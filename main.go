@@ -19,6 +19,7 @@ import (
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/shell"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/ssh"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/virtualbox"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/anka"
 	_ "gitlab.com/gitlab-org/gitlab-runner/shells"
 )
 
