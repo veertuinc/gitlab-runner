@@ -114,6 +114,15 @@ type VirtualBoxConfig struct {
 	DisableSnapshots bool   `toml:"disable_snapshots,omitzero" json:"disable_snapshots" long:"disable-snapshots" env:"VIRTUALBOX_DISABLE_SNAPSHOTS" description:"Disable snapshoting to speedup VM creation"`
 }
 
+type AnkaConfig struct {
+	ControllerAddress  string  `toml:"controller_address" json:"controller_address" long:"controller_address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud controller address, example: http://anka.controller.com[:8090]"`
+	ImageId			   string  `toml:"image_id" json:"image_id" long:"image_id" env:"IMAGE_ID" description:"Image id to be used"`
+	Tag                *string `toml:"tag" "json:"tag" long:"tag" env:"IMAGE_TAG" description:"Image tag to use"`
+	NodeID             *string `toml:"node_id" "json:"node_id" long:"node_id" env:"NODE_ID" description:"Run on a specific node"`
+	Priority		   *int    `toml:"priority" "json:"priority" long:"priority" env:"PRIORITY" description:"Override the task's default priority"`
+	GroupId 		   *string `toml:"group_id" "json:"group_id" long:"group_id" env:"GROUP_ID" description:"Run on a specific node group "`
+}
+
 type KubernetesPullPolicy string
 
 // Get returns one of the predefined values in kubernetes notation or returns an error if the value can't match the predefined
@@ -275,6 +284,7 @@ type RunnerSettings struct {
 	Cache      *CacheConfig      `toml:"cache,omitempty" json:"cache" group:"cache configuration" namespace:"cache"`
 	Machine    *DockerMachine    `toml:"machine,omitempty" json:"machine" group:"docker machine provider" namespace:"machine"`
 	Kubernetes *KubernetesConfig `toml:"kubernetes,omitempty" json:"kubernetes" group:"kubernetes executor" namespace:"kubernetes"`
+	Anka *AnkaConfig 			 `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
 }
 
 type RunnerConfig struct {

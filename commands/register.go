@@ -292,6 +292,7 @@ func init() {
 				SSH:        &ssh.Config{},
 				Parallels:  &common.ParallelsConfig{},
 				VirtualBox: &common.VirtualBoxConfig{},
+				Anka:       &common.AnkaConfig{},
 			},
 		},
 		Locked:  true,
