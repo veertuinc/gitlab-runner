@@ -16,6 +16,13 @@ Start or create an Anka VM.
 Install git.
 Install your dependencies.
 Suspend the VM.
+
+Configure port forwarding for ssh:
+
+```
+anka modify $VM_NAME add port-forwarding --guest-port 22 --host-port 0 --protocol tcp ssh1
+```
+
 Push it to Registry.
 
 ## Step 2 - Install the alternative runner
@@ -24,7 +31,7 @@ Download a binary from the <a href="https://github.com/veertuinc/gitlab-runner/r
 
 Copy the file to /usr/local/bin/gitlab-runner.
 
-Give the file run permissions
+Give the file run permission
 
 
 You can also follow the additional instructions in the <a href="https://docs.gitlab.com/runner/install/linux-manually.html">gitlab installation instructions</a>
