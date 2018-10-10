@@ -81,17 +81,19 @@ In step 6 "Enter the Runner executor:"
 
 enter "anka"
 
+The register process will ask you for more configuration parameters.
+
+For Anka Cloud Address, enter your controller url.
+
+For Anka Image id, enter the id of the VM you prepared in step 1
+
+If you want enter the registry tag you want Anka to use. 
+
+For SSH User, enter the ssh user for your anka VM
+
+For SSH Password, enter the ssh password for your anka VM
 
 After the runner is configured a config.toml file should be in ~/.gitlab-runner/config.toml or in /etc/gitlab-runner/config.toml
-
-
-under [runners.ssh] , add user and password for ssh
-
-under [runners.anka] , add controller_address and image_id
-
-controller address is the Anka cloud controller address (with port)
-
-image_id is the id of the VM you prepared in step 1
 
 
 your configuration should look similar to this
@@ -117,7 +119,7 @@ check_interval = 0
 
 ```
 
-More optional configuration parameters:  
+More optional configuration parameters (under runners.anka):  
 
 tag - choose a specific tag to run on.  
 
@@ -128,6 +130,8 @@ priority - override the task's default priority (smaller number is higher priori
 group_id - Specify a group id if groups are configured.
 
 keep_alive_on_error - Keep the VM alive in case of a build error.
+
+**NOTE:** You can also use gitlab-runner --non-interactive. add --help for available parameters.
 
 
 ### Run the runner
