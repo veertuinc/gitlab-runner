@@ -1,5 +1,5 @@
 
-
+update-ca-certificates
 
 gitlab-runner register --non-interactive $@
                          
