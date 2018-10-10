@@ -116,12 +116,13 @@ type VirtualBoxConfig struct {
 }
 
 type AnkaConfig struct {
-	ControllerAddress  string  `toml:"controller_address" json:"controller_address" long:"controller_address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud controller address, example: http://anka.controller.com[:8090]"`
-	ImageId			   string  `toml:"image_id" json:"image_id" long:"image_id" env:"IMAGE_ID" description:"Image id to be used"`
-	Tag                *string `toml:"tag" "json:"tag" long:"tag" env:"IMAGE_TAG" description:"Image tag to use"`
-	NodeID             *string `toml:"node_id" "json:"node_id" long:"node_id" env:"NODE_ID" description:"Run on a specific node"`
-	Priority		   *int    `toml:"priority" "json:"priority" long:"priority" env:"PRIORITY" description:"Override the task's default priority"`
-	GroupId 		   *string `toml:"group_id" "json:"group_id" long:"group_id" env:"GROUP_ID" description:"Run on a specific node group "`
+	ControllerAddress  string  `toml:"controller_address" json:"controller_address" long:"controller-address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud controller address, example: http://anka.controller.com[:8090]"`
+	ImageId			   string  `toml:"image_id" json:"image_id" long:"image-id" env:"IMAGE_ID" description:"Image id to be used"`
+	Tag                *string  `toml:"tag,omitempty" json:"tag" long:"tag" env:"TAG" description:"(optional) Tag to use"`
+	NodeID             *string  `toml:"node_id,omitempty" json:"node_id" long:"node-id" env:"NODE_ID" description:"(optional) Run on a specific node"`
+	Priority		   *int     `toml:"priority,omitzero" json:"priority" long:"priority" env:"PRIORITY" description:"(optional) Override the task's default priority"`
+	GroupId 		   *string  `toml:"group_id,omitempty" json:"group_id" long:"group-id" env:"GROUP_ID" description:"(optional) Run on a specific node group "`
+	KeepAliveOnError   bool     `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"(optional) Keep the VM alive in case of error for debugging purposes "`
 }
 
 type KubernetesPullPolicy string

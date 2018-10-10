@@ -112,8 +112,10 @@ func (s *executor) Run(cmd common.ExecutorCommand) error {
 func (s *executor) Cleanup() {
 	s.sshClient.Cleanup()
 	if s.connector != nil && s.vmConnectInfo != nil {
-		s.Println("Terminating Anka VM ", s.vmConnectInfo.InstanceId)
-		s.connector.TerminateInstance(s.vmConnectInfo.InstanceId)
+		if s.Trace.IsJobSuccesFull() || !s.Config.Anka.KeepAliveOnError {
+			s.Println("Terminating Anka VM ", s.vmConnectInfo.InstanceId)
+			s.connector.TerminateInstance(s.vmConnectInfo.InstanceId)
+		}
 	}
 	s.AbstractExecutor.Cleanup()
 }

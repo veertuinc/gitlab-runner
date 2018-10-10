@@ -107,6 +107,13 @@ func (c *clientJobTrace) Fail(err error, failureReason common.JobFailureReason) 
 	c.finish()
 }
 
+func (c *clientJobTrace) IsJobSuccesFull() bool {
+	if c.state == common.Success {
+		return true
+	}
+	return false
+}
+
 func (c *clientJobTrace) SetCancelFunc(cancelFunc context.CancelFunc) {
 	c.cancelFunc = cancelFunc
 }

@@ -86,6 +86,16 @@ check_interval = 0
 
 ```
 
+More optional configuration parameters:  
+
+tag - choose a specific tag to run on.  
+
+node_id - run the vm on a specific node.
+
+priority - override the task's default priority (smaller number is higher priority).
+
+group_id - Specify a group id if groups are configured.
+
 ## Run the runner
 
 ```
