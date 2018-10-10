@@ -10,12 +10,12 @@ For more information about Anka go to <a href="https://veertu.com" target="_blan
 
 # How To Use This Package
 
-## Step 1 - Prepare the base image
+### Prepare a base image
 
 Start or create an Anka VM. 
 Install git.
 Install your dependencies.
-Suspend the VM.
+Suspend/Stop the VM.
 
 Configure port forwarding for ssh:
 
@@ -25,7 +25,38 @@ anka modify $VM_NAME add port-forwarding --guest-port 22 --host-port 0 --protoco
 
 Push it to Registry.
 
-## Step 2 - Install the alternative runner
+
+
+Once you have a base image, there are 2 options.
+
+## Option 1 - Run with Docker
+
+```
+docker run -t asafg6/gitlab-anka-runner --executor anka \
+--url http://YOUR_GITLAB_HOST \
+--registration-token ** \
+--ssh-user VM_USER \
+--ssh-password VM_PASSWORD \
+--anka-controller-address http://ANKA_CLOUD_ADDRESS \
+--anka-image-id IMAGE_ID \
+--name my-anka-runner
+```
+
+You can also append whatever arguments you would pass to gitlab-runner register.
+For example ---locked, --run-untagged, --tag-list, etc....
+
+More Anka optional parameters:
+
+--anka-tag value Use a specific tag
+--anka-node-id value Run on a specific node
+--anka-priority value Override the task's default priority
+--anka-group-id value Run on a specific node group
+--anka-keep-alive-on-error Keep the VM alive in case of error for debugging purposes
+
+
+## Option 2 - Install And Run Manually
+
+### Install the alternative runner
 
 Download a binary from the <a href="https://github.com/veertuinc/gitlab-runner/releases/">releases page</a> 
 
@@ -37,13 +68,13 @@ Give the file run permission
 You can also follow the additional instructions in the <a href="https://docs.gitlab.com/runner/install/linux-manually.html">gitlab installation instructions</a>
 
 
-## Install the runner service 
+### Install the runner service 
 
 ```
 gitlab-runner install
 ```
 
-## Configure the runner
+### Configure the runner
 
 Follow the instructions on <a href="https://docs.gitlab.com/runner/register/index.html">gitlab instructions page</a>.
 In step 6 "Enter the Runner executor:"
@@ -96,7 +127,10 @@ priority - override the task's default priority (smaller number is higher priori
 
 group_id - Specify a group id if groups are configured.
 
-## Run the runner
+keep_alive_on_error - Keep the VM alive in case of a build error.
+
+
+### Run the runner
 
 ```
 gitlab-runner start
