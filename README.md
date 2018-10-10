@@ -131,7 +131,7 @@ group_id - Specify a group id if groups are configured.
 
 keep_alive_on_error - Keep the VM alive in case of a build error.
 
-**NOTE:** You can also use gitlab-runner --non-interactive. add --help for available parameters.
+**NOTE:** You can also use gitlab-runner register --non-interactive. add --help for available parameters.
 
 
 ### Run the runner
