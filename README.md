@@ -47,11 +47,11 @@ For example ---locked, --run-untagged, --tag-list, etc....
 
 More Anka optional parameters:
 
---anka-tag value Use a specific tag
---anka-node-id value Run on a specific node
---anka-priority value Override the task's default priority
---anka-group-id value Run on a specific node group
---anka-keep-alive-on-error Keep the VM alive in case of error for debugging purposes
+--anka-tag value Use a specific tag  
+--anka-node-id value Run on a specific node  
+--anka-priority value Override the task's default priority  
+--anka-group-id value Run on a specific node group  
+--anka-keep-alive-on-error Keep the VM alive in case of error for debugging purposes  
 
 
 ## Option 2 - Install And Run Manually
@@ -77,21 +77,18 @@ gitlab-runner install
 ### Configure the runner
 
 Follow the instructions on <a href="https://docs.gitlab.com/runner/register/index.html">gitlab instructions page</a>.
-In step 6 "Enter the Runner executor:"
+In step 6 "Enter the Runner executor:  
 
 enter "anka"
 
 The register process will ask you for more configuration parameters.
 
-For Anka Cloud Address, enter your controller url.
 
-For Anka Image id, enter the id of the VM you prepared in step 1
-
-If you want enter the registry tag you want Anka to use. 
-
-For SSH User, enter the ssh user for your anka VM
-
-For SSH Password, enter the ssh password for your anka VM
+For Anka Cloud Address, enter your controller url.  
+For Anka Image id, enter the id of the VM you prepared in step 1  
+If you want enter the registry tag you want Anka to use.  
+For SSH User, enter the ssh user for your anka VM  
+For SSH Password, enter the ssh password for your anka VM  
 
 After the runner is configured a config.toml file should be in ~/.gitlab-runner/config.toml or in /etc/gitlab-runner/config.toml
 
@@ -122,14 +119,10 @@ check_interval = 0
 More optional configuration parameters (under runners.anka):  
 
 tag - choose a specific tag to run on.  
-
-node_id - run the vm on a specific node.
-
-priority - override the task's default priority (smaller number is higher priority).
-
-group_id - Specify a group id if groups are configured.
-
-keep_alive_on_error - Keep the VM alive in case of a build error.
+node_id - run the vm on a specific node.   
+priority - override the task's default priority (smaller number is higher priority).  
+group_id - Specify a group id if groups are configured.  
+keep_alive_on_error - Keep the VM alive in case of a build error.  
 
 **NOTE:** You can also use gitlab-runner register --non-interactive. add --help for available parameters.
 
