@@ -14,8 +14,8 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/archives"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/formatter"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/url"
+	"gitlab.com/gitlab-org/gitlab-runner/log"
 )
 
 type CacheExtractorCommand struct {
@@ -81,7 +81,7 @@ func (c *CacheExtractorCommand) download() (bool, error) {
 }
 
 func (c *CacheExtractorCommand) Execute(context *cli.Context) {
-	formatter.SetRunnerFormatter()
+	log.SetRunnerFormatter()
 
 	if len(c.File) == 0 {
 		logrus.Fatalln("Missing cache file")
@@ -92,6 +92,8 @@ func (c *CacheExtractorCommand) Execute(context *cli.Context) {
 		if err != nil {
 			logrus.Fatalln(err)
 		}
+	} else {
+		logrus.Infoln("No URL provided, cache will be not downloaded from shared cache server. Instead a local version of cache will be extracted.")
 	}
 
 	err := archives.ExtractZipFile(c.File)

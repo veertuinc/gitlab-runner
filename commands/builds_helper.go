@@ -3,10 +3,13 @@ package commands
 import (
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 	"sync"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
+	"gitlab.com/gitlab-org/gitlab-runner/session"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -59,6 +62,9 @@ type buildsHelper struct {
 	counters map[string]*runnerCounter
 	builds   []*common.Build
 	lock     sync.Mutex
+
+	jobsTotal            *prometheus.CounterVec
+	jobDurationHistogram *prometheus.HistogramVec
 }
 
 func (b *buildsHelper) getRunnerCounter(runner *common.RunnerConfig) *runnerCounter {
@@ -72,6 +78,19 @@ func (b *buildsHelper) getRunnerCounter(runner *common.RunnerConfig) *runnerCoun
 		b.counters[runner.Token] = counter
 	}
 	return counter
+}
+
+func (b *buildsHelper) findSessionByURL(url string) *session.Session {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	for _, build := range b.builds {
+		if strings.HasPrefix(url, build.Session.Endpoint+"/") {
+			return build.Session
+		}
+	}
+
+	return nil
 }
 
 func (b *buildsHelper) acquireBuild(runner *common.RunnerConfig) bool {
@@ -130,6 +149,10 @@ func (b *buildsHelper) releaseRequest(runner *common.RunnerConfig) bool {
 }
 
 func (b *buildsHelper) addBuild(build *common.Build) {
+	if build == nil {
+		return
+	}
+
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
@@ -163,6 +186,8 @@ func (b *buildsHelper) addBuild(build *common.Build) {
 	}
 
 	b.builds = append(b.builds, build)
+	b.jobsTotal.WithLabelValues(build.Runner.ShortDescription()).Inc()
+
 	return
 }
 
@@ -170,12 +195,16 @@ func (b *buildsHelper) removeBuild(deleteBuild *common.Build) bool {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
+	b.jobDurationHistogram.WithLabelValues(deleteBuild.Runner.ShortDescription()).Observe(deleteBuild.Duration().Seconds())
+
 	for idx, build := range b.builds {
 		if build == deleteBuild {
 			b.builds = append(b.builds[0:idx], b.builds[idx+1:]...)
+
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -219,6 +248,9 @@ func (b *buildsHelper) Describe(ch chan<- *prometheus.Desc) {
 	ch <- numBuildsDesc
 	ch <- requestConcurrencyDesc
 	ch <- requestConcurrencyExceededDesc
+
+	b.jobsTotal.Describe(ch)
+	b.jobDurationHistogram.Describe(ch)
 }
 
 // Collect implements prometheus.Collector.
@@ -252,11 +284,37 @@ func (b *buildsHelper) Collect(ch chan<- prometheus.Metric) {
 			runner,
 		)
 	}
+
+	b.jobsTotal.Collect(ch)
+	b.jobDurationHistogram.Collect(ch)
 }
 
 func (b *buildsHelper) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Content-Type", "text/plain")
+	version := r.URL.Query().Get("v")
+	if version == "" {
+		version = "1"
+	}
 
+	handlers := map[string]http.HandlerFunc{
+		"1": b.listJobsHandlerV1,
+		"2": b.listJobsHandlerV2,
+	}
+
+	handler, ok := handlers[version]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "Request version %q not supported", version)
+		return
+	}
+
+	w.Header().Add("X-List-Version", version)
+	w.Header().Add("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+
+	handler(w, r)
+}
+
+func (b *buildsHelper) listJobsHandlerV1(w http.ResponseWriter, r *http.Request) {
 	for _, job := range b.builds {
 		fmt.Fprintf(
 			w,
@@ -264,5 +322,45 @@ func (b *buildsHelper) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 			job.ID, job.RepoCleanURL(),
 			job.CurrentState, job.CurrentStage, job.CurrentExecutorStage(),
 		)
+	}
+
+}
+
+func (b *buildsHelper) listJobsHandlerV2(w http.ResponseWriter, r *http.Request) {
+	for _, job := range b.builds {
+		url := CreateJobURL(job.RepoCleanURL(), job.ID)
+
+		fmt.Fprintf(
+			w,
+			"url=%s state=%s stage=%s executor_stage=%s duration=%s\n",
+			url, job.CurrentState, job.CurrentStage, job.CurrentExecutorStage(), job.Duration(),
+		)
+	}
+}
+
+func CreateJobURL(projectURL string, jobID int) string {
+	r := regexp.MustCompile("(\\.git$)?")
+	URL := r.ReplaceAllString(projectURL, "")
+
+	return fmt.Sprintf("%s/-/jobs/%d", URL, jobID)
+}
+
+func newBuildsHelper() buildsHelper {
+	return buildsHelper{
+		jobsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "gitlab_runner_jobs_total",
+				Help: "Total number of handled jobs",
+			},
+			[]string{"runner"},
+		),
+		jobDurationHistogram: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "gitlab_runner_job_duration_seconds",
+				Help:    "Histogram of job durations",
+				Buckets: []float64{30, 60, 300, 600, 1800, 3600, 7200, 10800, 18000, 36000},
+			},
+			[]string{"runner"},
+		),
 	}
 }

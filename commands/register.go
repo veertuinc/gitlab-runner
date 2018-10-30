@@ -124,13 +124,6 @@ func (s *RegisterCommand) askVirtualBox() {
 	s.VirtualBox.BaseName = s.ask("virtualbox-base-name", "Please enter the VirtualBox VM (e.g. my-vm):")
 }
 
-func (s *RegisterCommand) askAnka() {
-	s.Anka.ControllerAddress = s.ask("anka-controller-address", "Please enter the Anka Cloud Controller address")
-	s.Anka.ImageId = s.ask("anka-image-id", "Please enter the Anka Image id")
-	tag := s.ask("anka-tag", "Pleas enter the tag to use (leave empty for latest)", true)
-	s.Anka.Tag = &tag
-}
-
 func (s *RegisterCommand) askSSHServer() {
 	s.SSH.Host = s.ask("ssh-host", "Please enter the SSH server address (e.g. my.server.com):")
 	s.SSH.Port = s.ask("ssh-port", "Please enter the SSH server port (e.g. 22):", true)
@@ -191,7 +184,6 @@ func (s *RegisterCommand) askExecutorOptions() {
 	ssh := s.SSH
 	parallels := s.Parallels
 	virtualbox := s.VirtualBox
-	anka := s.Anka
 
 	s.Kubernetes = nil
 	s.Machine = nil
@@ -235,12 +227,46 @@ func (s *RegisterCommand) askExecutorOptions() {
 		s.VirtualBox = virtualbox
 		s.askVirtualBox()
 		s.askSSHLogin()
-	case "anka":
-		s.SSH = ssh
-		s.Anka = anka
-		s.askAnka()
-		s.askSSHLogin()
 	}
+}
+
+// DEPRECATED
+// TODO: Remove in 12.0
+//
+// Writes cache configuration section using new syntax, even if
+// old CLI options/env variables were used.
+func (s *RegisterCommand) prepareCache() {
+	cache := s.RunnerConfig.Cache
+
+	// Called to log deprecated usage, if old cli options/env variables are used
+	cache.Path = cache.GetPath()
+	cache.Shared = cache.GetShared()
+
+	// Called to assign values and log deprecated usage, if old env variables are used
+	setStringIfUnset(&cache.S3.ServerAddress, cache.GetServerAddress())
+	setStringIfUnset(&cache.S3.AccessKey, cache.GetAccessKey())
+	setStringIfUnset(&cache.S3.SecretKey, cache.GetSecretKey())
+	setStringIfUnset(&cache.S3.BucketName, cache.GetBucketName())
+	setStringIfUnset(&cache.S3.BucketLocation, cache.GetBucketLocation())
+	setBoolIfUnset(&cache.S3.Insecure, cache.GetInsecure())
+}
+
+// TODO: Remove in 12.0
+func setStringIfUnset(setting *string, newSetting string) {
+	if *setting != "" {
+		return
+	}
+
+	*setting = newSetting
+}
+
+// TODO: Remove in 12.0
+func setBoolIfUnset(setting *bool, newSetting bool) {
+	if *setting {
+		return
+	}
+
+	*setting = newSetting
 }
 
 func (s *RegisterCommand) Execute(context *cli.Context) {
@@ -283,6 +309,7 @@ func (s *RegisterCommand) Execute(context *cli.Context) {
 	s.askExecutor()
 	s.askExecutorOptions()
 	s.addRunner(&s.RunnerConfig)
+	s.prepareCache()
 	s.saveConfig()
 
 	log.Printf("Runner registered successfully. Feel free to start it, but if it's running already the config should be automatically reloaded!")
@@ -293,8 +320,8 @@ func getHostname() string {
 	return hostname
 }
 
-func init() {
-	common.RegisterCommand2("register", "register a new runner", &RegisterCommand{
+func newRegisterCommand() *RegisterCommand {
+	return &RegisterCommand{
 		RunnerConfig: common.RunnerConfig{
 			Name: getHostname(),
 			RunnerSettings: common.RunnerSettings{
@@ -305,11 +332,14 @@ func init() {
 				SSH:        &ssh.Config{},
 				Parallels:  &common.ParallelsConfig{},
 				VirtualBox: &common.VirtualBoxConfig{},
-				Anka:       &common.AnkaConfig{},
 			},
 		},
 		Locked:  true,
 		Paused:  false,
 		network: network.NewGitLabClient(),
-	})
+	}
+}
+
+func init() {
+	common.RegisterCommand2("register", "register a new runner", newRegisterCommand())
 }

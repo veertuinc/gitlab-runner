@@ -5,27 +5,44 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	_ "net/http/pprof" // PPROF package adds everything itself inside its init() function
+	_ "net/http/pprof" // pprof package adds everything itself inside its init() function
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
 
-	service "github.com/ayufan/golang-kardianos-service"
+	"github.com/ayufan/golang-kardianos-service"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
-
-	log "github.com/sirupsen/logrus"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/cli"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/certificate"
 	prometheus_helper "gitlab.com/gitlab-org/gitlab-runner/helpers/prometheus"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/sentry"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/service"
+	"gitlab.com/gitlab-org/gitlab-runner/log"
 	"gitlab.com/gitlab-org/gitlab-runner/network"
+	"gitlab.com/gitlab-org/gitlab-runner/session"
+)
+
+var (
+	concurrentDesc = prometheus.NewDesc(
+		"gitlab_runner_concurrent",
+		"The current value of concurrent setting",
+		nil,
+		nil,
+	)
+
+	limitDesc = prometheus.NewDesc(
+		"gitlab_runner_limit",
+		"The current value of concurrent setting",
+		[]string{"runner"},
+		nil,
+	)
 )
 
 type RunCommand struct {
@@ -38,13 +55,15 @@ type RunCommand struct {
 	ServiceName      string `short:"n" long:"service" description:"Use different names for different services"`
 	WorkingDirectory string `short:"d" long:"working-directory" description:"Specify custom working directory"`
 	User             string `short:"u" long:"user" description:"Use specific user to execute shell scripts"`
-	Syslog           bool   `long:"syslog" description:"Log to syslog"`
+	Syslog           bool   `long:"syslog" description:"Log to system service logger" env:"LOG_SYSLOG"`
 
 	sentryLogHook     sentry.LogHook
 	prometheusLogHook prometheus_helper.LogHook
 
 	failuresCollector               *prometheus_helper.FailuresCollector
 	networkRequestStatusesCollector prometheus.Collector
+
+	sessionServer *session.Server
 
 	// abortBuilds is used to abort running builds
 	abortBuilds chan os.Signal
@@ -58,8 +77,9 @@ type RunCommand struct {
 	// stopSignals is to catch a signals notified to process: SIGTERM, SIGQUIT, Interrupt, Kill
 	stopSignals chan os.Signal
 
-	// stopSignal is used to preserve the signal that was used to stop the process
-	// In case this is SIGQUIT it makes to finish all buids
+	// stopSignal is used to preserve the signal that was used to stop the
+	// process In case this is SIGQUIT it makes to finish all builds and session
+	// server.
 	stopSignal os.Signal
 
 	// runFinished is used to notify that Run() did finish
@@ -68,8 +88,8 @@ type RunCommand struct {
 	currentWorkers int
 }
 
-func (mr *RunCommand) log() *log.Entry {
-	return log.WithField("builds", mr.buildsHelper.buildsCount())
+func (mr *RunCommand) log() *logrus.Entry {
+	return logrus.WithField("builds", mr.buildsHelper.buildsCount())
 }
 
 func (mr *RunCommand) feedRunner(runner *common.RunnerConfig, runners chan *common.RunnerConfig) {
@@ -101,13 +121,13 @@ func (mr *RunCommand) feedRunners(runners chan *common.RunnerConfig) {
 	}
 }
 
-func (mr *RunCommand) requestJob(runner *common.RunnerConfig) (*common.JobResponse, bool) {
+func (mr *RunCommand) requestJob(runner *common.RunnerConfig, sessionInfo *common.SessionInfo) (*common.JobResponse, bool) {
 	if !mr.buildsHelper.acquireRequest(runner) {
 		return nil, false
 	}
 	defer mr.buildsHelper.releaseRequest(runner)
 
-	jobData, healthy := mr.network.RequestJob(*runner)
+	jobData, healthy := mr.network.RequestJob(*runner, sessionInfo)
 	mr.makeHealthy(runner.UniqueID(), healthy)
 	return jobData, true
 }
@@ -120,7 +140,7 @@ func (mr *RunCommand) processRunner(id int, runner *common.RunnerConfig, runners
 
 	context, err := provider.Acquire(runner)
 	if err != nil {
-		log.Warningln("Failed to update executor", runner.Executor, "for", runner.ShortDescription(), err)
+		logrus.Warningln("Failed to update executor", runner.Executor, "for", runner.ShortDescription(), err)
 		return
 	}
 	defer provider.Release(runner, context)
@@ -133,8 +153,15 @@ func (mr *RunCommand) processRunner(id int, runner *common.RunnerConfig, runners
 	}
 	defer mr.buildsHelper.releaseBuild(runner)
 
+	var features common.FeaturesInfo
+	provider.GetFeatures(&features)
+	buildSession, sessionInfo, err := mr.createSession(features)
+	if err != nil {
+		return
+	}
+
 	// Receive a new build
-	jobData, result := mr.requestJob(runner)
+	jobData, result := mr.requestJob(runner, sessionInfo)
 	if !result {
 		mr.log().WithField("runner", runner.ShortDescription()).
 			Debugln("Failed to request job: runner requestConcurrency meet")
@@ -155,12 +182,8 @@ func (mr *RunCommand) processRunner(id int, runner *common.RunnerConfig, runners
 	trace.SetFailuresCollector(mr.failuresCollector)
 
 	// Create a new build
-	build := &common.Build{
-		JobResponse:     *jobData,
-		Runner:          runner,
-		ExecutorData:    context,
-		SystemInterrupt: mr.abortBuilds,
-	}
+	build := common.NewBuild(*jobData, runner, mr.abortBuilds, context)
+	build.Session = buildSession
 
 	// Add build to list of builds to assign numbers
 	mr.buildsHelper.addBuild(build)
@@ -178,6 +201,25 @@ func (mr *RunCommand) processRunner(id int, runner *common.RunnerConfig, runners
 
 	// Process a build
 	return build.Run(mr.config, trace)
+}
+
+func (mr *RunCommand) createSession(features common.FeaturesInfo) (*session.Session, *common.SessionInfo, error) {
+	if mr.sessionServer == nil || !features.Session {
+		return nil, nil, nil
+	}
+
+	sess, err := session.NewSession(mr.log())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sessionInfo := &common.SessionInfo{
+		URL:           mr.sessionServer.AdvertiseAddress + sess.Endpoint,
+		Certificate:   string(mr.sessionServer.CertificatePublicKey),
+		Authorization: sess.Token,
+	}
+
+	return sess, sessionInfo, err
 }
 
 func (mr *RunCommand) processRunners(id int, stopWorker chan bool, runners chan *common.RunnerConfig) {
@@ -212,12 +254,9 @@ func (mr *RunCommand) loadConfig() error {
 	}
 
 	// Set log level
-	if !cli_helpers.CustomLogLevelSet && mr.config.LogLevel != nil {
-		level, err := log.ParseLevel(*mr.config.LogLevel)
-		if err != nil {
-			log.Fatalf(err.Error())
-		}
-		log.SetLevel(level)
+	err = mr.updateLoggingConfiguration()
+	if err != nil {
+		return err
 	}
 
 	// pass user to execute scripts as specific user
@@ -238,6 +277,34 @@ func (mr *RunCommand) loadConfig() error {
 		}
 	} else {
 		mr.sentryLogHook = sentry.LogHook{}
+	}
+
+	return nil
+}
+
+func (mr *RunCommand) updateLoggingConfiguration() error {
+	reloadNeeded := false
+
+	if mr.config.LogLevel != nil && !log.Configuration().IsLevelSetWithCli() {
+		err := log.Configuration().SetLevel(*mr.config.LogLevel)
+		if err != nil {
+			return err
+		}
+
+		reloadNeeded = true
+	}
+
+	if mr.config.LogFormat != nil && !log.Configuration().IsFormatSetWithCli() {
+		err := log.Configuration().SetFormat(*mr.config.LogFormat)
+		if err != nil {
+			return err
+		}
+
+		reloadNeeded = true
+	}
+
+	if reloadNeeded {
+		log.Configuration().ReloadConfiguration()
 	}
 
 	return nil
@@ -347,10 +414,11 @@ func (mr *RunCommand) runWait() {
 	mr.stopSignal = <-mr.stopSignals
 }
 
-func (mr *RunCommand) serveMetrics() {
+func (mr *RunCommand) serveMetrics(mux *http.ServeMux) {
 	registry := prometheus.NewRegistry()
 	// Metrics about the runner's business logic.
 	registry.MustRegister(&mr.buildsHelper)
+	registry.MustRegister(mr)
 	// Metrics about API connections
 	registry.MustRegister(mr.networkRequestStatusesCollector)
 	// Metrics about jobs failures
@@ -371,11 +439,11 @@ func (mr *RunCommand) serveMetrics() {
 		}
 	}
 
-	http.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 }
 
-func (mr *RunCommand) serveDebugData() {
-	http.Handle("/debug/jobs/list", http.HandlerFunc(mr.buildsHelper.ListJobsHandler))
+func (mr *RunCommand) serveDebugData(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/jobs/list", mr.buildsHelper.ListJobsHandler)
 }
 
 func (mr *RunCommand) setupMetricsAndDebugServer() {
@@ -387,7 +455,7 @@ func (mr *RunCommand) setupMetricsAndDebugServer() {
 	}
 
 	if listenAddress == "" {
-		log.Infoln("Metrics server disabled")
+		mr.log().Info("Listen address not defined, metrics server disabled")
 		return
 	}
 
@@ -395,21 +463,62 @@ func (mr *RunCommand) setupMetricsAndDebugServer() {
 	// the provided address is invalid or there is some other listener error.
 	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
-		log.Fatalln(err)
+		mr.log().WithError(err).Fatal("Failed to create listener for metrics server")
+	}
+
+	mux := http.NewServeMux()
+
+	go func() {
+		err := http.Serve(listener, mux)
+		if err != nil {
+			mr.log().WithError(err).Fatal("Metrics server terminated")
+		}
+	}()
+
+	mr.serveMetrics(mux)
+	mr.serveDebugData(mux)
+
+	mr.log().
+		WithField("address", listenAddress).
+		Info("Metrics server listening")
+}
+
+func (mr *RunCommand) setupSessionServer() {
+	if mr.config.SessionServer.ListenAddress == "" {
+		mr.log().Info("Listen address not defined, session server disabled")
+		return
+	}
+
+	var err error
+	mr.sessionServer, err = session.NewServer(
+		session.ServerConfig{
+			AdvertiseAddress: mr.config.SessionServer.AdvertiseAddress,
+			ListenAddress:    mr.config.SessionServer.ListenAddress,
+			ShutdownTimeout:  common.ShutdownTimeout * time.Second,
+		},
+		mr.log(),
+		certificate.X509Generator{},
+		mr.buildsHelper.findSessionByURL,
+	)
+	if err != nil {
+		mr.log().WithError(err).Fatal("Failed to create session server")
 	}
 
 	go func() {
-		log.Fatalln(http.Serve(listener, nil))
+		err := mr.sessionServer.Start()
+		if err != nil {
+			mr.log().WithError(err).Fatal("Session server terminated")
+		}
 	}()
 
-	mr.serveMetrics()
-	mr.serveDebugData()
-
-	log.Infoln("Metrics server listening at", listenAddress)
+	mr.log().
+		WithField("address", mr.config.SessionServer.ListenAddress).
+		Info("Session server listening")
 }
 
 func (mr *RunCommand) Run() {
 	mr.setupMetricsAndDebugServer()
+	mr.setupSessionServer()
 
 	runners := make(chan *common.RunnerConfig)
 	go mr.feedRunners(runners)
@@ -482,6 +591,10 @@ func (mr *RunCommand) handleShutdown() error {
 
 	go mr.abortAllBuilds()
 
+	if mr.sessionServer != nil {
+		mr.sessionServer.Close()
+	}
+
 	// Wait for graceful shutdown or abort after timeout
 	for {
 		select {
@@ -508,6 +621,32 @@ func (mr *RunCommand) Stop(s service.Service) (err error) {
 	return
 }
 
+// Describe implements prometheus.Collector.
+func (mr *RunCommand) Describe(ch chan<- *prometheus.Desc) {
+	ch <- concurrentDesc
+	ch <- limitDesc
+}
+
+// Collect implements prometheus.Collector.
+func (mr *RunCommand) Collect(ch chan<- prometheus.Metric) {
+	config := mr.config
+
+	ch <- prometheus.MustNewConstMetric(
+		concurrentDesc,
+		prometheus.GaugeValue,
+		float64(config.Concurrent),
+	)
+
+	for _, runner := range config.Runners {
+		ch <- prometheus.MustNewConstMetric(
+			limitDesc,
+			prometheus.GaugeValue,
+			float64(runner.Limit),
+			runner.ShortDescription(),
+		)
+	}
+}
+
 func (mr *RunCommand) Execute(context *cli.Context) {
 	svcConfig := &service.Config{
 		Name:        mr.ServiceName,
@@ -519,27 +658,21 @@ func (mr *RunCommand) Execute(context *cli.Context) {
 		},
 	}
 
-	service, err := service_helpers.New(mr, svcConfig)
+	svc, err := service_helpers.New(mr, svcConfig)
 	if err != nil {
-		log.Fatalln(err)
+		logrus.Fatalln(err)
 	}
 
 	if mr.Syslog {
-		log.SetFormatter(new(log.TextFormatter))
-		logger, err := service.SystemLogger(nil)
-		if err == nil {
-			log.AddHook(&ServiceLogHook{logger, log.InfoLevel})
-		} else {
-			log.Errorln(err)
-		}
+		log.SetSystemLogger(svc)
 	}
 
-	log.AddHook(&mr.sentryLogHook)
-	log.AddHook(&mr.prometheusLogHook)
+	logrus.AddHook(&mr.sentryLogHook)
+	logrus.AddHook(&mr.prometheusLogHook)
 
-	err = service.Run()
+	err = svc.Run()
 	if err != nil {
-		log.Fatalln(err)
+		logrus.Fatalln(err)
 	}
 }
 
@@ -552,5 +685,6 @@ func init() {
 		networkRequestStatusesCollector: requestStatusesCollector,
 		prometheusLogHook:               prometheus_helper.NewLogHook(),
 		failuresCollector:               prometheus_helper.NewFailuresCollector(),
+		buildsHelper:                    newBuildsHelper(),
 	})
 }

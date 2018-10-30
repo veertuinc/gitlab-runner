@@ -17,7 +17,8 @@ This defines global settings of GitLab Runner.
 | Setting | Description |
 | ------- | ----------- |
 | `concurrent`     | limits how many jobs globally can be run concurrently. The most upper limit of jobs using all defined runners. `0` **does not** mean unlimited |
-| `log_level`      | Log level (options: debug, info, warn, error, fatal, panic). Note that this setting has lower priority than log-level set by command line argument --debug, -l or --log-level |
+| `log_level`      | Log level (options: debug, info, warn, error, fatal, panic). Note that this setting has lower priority than level set by command line argument `--debug`, `-l` or `--log-level` |
+| `log_format`     | Log format (options: runner, text, json). Note that this setting has lower priority than format set by command line argument `--log-format` |
 | `check_interval` | defines the interval length, in seconds, between new jobs check. The default value is `3`; if set to `0` or lower, the default value will be used. |
 | `sentry_dsn`     | enable tracking of all system level errors to sentry |
 | `listen_address` | address (`<host>:<port>`) on which the Prometheus metrics HTTP server should be listening |
@@ -62,6 +63,36 @@ there are two sleeps taking 5s, so finally it's ~10s between subsequent requests
 for `runner-2`. If you define more workers, the sleep interval will be smaller, but a request for a worker will
 be repeated after all requests for the other workers + their sleeps are called.
 
+## The `[session_server]` section
+
+The section `[session_server]` is a system runner level configuration, so it should be specified at the root level, 
+not per executor i.e. it should be outside `[[runners]]` section. The session server allows the user to interact 
+with jobs that the Runner is responsible for. A good example of this is the
+[interactive web terminal](https://docs.gitlab.com/ce/ci/interactive_web_terminal).
+
+Both `listen_address` and `advertise_address` should be provided in the form
+of `host:port`, where `host` may be an IP address (e.g., `127.0.0.1:8093`)
+or a domain (e.g., `my-runner.example.com:8093`). The Runner will create a
+TLS certificate automatically to have a secure connection.
+
+If you want to disable the session server, just delete the `[session_server]`
+section and terminal support will be disabled.
+
+| Setting | Description |
+| ------- | ----------- |
+| `listen_address` | An internal URL to be used for the session server. |
+| `advertise_address`| The URL that the Runner will expose to GitLab to be used to access the session server. Fallbacks to `listen_address` if not defined.   |
+| `session_timeout` | How long in seconds the session can stay active after the job completes (which will block the job from finishing), defaults to `1800` (30 minutes). |
+
+Example:
+
+```bash
+[session_server]
+  listen_address = "0.0.0.0:8093"
+  advertise_address = "runner-host-name.tld:8093"
+  session_timeout = 1800
+```
+
 ## The `[[runners]]` section
 
 This defines one runner entry.
@@ -77,7 +108,6 @@ This defines one runner entry.
 | `limit`              | Limit how many jobs can be handled concurrently by this token. `0` (default) simply means don't limit |
 | `executor`           | Select how a project should be built, see next section |
 | `shell`              | The name of shell to generate the script (default value is platform dependent) |
-| `builds_dir`         | Directory where builds will be stored in context of selected executor (Locally, Docker, SSH) |
 | `builds_dir`         | Directory where builds will be stored in context of selected executor (Locally, Docker, SSH) |
 | `cache_dir`          | Directory where build caches will be stored in context of selected executor (locally, Docker, SSH). If the `docker` executor is used, this directory needs to be included in its `volumes` parameter. |
 | `environment`        | Append or overwrite environment variables |
@@ -147,26 +177,28 @@ This defines the Docker Container parameters.
 
 | Parameter | Description |
 | --------- | ----------- |
-| `host`                      | Specify custom Docker endpoint, by default `DOCKER_HOST` environment is used or `unix:///var/run/docker.sock` |
-| `hostname`                  | Specify custom hostname for Docker container |
-| `runtime`                   | Specify a runtime for Docker container |
-| `tls_cert_path`             | When set it will use `ca.pem`, `cert.pem` and `key.pem` from that folder to make secure TLS connection to Docker (useful in boot2docker) |
-| `image`                     | Use this image to run builds |
-| `memory`                    | String value containing the memory limit |
-| `memory_swap`               | String value containing the total memory limit |
-| `memory_reservation`        | String value containing the memory soft limit |
-| `cpuset_cpus`               | String value containing the cgroups CpusetCpus to use |
-| `cpus`                      | Number of CPUs (available in docker 1.13 or later) |
-| `dns`                       | A list of DNS servers for the container to use |
-| `dns_search`                | A list of DNS search domains |
-| `privileged`                | Make container run in Privileged mode (insecure) |
-| `userns_mode`               | Sets the usernamespace mode for the container when usernamespace remapping option is enabled. (available in docker 1.10 or later) |
-| `cap_add`                   | Add additional Linux capabilities to the container |
-| `cap_drop`                  | Drop additional Linux capabilities from the container |
-| `security_opt`              | Set security options (--security-opt in docker run), takes a list of ':' separated key/values |
-| `devices`                   | Share additional host devices with the container |
-| `cache_dir`                 | Specify where Docker caches should be stored (this can be absolute or relative to current working directory). See `disable_cache` for more information. |
-| `disable_cache`             | The Docker executor has 2 levels of caching: a global one (like any other executor) and a local cache based on Docker volumes. This configuration flag acts only on the local one which disables the use of automatically created (not mapped to a host directory) cache volumes. In other words, it only prevents creating a container that holds temporary files of builds, it does not disable the cache if the Runner is configured in [distributed cache mode](autoscale.md#distributed-runners-caching). |
+| `host`                         | Specify custom Docker endpoint, by default `DOCKER_HOST` environment is used or `unix:///var/run/docker.sock` |
+| `hostname`                     | Specify custom hostname for Docker container |
+| `runtime`                      | Specify a runtime for Docker container |
+| `tls_cert_path`                | When set it will use `ca.pem`, `cert.pem` and `key.pem` from that folder to make secure TLS connection to Docker (useful in boot2docker) |
+| `image`                        | Use this image to run builds |
+| `memory`                       | String value containing the memory limit |
+| `memory_swap`                  | String value containing the total memory limit |
+| `memory_reservation`           | String value containing the memory soft limit |
+| `oom_kill_disable`             | Do not kill processes in a container if an out-of-memory (OOM) error occurs |
+| `cpuset_cpus`                  | String value containing the cgroups CpusetCpus to use |
+| `cpus`                         | Number of CPUs (available in docker 1.13 or later) |
+| `dns`                          | A list of DNS servers for the container to use |
+| `dns_search`                   | A list of DNS search domains |
+| `privileged`                   | Make container run in Privileged mode (insecure) |
+| `disable_entrypoint_overwrite` | Disable the image entrypoint overwriting |
+| `userns_mode`                  | Sets the usernamespace mode for the container when usernamespace remapping option is enabled. (available in docker 1.10 or later) |
+| `cap_add`                      | Add additional Linux capabilities to the container |
+| `cap_drop`                     | Drop additional Linux capabilities from the container |
+| `security_opt`                 | Set security options (--security-opt in docker run), takes a list of ':' separated key/values |
+| `devices`                      | Share additional host devices with the container |
+| `cache_dir`                    | Specify where Docker caches should be stored (this can be absolute or relative to current working directory). See `disable_cache` for more information. |
+| `disable_cache`                | The Docker executor has 2 levels of caching: a global one (like any other executor) and a local cache based on Docker volumes. This configuration flag acts only on the local one which disables the use of automatically created (not mapped to a host directory) cache volumes. In other words, it only prevents creating a container that holds temporary files of builds, it does not disable the cache if the Runner is configured in [distributed cache mode](autoscale.md#distributed-runners-caching). |
 | `network_mode`              | Add container to a custom network |
 | `wait_for_services_timeout` | Specify how long to wait for docker services, set to 0 to disable, default: 30 |
 | `volumes`                   | Specify additional volumes that should be mounted (same syntax as Docker's `-v` flag) |
@@ -180,7 +212,7 @@ This defines the Docker Container parameters.
 | `allowed_services`          | Specify wildcard list of services that can be specified in .gitlab-ci.yml. If not present all images are allowed (equivalent to `["*/*:*"]`) |
 | `pull_policy`               | Specify the image pull policy: `never`, `if-not-present` or `always` (default); read more in the [pull policies documentation](../executors/docker.md#how-pull-policies-work) |
 | `sysctls`                   | specify the sysctl options |
-| `helper_image`              | [ADVANCED] Override the default helper image used to clone repos and upload artifacts |
+| `helper_image`              | [ADVANCED] Override the default helper image used to clone repos and upload artifacts. Read the [helper image](#helper-image) section for more details |
 
 Example:
 
@@ -193,6 +225,7 @@ Example:
   memory = "128m"
   memory_swap = "256m"
   memory_reservation = "64m"
+  oom_kill_disable = false
   cpuset_cpus = "0,1"
   dns = ["8.8.8.8"]
   dns_search = [""]
@@ -468,44 +501,123 @@ can be found [here][cronvendor].
 
 ## The `[runners.cache]` section
 
->**Note:**
-Added in GitLab Runner v1.1.0.
+> Introduced in GitLab Runner 1.1.0.
 
 This defines the distributed cache feature. More details can be found
 in the [runners autoscale documentation](autoscale.md#distributed-runners-caching).
 
 | Parameter        | Type             | Description |
 |------------------|------------------|-------------|
-| `Type`           | string           | As of now, only S3-compatible services are supported, so only `s3` can be used. |
-| `ServerAddress`  | string           | A `host:port` to the used S3-compatible server. |
-| `AccessKey`      | string           | The access key specified for your S3 instance. |
-| `SecretKey`      | string           | The secret key specified for your S3 instance. |
-| `BucketName`     | string           | Name of the bucket where cache will be stored. |
-| `BucketLocation` | string           | Name of S3 region. |
-| `Insecure`       | boolean          | Set to `true` if the S3 service is available by `HTTP`. Is set to `false` by default. |
+| `Type`           | string           | One of: `s3`, `gcs`. |
 | `Path`           | string           | Name of the path to prepend to the cache URL. |
 | `Shared`         | boolean          | Enables cache sharing between runners, `false` by default. |
 
+CAUTION: **Important:**
+With GitLab Runner 11.3.0, the configuration parameters related to S3 were moved to a dedicated `[runners.cache.s3]` section.
+The old format of the configuration with S3 configured directly in `[runners.cache]` section is still supported,
+but is deprecated with GitLab Runner 11.3.0. **This support will be removed in GitLab Runner 12.0.0**.
+
+Bellow is a table containing a summary of `config.toml`, cli options and ENV variables deprecations:
+
+| Setting             | TOML field                               | CLI option for `register`      | ENV for `register`                | deprecated TOML field               | deprecated CLI option   | deprecated ENV        |
+|---------------------|------------------------------------------|--------------------------------|-----------------------------------|-------------------------------------|-------------------------|-----------------------|
+| Type                | `[runners.cache] -> Type`                | `--cache-type`                 | `$CACHE_TYPE`                     |                                     |                         |                       |
+| Path                | `[runners.cache] -> Path`                | `--cache-path`                 | `$CACHE_PATH`                     |                                     | `--cache-s3-cache-path` | `$S3_CACHE_PATH`      |
+| Shared              | `[runners.cache] -> Shared`              | `--cache-shared`               | `$CACHE_SHARED`                   |                                     | `--cache-cache-shared`  |                       |
+| S3.ServerAddress    | `[runners.cache.s3] -> ServerAddress`    | `--cache-s3-server-address`    | `$CACHE_S3_SERVER_ADDRESS`        | `[runners.cache] -> ServerAddress`  |                         | `$S3_SERVER_ADDRESS`  |
+| S3.AccessKey        | `[runners.cache.s3] -> AccessKey`        | `--cache-s3-access-key`        | `$CACHE_S3_ACCESS_KEY`            | `[runners.cache] -> AccessKey`      |                         | `$S3_ACCESS_KEY`      |
+| S3.SecretKey        | `[runners.cache.s3] -> SecretKey`        | `--cache-s3-secret-key`        | `$CACHE_S3_SECRET_KEY`            | `[runners.cache] -> SecretKey`      |                         | `$S3_SECRET_KEY`      |
+| S3.BucketName       | `[runners.cache.s3] -> BucketName`       | `--cache-s3-bucket-name`       | `$CACHE_S3_BUCKET_NAME`           | `[runners.cache] -> BucketName`     |                         | `$S3_BUCKET_NAME`     |
+| S3.BucketLocation   | `[runners.cache.s3] -> BucketLocation`   | `--cache-s3-bucket-location`   | `$CACHE_S3_BUCKET_LOCATION`       | `[runners.cache] -> BucketLocation` |                         | `$S3_BUCKET_LOCATION` |
+| S3.Insecure         | `[runners.cache.s3] -> Insecure`         | `--cache-s3-insecure`          | `$CACHE_S3_INSECURE`              | `[runners.cache] -> Insecure`       |                         | `$S3_INSECURE`        |
+| GCS.AccessID        | `[runners.cache.gcs] -> AccessID`        | `--cache-gcs-access-id`        | `$CACHE_GCS_ACCESS_ID`            |                                     |                         |                       |
+| GCS.PrivateKey      | `[runners.cache.gcs] -> PrivateKey`      | `--cache-gcs-private-key`      | `$CACHE_GCS_PRIVATE_KEY`          |                                     |                         |                       |
+| GCS.CredentialsFile | `[runners.cache.gcs] -> CredentialsFile` | `--cache-gcs-credentials-file` | `$GOOGLE_APPLICATION_CREDENTIALS` |                                     |                         |                       |
+| GCS.BucketName      | `[runners.cache.gcs] -> BucketName`      | `--cache-gcs-bucket-name`      | `$CACHE_GCS_BUCKET_NAME`          |                                     |                         |                       |
+
+
+### The `[runners.cache.s3]` section
+
+NOTE: **Note:**
+Moved from the `[runners.cache]` section in GitLab Runner 11.3.0.
+
+Allows to configure S3 storage for cache. This section contains settings related to S3, that previously were
+present globally in the `[runners.cache]` section.
+
+| Parameter        | Type             | Description |
+|------------------|------------------|-------------|
+| `ServerAddress`  | string           | A `host:port` to the used S3-compatible server. |
+| `AccessKey`      | string           | The access key specified for your S3 instance. |
+| `SecretKey`      | string           | The secret key specified for your S3 instance. |
+| `BucketName`     | string           | Name of the storage bucket where cache will be stored. |
+| `BucketLocation` | string           | Name of S3 region. |
+| `Insecure`       | boolean          | Set to `true` if the S3 service is available by `HTTP`. Set to `false` by default. |
+
 Example:
 
-```bash
+```toml
 [runners.cache]
   Type = "s3"
-  ServerAddress = "s3.amazonaws.com"
-  AccessKey = "AMAZON_S3_ACCESS_KEY"
-  SecretKey = "AMAZON_S3_SECRET_KEY"
-  BucketName = "runners"
-  BucketLocation = "eu-west-1"
-  Insecure = false
   Path = "path/to/prefix"
   Shared = false
+  [runners.cache.s3]
+    ServerAddress = "s3.amazonaws.com"
+    AccessKey = "AMAZON_S3_ACCESS_KEY"
+    SecretKey = "AMAZON_S3_SECRET_KEY"
+    BucketName = "runners-cache"
+    BucketLocation = "eu-west-1"
+    Insecure = false
 ```
 
-> **Note:** For Amazon's S3 service the `ServerAddress` should always be `s3.amazonaws.com`. Minio S3 client will
-> get bucket metadata and modify the URL to point to the valid region (eg. `s3-eu-west-1.amazonaws.com`) itself.
+NOTE: **Note:**
+For Amazon's S3 service, the `ServerAddress` should always be `s3.amazonaws.com`. The Minio S3 client will
+get bucket metadata and modify the URL to point to the valid region (eg. `s3-eu-west-1.amazonaws.com`) itself.
 
-> **Note:** If any of `ServerAddress`, `AccessKey` or `SecretKey` aren't specified then the S3 client will use the
-> IAM instance profile available to the instance.
+NOTE: **Note:**
+If any of `ServerAddress`, `AccessKey` or `SecretKey` aren't specified, then the S3 client will use the
+IAM instance profile available to the instance.
+
+### The `[runners.cache.gcs]` section
+
+> Introduced in GitLab Runner 11.3.0.
+
+Configure native support for Google Cloud Storage. Read the
+[Google Cloud Storage Authentication documentation](https://cloud.google.com/storage/docs/authentication#service_accounts)
+to check where these values come from.
+
+| Parameter         | Type             | Description |
+|-------------------|------------------|-------------|
+| `CredentialsFile` | string           | Path to the Google JSON key file. Currently only the `service_account` type is supported. If configured, takes precedence over `AccessID` and `PrivateKey` configured directly in `config.toml`. |
+| `AccessID`        | string           | ID of GCP Service Account used to access the storage. |
+| `PrivateKey`      | string           | Private key used to sign GCS requests. |
+| `BucketName`      | string           | Name of the storage bucket where cache will be stored. |
+
+Examples:
+
+**Credentials configured directly in `config.toml` file:**
+
+```toml
+[runners.cache]
+  Type = "gcs"
+  Path = "path/to/prefix"
+  Shared = false
+  [runners.cache.gcs]
+    AccessID = "cache-access-account@test-project-123456.iam.gserviceaccount.com"
+    PrivateKey = "-----BEGIN PRIVATE KEY-----\nXXXXXX\n-----END PRIVATE KEY-----\n"
+    BucketName = "runners-cache"
+```
+
+**Credentials in JSON file downloaded from GCP:**
+
+```toml
+[runners.cache]
+  Type = "gcs"
+  Path = "path/to/prefix"
+  Shared = false
+  [runners.cache.gcs]
+    CredentialsFile = "/etc/gitlab-runner/service-account.json"
+    BucketName = "runners-cache"
+```
 
 ## The `[runners.kubernetes]` section
 
@@ -541,6 +653,80 @@ Example:
 	[runners.kubernetes.node_selector]
 		gitlab = "true"
 ```
+
+## Helper image
+
+When one of `docker`, `docker+machine` or `kubernetes` executors is used, GitLab Runner uses a specific container
+to handle Git, artifacts and cache operations. This container is created from a special image, named `helper image`.
+
+The helper image is based on Alpine Linux and it's provided for amd64 and arm architectures. It contains
+a `gitlab-runner-helper` binary which is a special compilation of GitLab Runner binary, that contains only a subset
+of available commands, as well as git, git-lfs, SSL certificates store and basic configuration of Alpine.
+
+When GitLab Runner is installed from the DEB/RPM packages, both images (`arm64` and `arm` based) are installed on the host.
+When the Runner prepares the environment for the job execution, if the image in specified version (based on Runner's git
+revision) is not found on Docker Engine, it is automatically loaded. It works like that for both
+`docker` and `docker+machine` executors.
+
+Things work a little different for the `kubernetes` executor or when GitLab Runner is installed manually. For manual
+installations, the `gitlab-runner-helper` binary is not included and for the `kubernetes` executor,the API of Kubernetes
+doesn't allow to load the `gitlab-runner-helper` image from a local archive. In both cases, GitLab Runner will download
+the helper image from Docker Hub, from GitLab's official repository `gitlab/gitlab-runner-helper` by using the Runner's
+revision and architecture for defining which tag should be downloaded.
+
+### Overriding the helper image
+
+In some cases, you may need to override the helper image. There are many reasons for doing this:
+
+1. **To speed up jobs execution**: In environments with slower internet connection, downloading over and over again the
+   same image from Docker Hub may generate a significant increase of a job's timings. Downloading the helper image from
+   a local registry (where the exact copy of `gitlab/gitlab-runner-helper:XYZ` is stored) may speed things up.
+
+1. **Security concerns**: Many people don't like to download external dependencies that were not checked before. There
+   might be a business rule to use only dependencies that were reviewed and stored in local repositories.
+
+1. **Build environments without internet access**: In some cases, jobs are being executed in an environment which has
+   a dedicated, closed network (this doesn't apply to the `kubernetes` executor where the image still needs to be downloaded
+   from an external registry that is available at least to the Kubernetes cluster).
+
+1. **Additional software**: Some users may want to install some additional software to the helper image, like
+   `openssh` to support submodules accessible via `git+ssh` instead of `git+http`.
+
+In any of the cases described above, it's possible to configure a custom image using the `helper_image` configuration field,
+that is available for the `docker`, `docker+machine` and `kubernetes` executors:
+
+```toml
+[[runners]]
+  (...)
+  executor = "docker"
+  [runners.docker]
+    (...)
+    helper_image = "my.registry.local/gitlab/gitlab-runner-helper:tag"
+```
+
+Note that the version of the helper image should be considered as strictly coupled with the version of GitLab Runner.
+As it was described above, one of the main reasons of providing such images is that Runner is using the
+`gitlab-runner-helper` binary, and this binary is compiled from part of GitLab Runner sources which is using an internal
+API that is expected to be the same in both binaries.
+
+The Runner by default references to a `gitlab/gitlab-runner-helper:XYZ` image, where `XYZ` is based
+on the Runner's architecture and git revision. Starting with **GitLab Runner 11.3** it's possible to define the version
+of used image automatically, by using one of the
+[version variables](https://gitlab.com/gitlab-org/gitlab-runner/blob/11-3-stable/common/version.go#L48-50):
+
+```toml
+[[runners]]
+  (...)
+  executor = "docker"
+  [runners.docker]
+    (...)
+    helper_image = "my.registry.local/gitlab/gitlab-runner-helper:${CI_RUNNER_REVISION}"
+```
+
+With that configuration, GitLab Runner will instruct the executor to use the image in version `${CI_RUNNER_REVISION}`,
+which is based on its compilation data. After updating the Runner to a new version, this will ensure that the
+Runner will try to download the proper image. This of course means that the image should be uploaded to the registry
+before upgrading the Runner, otherwise the jobs will start failing with a "No such image" error.
 
 ## Note
 

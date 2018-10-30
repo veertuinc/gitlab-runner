@@ -1,3 +1,56 @@
+v 11.4.2 (2018-10-26)
+This release fixes improperly released 11.4.1 relelase.
+
+v 11.4.1 (2018-10-26)
+This release is created to rebuild official Docker images of GitLab Runner
+(including helper images) with new git version.
+
+v 11.4.0 (2018-10-22)
+- Do not create apk cache !1017
+- Handle untracked files with Unicode characters in filenames. !913
+- Add metrics with concurrent and limit values !1019
+- Add a gitlab_runner_jobs_total metric !1018
+- Add a job duration histogram metric !1025
+- Filter content of X-Amz-Credential from logs !1028
+- Disable escaping project bucket in cache operations !1029
+- Fix example for session_server and added the note about where this section should be placed !1035
+- Fix job duration counting !1033
+- Log duration on job finishing log line !1034
+- Allow disabling docker entrypoint overwrite !965
+- Fix command and args assignment when creating containers with K8S executor !1010
+- Support json logging !1020
+- Change image for docs link checking !1043
+- Fix command that prepares the definitions of tests !1044
+- Add OomKillDisable option to Docker executor !1042
+- Add docker support for interactive web terminal !1008
+- Add support docker machine web terminal support !1046
+
+v 11.3.0 (2018-09-22)
+- Fix logrus secrets cleanup !990
+- Fix test failure detection !993
+- Fix wrongly generated `Content-Range` header for `PATCH /api/v4/jobs/:id/trace` request !906
+- Improve and fix release checklist !940
+- Add ~"git operations" label to CONTRIBUTING guide !943
+- Disable few jobs for docs-/-docs branches !996
+- Update release checklist issue template !995
+- Fix HTTPS validation problem when ssh executor is used !962
+- Reduce complexity of reported methods !997
+- Update docker images to alpine:3.8 !984
+- Fail build in case of code_quality errors !986
+- Add initial support for CI Web Terminal !934
+- Make session and metrics server initialization logging consistent !994
+- Make prepare-changelog-entries.rb script compatible with GitLab APIv4 !927
+- Save compilation time always in UTC timezone !1000
+- Extend debug logging for k8s executor !949
+- Introduce GCS adapter for remote cache !968
+- Make configuration of helper image more dynamic !1005
+- Logrus upgrade - fix data race in helpers.MakeFatalToPanic() !1011
+- Add few TODOs to mark things that should be cleaned in 12.0 !1013
+- Update debug jobs list output !992
+- Remove duplicate build_dir setting !1015
+- Add step for updating Runner helm chart !1009
+- Clenup env, cli-options and deprecations of cache settings !1012
+
 v 11.2.0 (2018-08-22)
 - Fix support for Unicode variable values when Windows+PowerShell are used !960
 - Update docs/executors/kubernetes.md !957

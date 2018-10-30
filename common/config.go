@@ -4,16 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"math/big"
 	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
-	"fmt"
-	"path/filepath"
-
 	"github.com/BurntSushi/toml"
-	units "github.com/docker/go-units"
+	"github.com/docker/go-units"
 	log "github.com/sirupsen/logrus"
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
@@ -51,40 +51,42 @@ func (p DockerPullPolicy) Get() (DockerPullPolicy, error) {
 
 type DockerConfig struct {
 	docker_helpers.DockerCredentials
-	Hostname               string            `toml:"hostname,omitempty" json:"hostname" long:"hostname" env:"DOCKER_HOSTNAME" description:"Custom container hostname"`
-	Image                  string            `toml:"image" json:"image" long:"image" env:"DOCKER_IMAGE" description:"Docker image to be used"`
-	Runtime                string            `toml:"runtime,omitempty" json:"runtime" long:"runtime" env:"DOCKER_RUNTIME" description:"Docker runtime to be used"`
-	Memory                 string            `toml:"memory,omitempty" json:"memory" long:"memory" env:"DOCKER_MEMORY" description:"Memory limit (format: <number>[<unit>]). Unit can be one of b, k, m, or g. Minimum is 4M."`
-	MemorySwap             string            `toml:"memory_swap,omitempty" json:"memory_swap" long:"memory-swap" env:"DOCKER_MEMORY_SWAP" description:"Total memory limit (memory + swap, format: <number>[<unit>]). Unit can be one of b, k, m, or g."`
-	MemoryReservation      string            `toml:"memory_reservation,omitempty" json:"memory_reservation" long:"memory-reservation" env:"DOCKER_MEMORY_RESERVATION" description:"Memory soft limit (format: <number>[<unit>]). Unit can be one of b, k, m, or g."`
-	CPUSetCPUs             string            `toml:"cpuset_cpus,omitempty" json:"cpuset_cpus" long:"cpuset-cpus" env:"DOCKER_CPUSET_CPUS" description:"String value containing the cgroups CpusetCpus to use"`
-	CPUS                   string            `toml:"cpus,omitempty" json:"cpus" long:"cpus" env:"DOCKER_CPUS" description:"Number of CPUs"`
-	DNS                    []string          `toml:"dns,omitempty" json:"dns" long:"dns" env:"DOCKER_DNS" description:"A list of DNS servers for the container to use"`
-	DNSSearch              []string          `toml:"dns_search,omitempty" json:"dns_search" long:"dns-search" env:"DOCKER_DNS_SEARCH" description:"A list of DNS search domains"`
-	Privileged             bool              `toml:"privileged,omitzero" json:"privileged" long:"privileged" env:"DOCKER_PRIVILEGED" description:"Give extended privileges to container"`
-	UsernsMode             string            `toml:"userns_mode,omitempty" json:"userns_mode" long:"userns" env:"DOCKER_USERNS_MODE" description:"User namespace to use"`
-	CapAdd                 []string          `toml:"cap_add" json:"cap_add" long:"cap-add" env:"DOCKER_CAP_ADD" description:"Add Linux capabilities"`
-	CapDrop                []string          `toml:"cap_drop" json:"cap_drop" long:"cap-drop" env:"DOCKER_CAP_DROP" description:"Drop Linux capabilities"`
-	SecurityOpt            []string          `toml:"security_opt" json:"security_opt" long:"security-opt" env:"DOCKER_SECURITY_OPT" description:"Security Options"`
-	Devices                []string          `toml:"devices" json:"devices" long:"devices" env:"DOCKER_DEVICES" description:"Add a host device to the container"`
-	DisableCache           bool              `toml:"disable_cache,omitzero" json:"disable_cache" long:"disable-cache" env:"DOCKER_DISABLE_CACHE" description:"Disable all container caching"`
-	Volumes                []string          `toml:"volumes,omitempty" json:"volumes" long:"volumes" env:"DOCKER_VOLUMES" description:"Bind mount a volumes"`
-	VolumeDriver           string            `toml:"volume_driver,omitempty" json:"volume_driver" long:"volume-driver" env:"DOCKER_VOLUME_DRIVER" description:"Volume driver to be used"`
-	CacheDir               string            `toml:"cache_dir,omitempty" json:"cache_dir" long:"cache-dir" env:"DOCKER_CACHE_DIR" description:"Directory where to store caches"`
-	ExtraHosts             []string          `toml:"extra_hosts,omitempty" json:"extra_hosts" long:"extra-hosts" env:"DOCKER_EXTRA_HOSTS" description:"Add a custom host-to-IP mapping"`
-	VolumesFrom            []string          `toml:"volumes_from,omitempty" json:"volumes_from" long:"volumes-from" env:"DOCKER_VOLUMES_FROM" description:"A list of volumes to inherit from another container"`
-	NetworkMode            string            `toml:"network_mode,omitempty" json:"network_mode" long:"network-mode" env:"DOCKER_NETWORK_MODE" description:"Add container to a custom network"`
-	Links                  []string          `toml:"links,omitempty" json:"links" long:"links" env:"DOCKER_LINKS" description:"Add link to another container"`
-	Services               []string          `toml:"services,omitempty" json:"services" long:"services" env:"DOCKER_SERVICES" description:"Add service that is started with container"`
-	WaitForServicesTimeout int               `toml:"wait_for_services_timeout,omitzero" json:"wait_for_services_timeout" long:"wait-for-services-timeout" env:"DOCKER_WAIT_FOR_SERVICES_TIMEOUT" description:"How long to wait for service startup"`
-	AllowedImages          []string          `toml:"allowed_images,omitempty" json:"allowed_images" long:"allowed-images" env:"DOCKER_ALLOWED_IMAGES" description:"Whitelist allowed images"`
-	AllowedServices        []string          `toml:"allowed_services,omitempty" json:"allowed_services" long:"allowed-services" env:"DOCKER_ALLOWED_SERVICES" description:"Whitelist allowed services"`
-	PullPolicy             DockerPullPolicy  `toml:"pull_policy,omitempty" json:"pull_policy" long:"pull-policy" env:"DOCKER_PULL_POLICY" description:"Image pull policy: never, if-not-present, always"`
-	ShmSize                int64             `toml:"shm_size,omitempty" json:"shm_size" long:"shm-size" env:"DOCKER_SHM_SIZE" description:"Shared memory size for docker images (in bytes)"`
-	Tmpfs                  map[string]string `toml:"tmpfs,omitempty" json:"tmpfs" long:"tmpfs" env:"DOCKER_TMPFS" description:"A toml table/json object with the format key=values. When set this will mount the specified path in the key as a tmpfs volume in the main container, using the options specified as key. For the supported options, see the documentation for the unix 'mount' command"`
-	ServicesTmpfs          map[string]string `toml:"services_tmpfs,omitempty" json:"services_tmpfs" long:"services-tmpfs" env:"DOCKER_SERVICES_TMPFS" description:"A toml table/json object with the format key=values. When set this will mount the specified path in the key as a tmpfs volume in all the service containers, using the options specified as key. For the supported options, see the documentation for the unix 'mount' command"`
-	SysCtls                DockerSysCtls     `toml:"sysctls,omitempty" json:"sysctls" long:"sysctls" env:"DOCKER_SYSCTLS" description:"Sysctl options, a toml table/json object of key=value. Value is expected to be a string."`
-	HelperImage            string            `toml:"helper_image,omitempty" json:"helper_image" long:"helper-image" env:"DOCKER_HELPER_IMAGE" description:"[ADVANCED] Override the default helper image used to clone repos and upload artifacts"`
+	Hostname                   string            `toml:"hostname,omitempty" json:"hostname" long:"hostname" env:"DOCKER_HOSTNAME" description:"Custom container hostname"`
+	Image                      string            `toml:"image" json:"image" long:"image" env:"DOCKER_IMAGE" description:"Docker image to be used"`
+	Runtime                    string            `toml:"runtime,omitempty" json:"runtime" long:"runtime" env:"DOCKER_RUNTIME" description:"Docker runtime to be used"`
+	Memory                     string            `toml:"memory,omitempty" json:"memory" long:"memory" env:"DOCKER_MEMORY" description:"Memory limit (format: <number>[<unit>]). Unit can be one of b, k, m, or g. Minimum is 4M."`
+	MemorySwap                 string            `toml:"memory_swap,omitempty" json:"memory_swap" long:"memory-swap" env:"DOCKER_MEMORY_SWAP" description:"Total memory limit (memory + swap, format: <number>[<unit>]). Unit can be one of b, k, m, or g."`
+	MemoryReservation          string            `toml:"memory_reservation,omitempty" json:"memory_reservation" long:"memory-reservation" env:"DOCKER_MEMORY_RESERVATION" description:"Memory soft limit (format: <number>[<unit>]). Unit can be one of b, k, m, or g."`
+	CPUSetCPUs                 string            `toml:"cpuset_cpus,omitempty" json:"cpuset_cpus" long:"cpuset-cpus" env:"DOCKER_CPUSET_CPUS" description:"String value containing the cgroups CpusetCpus to use"`
+	CPUS                       string            `toml:"cpus,omitempty" json:"cpus" long:"cpus" env:"DOCKER_CPUS" description:"Number of CPUs"`
+	DNS                        []string          `toml:"dns,omitempty" json:"dns" long:"dns" env:"DOCKER_DNS" description:"A list of DNS servers for the container to use"`
+	DNSSearch                  []string          `toml:"dns_search,omitempty" json:"dns_search" long:"dns-search" env:"DOCKER_DNS_SEARCH" description:"A list of DNS search domains"`
+	Privileged                 bool              `toml:"privileged,omitzero" json:"privileged" long:"privileged" env:"DOCKER_PRIVILEGED" description:"Give extended privileges to container"`
+	DisableEntrypointOverwrite bool              `toml:"disable_entrypoint_overwrite,omitzero" json:"disable_entrypoint_overwrite" long:"disable-entrypoint-overwrite" env:"DOCKER_DISABLE_ENTRYPOINT_OVERWRITE" description:"Disable the possibility for a container to overwrite the default image entrypoint"`
+	UsernsMode                 string            `toml:"userns_mode,omitempty" json:"userns_mode" long:"userns" env:"DOCKER_USERNS_MODE" description:"User namespace to use"`
+	CapAdd                     []string          `toml:"cap_add" json:"cap_add" long:"cap-add" env:"DOCKER_CAP_ADD" description:"Add Linux capabilities"`
+	CapDrop                    []string          `toml:"cap_drop" json:"cap_drop" long:"cap-drop" env:"DOCKER_CAP_DROP" description:"Drop Linux capabilities"`
+	OomKillDisable             bool              `toml:"oom_kill_disable,omitzero" json:"oom_kill_disable" long:"oom-kill-disable" env:"DOCKER_OOM_KILL_DISABLE" description:"Do not kill processes in a container if an out-of-memory (OOM) error occurs"`
+	SecurityOpt                []string          `toml:"security_opt" json:"security_opt" long:"security-opt" env:"DOCKER_SECURITY_OPT" description:"Security Options"`
+	Devices                    []string          `toml:"devices" json:"devices" long:"devices" env:"DOCKER_DEVICES" description:"Add a host device to the container"`
+	DisableCache               bool              `toml:"disable_cache,omitzero" json:"disable_cache" long:"disable-cache" env:"DOCKER_DISABLE_CACHE" description:"Disable all container caching"`
+	Volumes                    []string          `toml:"volumes,omitempty" json:"volumes" long:"volumes" env:"DOCKER_VOLUMES" description:"Bind mount a volumes"`
+	VolumeDriver               string            `toml:"volume_driver,omitempty" json:"volume_driver" long:"volume-driver" env:"DOCKER_VOLUME_DRIVER" description:"Volume driver to be used"`
+	CacheDir                   string            `toml:"cache_dir,omitempty" json:"cache_dir" long:"cache-dir" env:"DOCKER_CACHE_DIR" description:"Directory where to store caches"`
+	ExtraHosts                 []string          `toml:"extra_hosts,omitempty" json:"extra_hosts" long:"extra-hosts" env:"DOCKER_EXTRA_HOSTS" description:"Add a custom host-to-IP mapping"`
+	VolumesFrom                []string          `toml:"volumes_from,omitempty" json:"volumes_from" long:"volumes-from" env:"DOCKER_VOLUMES_FROM" description:"A list of volumes to inherit from another container"`
+	NetworkMode                string            `toml:"network_mode,omitempty" json:"network_mode" long:"network-mode" env:"DOCKER_NETWORK_MODE" description:"Add container to a custom network"`
+	Links                      []string          `toml:"links,omitempty" json:"links" long:"links" env:"DOCKER_LINKS" description:"Add link to another container"`
+	Services                   []string          `toml:"services,omitempty" json:"services" long:"services" env:"DOCKER_SERVICES" description:"Add service that is started with container"`
+	WaitForServicesTimeout     int               `toml:"wait_for_services_timeout,omitzero" json:"wait_for_services_timeout" long:"wait-for-services-timeout" env:"DOCKER_WAIT_FOR_SERVICES_TIMEOUT" description:"How long to wait for service startup"`
+	AllowedImages              []string          `toml:"allowed_images,omitempty" json:"allowed_images" long:"allowed-images" env:"DOCKER_ALLOWED_IMAGES" description:"Whitelist allowed images"`
+	AllowedServices            []string          `toml:"allowed_services,omitempty" json:"allowed_services" long:"allowed-services" env:"DOCKER_ALLOWED_SERVICES" description:"Whitelist allowed services"`
+	PullPolicy                 DockerPullPolicy  `toml:"pull_policy,omitempty" json:"pull_policy" long:"pull-policy" env:"DOCKER_PULL_POLICY" description:"Image pull policy: never, if-not-present, always"`
+	ShmSize                    int64             `toml:"shm_size,omitempty" json:"shm_size" long:"shm-size" env:"DOCKER_SHM_SIZE" description:"Shared memory size for docker images (in bytes)"`
+	Tmpfs                      map[string]string `toml:"tmpfs,omitempty" json:"tmpfs" long:"tmpfs" env:"DOCKER_TMPFS" description:"A toml table/json object with the format key=values. When set this will mount the specified path in the key as a tmpfs volume in the main container, using the options specified as key. For the supported options, see the documentation for the unix 'mount' command"`
+	ServicesTmpfs              map[string]string `toml:"services_tmpfs,omitempty" json:"services_tmpfs" long:"services-tmpfs" env:"DOCKER_SERVICES_TMPFS" description:"A toml table/json object with the format key=values. When set this will mount the specified path in the key as a tmpfs volume in all the service containers, using the options specified as key. For the supported options, see the documentation for the unix 'mount' command"`
+	SysCtls                    DockerSysCtls     `toml:"sysctls,omitempty" json:"sysctls" long:"sysctls" env:"DOCKER_SYSCTLS" description:"Sysctl options, a toml table/json object of key=value. Value is expected to be a string."`
+	HelperImage                string            `toml:"helper_image,omitempty" json:"helper_image" long:"helper-image" env:"DOCKER_HELPER_IMAGE" description:"[ADVANCED] Override the default helper image used to clone repos and upload artifacts"`
 }
 
 type DockerMachine struct {
@@ -113,16 +115,6 @@ type VirtualBoxConfig struct {
 	BaseName         string `toml:"base_name" json:"base_name" long:"base-name" env:"VIRTUALBOX_BASE_NAME" description:"VM name to be used"`
 	BaseSnapshot     string `toml:"base_snapshot,omitempty" json:"base_snapshot" long:"base-snapshot" env:"VIRTUALBOX_BASE_SNAPSHOT" description:"Name or UUID of a specific VM snapshot to clone"`
 	DisableSnapshots bool   `toml:"disable_snapshots,omitzero" json:"disable_snapshots" long:"disable-snapshots" env:"VIRTUALBOX_DISABLE_SNAPSHOTS" description:"Disable snapshoting to speedup VM creation"`
-}
-
-type AnkaConfig struct {
-	ControllerAddress  string  `toml:"controller_address" json:"controller_address" long:"controller-address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud controller address, example: http://anka.controller.com[:8090]"`
-	ImageId			   string  `toml:"image_id" json:"image_id" long:"image-id" env:"IMAGE_ID" description:"Image id to be used"`
-	Tag                *string  `toml:"tag,omitempty" json:"tag" long:"tag" env:"TAG" description:"(optional) Tag to use"`
-	NodeID             *string  `toml:"node_id,omitempty" json:"node_id" long:"node-id" env:"NODE_ID" description:"(optional) Run on a specific node"`
-	Priority		   *int     `toml:"priority,omitzero" json:"priority" long:"priority" env:"PRIORITY" description:"(optional) Override the task's default priority"`
-	GroupId 		   *string  `toml:"group_id,omitempty" json:"group_id" long:"group-id" env:"GROUP_ID" description:"(optional) Run on a specific node group "`
-	KeepAliveOnError   bool     `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"(optional) Keep the VM alive in case of error for debugging purposes "`
 }
 
 type KubernetesPullPolicy string
@@ -229,16 +221,43 @@ type RunnerCredentials struct {
 	TLSKeyFile  string `toml:"tls-key-file,omitempty" json:"tls-key-file" long:"tls-key-file" env:"CI_SERVER_TLS_KEY_FILE" description:"File containing private key for TLS client auth when using HTTPS"`
 }
 
+type CacheGCSCredentials struct {
+	AccessID   string `toml:"AccessID,omitempty" long:"access-id" env:"CACHE_GCS_ACCESS_ID" description:"ID of GCP Service Account used to access the storage"`
+	PrivateKey string `toml:"PrivateKey,omitempty" long:"private-key" env:"CACHE_GCS_PRIVATE_KEY" description:"Private key used to sign GCS requests"`
+}
+
+type CacheGCSConfig struct {
+	CacheGCSCredentials
+	CredentialsFile string `toml:"CredentialsFile,omitempty" long:"credentials-file" env:"GOOGLE_APPLICATION_CREDENTIALS" description:"File with GCP credentials, containing AccessID and PrivateKey"`
+	BucketName      string `toml:"BucketName,omitempty" long:"bucket-name" env:"CACHE_GCS_BUCKET_NAME" description:"Name of the bucket where cache will be stored"`
+}
+
+type CacheS3Config struct {
+	ServerAddress  string `toml:"ServerAddress,omitempty" long:"server-address" env:"CACHE_S3_SERVER_ADDRESS" description:"A host:port to the used S3-compatible server"`
+	AccessKey      string `toml:"AccessKey,omitempty" long:"access-key" env:"CACHE_S3_ACCESS_KEY" description:"S3 Access Key"`
+	SecretKey      string `toml:"SecretKey,omitempty" long:"secret-key" env:"CACHE_S3_SECRET_KEY" description:"S3 Secret Key"`
+	BucketName     string `toml:"BucketName,omitempty" long:"bucket-name" env:"CACHE_S3_BUCKET_NAME" description:"Name of the bucket where cache will be stored"`
+	BucketLocation string `toml:"BucketLocation,omitempty" long:"bucket-location" env:"CACHE_S3_BUCKET_LOCATION" description:"Name of S3 region"`
+	Insecure       bool   `toml:"Insecure,omitempty" long:"insecure" env:"CACHE_S3_INSECURE" description:"Use insecure mode (without https)"`
+}
+
 type CacheConfig struct {
-	Type           string `toml:"Type,omitempty" long:"type" env:"CACHE_TYPE" description:"Select caching method: s3, to use S3 buckets"`
-	ServerAddress  string `toml:"ServerAddress,omitempty" long:"s3-server-address" env:"S3_SERVER_ADDRESS" description:"A host:port to the used S3-compatible server"`
-	AccessKey      string `toml:"AccessKey,omitempty" long:"s3-access-key" env:"S3_ACCESS_KEY" description:"S3 Access Key"`
-	SecretKey      string `toml:"SecretKey,omitempty" long:"s3-secret-key" env:"S3_SECRET_KEY" description:"S3 Secret Key"`
-	BucketName     string `toml:"BucketName,omitempty" long:"s3-bucket-name" env:"S3_BUCKET_NAME" description:"Name of the bucket where cache will be stored"`
-	BucketLocation string `toml:"BucketLocation,omitempty" long:"s3-bucket-location" env:"S3_BUCKET_LOCATION" description:"Name of S3 region"`
-	Insecure       bool   `toml:"Insecure,omitempty" long:"s3-insecure" env:"S3_CACHE_INSECURE" description:"Use insecure mode (without https)"`
-	Path           string `toml:"Path,omitempty" long:"s3-cache-path" env:"S3_CACHE_PATH" description:"Name of the path to prepend to the cache URL"`
-	Shared         bool   `toml:"Shared,omitempty" long:"cache-shared" env:"CACHE_SHARED" description:"Enable cache sharing between runners."`
+	Type   string `toml:"Type,omitempty" long:"type" env:"CACHE_TYPE" description:"Select caching method"`
+	Path   string `toml:"Path,omitempty" long:"path" env:"CACHE_PATH" description:"Name of the path to prepend to the cache URL"`
+	Shared bool   `toml:"Shared,omitempty" long:"shared" env:"CACHE_SHARED" description:"Enable cache sharing between runners."`
+
+	S3  *CacheS3Config  `toml:"s3,omitempty" json:"s3" namespace:"s3"`
+	GCS *CacheGCSConfig `toml:"gcs,omitempty" json:"gcs" namespace:"gcs"`
+
+	// TODO: Remove in 12.0
+	S3CachePath    string `toml:"-" long:"s3-cache-path" env:"S3_CACHE_PATH" description:"Name of the path to prepend to the cache URL. DEPRECATED"` // DEPRECATED
+	CacheShared    bool   `toml:"-" long:"cache-shared" description:"Enable cache sharing between runners. DEPRECATED"`                              // DEPRECATED
+	ServerAddress  string `toml:"ServerAddress,omitempty" description:"A host:port to the used S3-compatible server DEPRECATED"`                     // DEPRECATED
+	AccessKey      string `toml:"AccessKey,omitempty" description:"S3 Access Key DEPRECATED"`                                                        // DEPRECATED
+	SecretKey      string `toml:"SecretKey,omitempty" description:"S3 Secret Key DEPRECATED"`                                                        // DEPRECATED
+	BucketName     string `toml:"BucketName,omitempty" description:"Name of the bucket where cache will be stored DEPRECATED"`                       // DEPRECATED
+	BucketLocation string `toml:"BucketLocation,omitempty" description:"Name of S3 region DEPRECATED"`                                               // DEPRECATED
+	Insecure       bool   `toml:"Insecure,omitempty" description:"Use insecure mode (without https) DEPRECATED"`                                     // DEPRECATED
 }
 
 type RunnerSettings struct {
@@ -261,7 +280,6 @@ type RunnerSettings struct {
 	Cache      *CacheConfig      `toml:"cache,omitempty" json:"cache" group:"cache configuration" namespace:"cache"`
 	Machine    *DockerMachine    `toml:"machine,omitempty" json:"machine" group:"docker machine provider" namespace:"machine"`
 	Kubernetes *KubernetesConfig `toml:"kubernetes,omitempty" json:"kubernetes" group:"kubernetes executor" namespace:"kubernetes"`
-	Anka *AnkaConfig 			 `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
 }
 
 type RunnerConfig struct {
@@ -274,18 +292,160 @@ type RunnerConfig struct {
 	RunnerSettings
 }
 
+type SessionServer struct {
+	ListenAddress    string `toml:"listen_address,omitempty" json:"listen_address" description:"Address that the runner will communicate directly with"`
+	AdvertiseAddress string `toml:"advertise_address,omitempty" json:"advertise_address" description:"Address the runner will expose to the world to connect to the session server"`
+	SessionTimeout   int    `toml:"session_timeout,omitempty" json:"session_timeout" description:"How long a terminal session can be active after a build completes, in seconds"`
+}
+
 type Config struct {
+	ListenAddress string        `toml:"listen_address,omitempty" json:"listen_address"`
+	SessionServer SessionServer `toml:"session_server,omitempty" json:"session_server"`
+
+	// TODO: Remove in 12.0
 	MetricsServerAddress string `toml:"metrics_server,omitempty" json:"metrics_server"` // DEPRECATED
-	ListenAddress        string `toml:"listen_address,omitempty" json:"listen_address"`
 
 	Concurrent    int             `toml:"concurrent" json:"concurrent"`
 	CheckInterval int             `toml:"check_interval" json:"check_interval" description:"Define active checking interval of jobs"`
 	LogLevel      *string         `toml:"log_level" json:"log_level" description:"Define log level (one of: panic, fatal, error, warning, info, debug)"`
+	LogFormat     *string         `toml:"log_format" json:"log_format" description:"Define log format (one of: runner, text, json)"`
 	User          string          `toml:"user,omitempty" json:"user"`
 	Runners       []*RunnerConfig `toml:"runners" json:"runners"`
 	SentryDSN     *string         `toml:"sentry_dsn"`
 	ModTime       time.Time       `toml:"-"`
 	Loaded        bool            `toml:"-"`
+}
+
+func getDeprecatedStringSetting(setting string, tomlField string, envVariable string, tomlReplacement string, envReplacement string) string {
+	if setting != "" {
+		log.Warningf("%s setting is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", tomlField, tomlReplacement)
+		return setting
+	}
+
+	value := os.Getenv(envVariable)
+	if value != "" {
+		log.Warningf("%s environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", envVariable, envReplacement)
+	}
+
+	return value
+}
+
+func getDeprecatedBoolSetting(setting bool, tomlField string, envVariable string, tomlReplacement string, envReplacement string) bool {
+	if setting {
+		log.Warningf("%s setting is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", tomlField, tomlReplacement)
+		return setting
+	}
+
+	value, _ := strconv.ParseBool(os.Getenv(envVariable))
+	if value {
+		log.Warningf("%s environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", envVariable, envReplacement)
+	}
+
+	return value
+}
+
+func (c *CacheS3Config) ShouldUseIAMCredentials() bool {
+	return c.ServerAddress == "" || c.AccessKey == "" || c.SecretKey == ""
+}
+
+func (c *CacheConfig) GetPath() string {
+	if c.Path != "" {
+		return c.Path
+	}
+
+	// TODO: Remove in 12.0
+	if c.S3CachePath != "" {
+		log.Warning("'--cache-s3-cache-path' command line option and `$S3_CACHE_PATH` environment variables are deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-path' or '$CACHE_PATH' instead")
+	}
+
+	return c.S3CachePath
+}
+
+func (c *CacheConfig) GetShared() bool {
+	if c.Shared {
+		return c.Shared
+	}
+
+	// TODO: Remove in 12.0
+	if c.CacheShared {
+		log.Warning("'--cache-cache-shared' command line is deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-shared' instead")
+	}
+
+	return c.CacheShared
+}
+
+// DEPRECATED
+// TODO: Remove in 12.0
+func (c *CacheConfig) GetServerAddress() string {
+	return getDeprecatedStringSetting(
+		c.ServerAddress,
+		"[runners.cache] ServerAddress",
+		"S3_SERVER_ADDRESS",
+		"[runners.cache.s3] ServerAddress",
+		"CACHE_S3_SERVER_ADDRESS")
+}
+
+// DEPRECATED
+// TODO: Remove in 12.0
+func (c *CacheConfig) GetAccessKey() string {
+	return getDeprecatedStringSetting(
+		c.AccessKey,
+		"[runners.cache] AccessKey",
+		"S3_ACCESS_KEY",
+		"[runners.cache.s3] AccessKey",
+		"CACHE_S3_ACCESS_KEY")
+}
+
+// DEPRECATED
+// TODO: Remove in 12.0
+func (c *CacheConfig) GetSecretKey() string {
+	return getDeprecatedStringSetting(
+		c.SecretKey,
+		"[runners.cache] SecretKey",
+		"S3_SECRET_KEY",
+		"[runners.cache.s3] SecretKey",
+		"CACHE_S3_SECRET_KEY")
+}
+
+// DEPRECATED
+// TODO: Remove in 12.0
+func (c *CacheConfig) GetBucketName() string {
+	return getDeprecatedStringSetting(
+		c.BucketName,
+		"[runners.cache] BucketName",
+		"S3_BUCKET_NAME",
+		"[runners.cache.s3] BucketName",
+		"CACHE_S3_BUCKET_NAME")
+}
+
+// DEPRECATED
+// TODO: Remove in 12.0
+func (c *CacheConfig) GetBucketLocation() string {
+	return getDeprecatedStringSetting(
+		c.BucketLocation,
+		"[runners.cache] BucketLocation",
+		"S3_BUCKET_LOCATION",
+		"[runners.cache.s3] BucketLocation",
+		"CACHE_S3_BUCKET_LOCATION")
+}
+
+// DEPRECATED
+// TODO: Remove in 12.0
+func (c *CacheConfig) GetInsecure() bool {
+	return getDeprecatedBoolSetting(
+		c.Insecure,
+		"[runners.cache] Insecure",
+		"S3_CACHE_INSECURE",
+		"[runners.cache.s3] Insecure",
+		"CACHE_S3_INSECURE")
+}
+
+func (c *SessionServer) GetSessionTimeout() time.Duration {
+	if c.SessionTimeout > 0 {
+		return time.Duration(c.SessionTimeout) * time.Second
+	}
+
+	return DefaultSessionTimeout
 }
 
 func (c *DockerConfig) GetNanoCPUs() (int64, error) {
@@ -326,6 +486,10 @@ func (c *DockerConfig) GetMemorySwap() int64 {
 
 func (c *DockerConfig) GetMemoryReservation() int64 {
 	return c.getMemoryBytes(c.MemoryReservation, "memory_reservation")
+}
+
+func (c *DockerConfig) GetOomKillDisable() *bool {
+	return &c.OomKillDisable
 }
 
 func (c *KubernetesConfig) GetHelperImage() string {
@@ -456,6 +620,9 @@ func (c *RunnerConfig) GetVariables() JobVariables {
 func NewConfig() *Config {
 	return &Config{
 		Concurrent: 1,
+		SessionServer: SessionServer{
+			SessionTimeout: int(DefaultSessionTimeout.Seconds()),
+		},
 	}
 }
 
@@ -534,6 +701,7 @@ func (c *Config) ListenOrServerMetricAddress() string {
 		return c.ListenAddress
 	}
 
+	// TODO: Remove in 12.0
 	if c.MetricsServerAddress != "" {
 		log.Warnln("'metrics_server' configuration entry is deprecated and will be removed in one of future releases; please use 'listen_address' instead")
 	}

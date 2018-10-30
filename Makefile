@@ -3,7 +3,7 @@ PACKAGE_NAME ?= $(NAME)
 export VERSION := $(shell ./ci/version)
 REVISION := $(shell git rev-parse --short=8 HEAD || echo unknown)
 BRANCH := $(shell git show-ref | grep "$(REVISION)" | grep -v HEAD | awk '{print $$2}' | sed 's|refs/remotes/origin/||' | sed 's|refs/heads/||' | sort | head -n 1)
-BUILT := $(shell date +%Y-%m-%dT%H:%M:%S%:z)
+BUILT := $(shell date -u +%Y-%m-%dT%H:%M:%S%z)
 export TESTFLAGS ?= -cover
 
 LATEST_STABLE_TAG := $(shell git -c versionsort.prereleaseSuffix="-rc" -c versionsort.prereleaseSuffix="-RC" tag -l "v*.*.*" --sort=-v:refname | awk '!/rc/' | head -n 1)
@@ -153,8 +153,11 @@ mocks: $(MOCKERY)
 	find . -type f ! -path '*vendor/*' -name 'mock_*' -delete
 	GOPATH=$(ORIGINAL_GOPATH) mockery $(MOCKERY_FLAGS) -dir=./vendor/github.com/ayufan/golang-kardianos-service -output=./helpers/service/mocks -name='(Interface|Logger)'
 	GOPATH=$(ORIGINAL_GOPATH) mockery $(MOCKERY_FLAGS) -dir=./helpers/docker -all -inpkg
+	GOPATH=$(ORIGINAL_GOPATH) mockery $(MOCKERY_FLAGS) -dir=./helpers/certificate -all -inpkg
+	GOPATH=$(ORIGINAL_GOPATH) mockery $(MOCKERY_FLAGS) -dir=./cache -all -inpkg
 	GOPATH=$(ORIGINAL_GOPATH) mockery $(MOCKERY_FLAGS) -dir=./common -all -inpkg
-	GOPATH=$(ORIGINAL_GOPATH) mockery $(MOCKERY_FLAGS) -dir=./shells -name fakeIAMCredentialsProvider -inpkg
+	GOPATH=$(ORIGINAL_GOPATH) mockery $(MOCKERY_FLAGS) -dir=./session -all -inpkg
+	GOPATH=$(ORIGINAL_GOPATH) mockery $(MOCKERY_FLAGS) -dir=./shells -all -inpkg
 
 test-docker:
 	make test-docker-image IMAGE=centos:6 TYPE=rpm

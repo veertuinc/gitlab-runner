@@ -8,15 +8,19 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gitlab.com/gitlab-org/gitlab-runner/session"
 
 	api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -30,6 +34,10 @@ import (
 
 var (
 	TRUE = true
+)
+
+const (
+	TestTimeout = 15 * time.Second
 )
 
 func TestLimits(t *testing.T) {
@@ -990,18 +998,51 @@ func TestSetupCredentials(t *testing.T) {
 	}
 }
 
+type setupBuildPodTestDef struct {
+	RunnerConfig common.RunnerConfig
+	Variables    []common.JobVariable
+	Options      *kubernetesOptions
+	PrepareFn    func(*testing.T, setupBuildPodTestDef, *executor)
+	VerifyFn     func(*testing.T, setupBuildPodTestDef, *api.Pod)
+}
+
+type setupBuildPodFakeRoundTripper struct {
+	t        *testing.T
+	test     setupBuildPodTestDef
+	executed bool
+}
+
+func (rt *setupBuildPodFakeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.executed = true
+	podBytes, err := ioutil.ReadAll(req.Body)
+	if !assert.NoError(rt.t, err, "failed to read request body") {
+		return nil, err
+	}
+
+	p := new(api.Pod)
+	err = json.Unmarshal(podBytes, p)
+	if !assert.NoError(rt.t, err, "failed to read request body") {
+		return nil, err
+	}
+
+	rt.test.VerifyFn(rt.t, rt.test, p)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: FakeReadCloser{
+			Reader: bytes.NewBuffer(podBytes),
+		},
+	}
+	resp.Header = make(http.Header)
+	resp.Header.Add("Content-Type", "application/json")
+
+	return resp, nil
+}
+
 func TestSetupBuildPod(t *testing.T) {
 	version, _ := testVersionAndCodec()
 
-	type testDef struct {
-		RunnerConfig common.RunnerConfig
-		Options      *kubernetesOptions
-		PrepareFn    func(*testing.T, testDef, *executor)
-		VerifyFn     func(*testing.T, testDef, *api.Pod)
-		Variables    []common.JobVariable
-	}
-	tests := []testDef{
-		{
+	tests := map[string]setupBuildPodTestDef{
+		"passes node selector setting": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
@@ -1013,11 +1054,11 @@ func TestSetupBuildPod(t *testing.T) {
 					},
 				},
 			},
-			VerifyFn: func(t *testing.T, test testDef, pod *api.Pod) {
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				assert.Equal(t, test.RunnerConfig.RunnerSettings.Kubernetes.NodeSelector, pod.Spec.NodeSelector)
 			},
 		},
-		{
+		"uses configured credentials": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
@@ -1025,19 +1066,19 @@ func TestSetupBuildPod(t *testing.T) {
 					},
 				},
 			},
-			PrepareFn: func(t *testing.T, test testDef, e *executor) {
+			PrepareFn: func(t *testing.T, test setupBuildPodTestDef, e *executor) {
 				e.credentials = &api.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "job-credentials",
 					},
 				}
 			},
-			VerifyFn: func(t *testing.T, test testDef, pod *api.Pod) {
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				secrets := []api.LocalObjectReference{{Name: "job-credentials"}}
 				assert.Equal(t, secrets, pod.Spec.ImagePullSecrets)
 			},
 		},
-		{
+		"uses configured image pull secrets": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
@@ -1048,12 +1089,12 @@ func TestSetupBuildPod(t *testing.T) {
 					},
 				},
 			},
-			VerifyFn: func(t *testing.T, test testDef, pod *api.Pod) {
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				secrets := []api.LocalObjectReference{{Name: "docker-registry-credentials"}}
 				assert.Equal(t, secrets, pod.Spec.ImagePullSecrets)
 			},
 		},
-		{
+		"configures helper container": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
@@ -1061,7 +1102,7 @@ func TestSetupBuildPod(t *testing.T) {
 					},
 				},
 			},
-			VerifyFn: func(t *testing.T, test testDef, pod *api.Pod) {
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				hasHelper := false
 				for _, c := range pod.Spec.Containers {
 					if c.Name == "helper" {
@@ -1071,7 +1112,7 @@ func TestSetupBuildPod(t *testing.T) {
 				assert.True(t, hasHelper)
 			},
 		},
-		{
+		"uses configured helper image": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
@@ -1080,7 +1121,7 @@ func TestSetupBuildPod(t *testing.T) {
 					},
 				},
 			},
-			VerifyFn: func(t *testing.T, test testDef, pod *api.Pod) {
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				for _, c := range pod.Spec.Containers {
 					if c.Name == "helper" {
 						assert.Equal(t, test.RunnerConfig.RunnerSettings.Kubernetes.HelperImage, c.Image)
@@ -1088,7 +1129,7 @@ func TestSetupBuildPod(t *testing.T) {
 				}
 			},
 		},
-		{
+		"expands variables for pod labels": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
@@ -1101,7 +1142,7 @@ func TestSetupBuildPod(t *testing.T) {
 					},
 				},
 			},
-			VerifyFn: func(t *testing.T, test testDef, pod *api.Pod) {
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				assert.Equal(t, map[string]string{
 					"test":    "label",
 					"another": "label",
@@ -1112,7 +1153,7 @@ func TestSetupBuildPod(t *testing.T) {
 				{Key: "test", Value: "sometestvar"},
 			},
 		},
-		{
+		"expands variables for pod annotations": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
@@ -1125,7 +1166,7 @@ func TestSetupBuildPod(t *testing.T) {
 					},
 				},
 			},
-			VerifyFn: func(t *testing.T, test testDef, pod *api.Pod) {
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				assert.Equal(t, map[string]string{
 					"test":    "annotation",
 					"another": "annotation",
@@ -1136,7 +1177,24 @@ func TestSetupBuildPod(t *testing.T) {
 				{Key: "test", Value: "sometestvar"},
 			},
 		},
-		{
+		"expands variables for helper image": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Namespace:   "default",
+						HelperImage: "custom/helper-image:${CI_RUNNER_REVISION}",
+					},
+				},
+			},
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
+				for _, c := range pod.Spec.Containers {
+					if c.Name == "helper" {
+						assert.Equal(t, "custom/helper-image:HEAD", c.Image)
+					}
+				}
+			},
+		},
+		"supports extended docker configuration for image and services": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
@@ -1156,10 +1214,14 @@ func TestSetupBuildPod(t *testing.T) {
 						Entrypoint: []string{"/init", "run"},
 						Command:    []string{"application", "--debug"},
 					},
+					{
+						Name:    "test-service-2",
+						Command: []string{"application", "--debug"},
+					},
 				},
 			},
-			VerifyFn: func(t *testing.T, test testDef, pod *api.Pod) {
-				require.Len(t, pod.Spec.Containers, 3)
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
+				require.Len(t, pod.Spec.Containers, 4)
 
 				assert.Equal(t, "build", pod.Spec.Containers[0].Name)
 				assert.Equal(t, "test-image", pod.Spec.Containers[0].Image)
@@ -1175,77 +1237,183 @@ func TestSetupBuildPod(t *testing.T) {
 				assert.Equal(t, "test-service", pod.Spec.Containers[2].Image)
 				assert.Equal(t, []string{"/init", "run"}, pod.Spec.Containers[2].Command)
 				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[2].Args)
+
+				assert.Equal(t, "svc-1", pod.Spec.Containers[3].Name)
+				assert.Equal(t, "test-service-2", pod.Spec.Containers[3].Image)
+				assert.Empty(t, pod.Spec.Containers[3].Command, "Service container command should be empty")
+				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[3].Args)
+			},
+		},
+		// TODO: Remove the mention of Feature Flag in 12.0, make it the only proper test case.
+		"properly sets command (entrypoint) and args when FF_K8S_USE_ENTRYPOINT_OVER_COMMAND is on": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Namespace:   "default",
+						HelperImage: "custom/helper-image",
+					},
+				},
+			},
+			Variables: []common.JobVariable{
+				{Key: "FF_K8S_USE_ENTRYPOINT_OVER_COMMAND", Value: "true"},
+			},
+			Options: &kubernetesOptions{
+				Image: common.Image{
+					Name: "test-image",
+				},
+				Services: common.Services{
+					{
+						Name:    "test-service-0",
+						Command: []string{"application", "--debug"},
+					},
+					{
+						Name:       "test-service-1",
+						Entrypoint: []string{"application", "--debug"},
+					},
+					{
+						Name:       "test-service-2",
+						Entrypoint: []string{"application", "--debug"},
+						Command:    []string{"argument1", "argument2"},
+					},
+				},
+			},
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
+				require.Len(t, pod.Spec.Containers, 5)
+
+				assert.Equal(t, "build", pod.Spec.Containers[0].Name)
+				assert.Equal(t, "test-image", pod.Spec.Containers[0].Image)
+				assert.Empty(t, pod.Spec.Containers[0].Command, "Build container command should be empty")
+				assert.Empty(t, pod.Spec.Containers[0].Args, "Build container args should be empty")
+
+				assert.Equal(t, "helper", pod.Spec.Containers[1].Name)
+				assert.Equal(t, "custom/helper-image", pod.Spec.Containers[1].Image)
+				assert.Empty(t, pod.Spec.Containers[1].Command, "Helper container command should be empty")
+				assert.Empty(t, pod.Spec.Containers[1].Args, "Helper container args should be empty")
+
+				assert.Equal(t, "svc-0", pod.Spec.Containers[2].Name)
+				assert.Equal(t, "test-service-0", pod.Spec.Containers[2].Image)
+				assert.Empty(t, pod.Spec.Containers[2].Command, "Service container command should be empty")
+				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[2].Args)
+
+				assert.Equal(t, "svc-1", pod.Spec.Containers[3].Name)
+				assert.Equal(t, "test-service-1", pod.Spec.Containers[3].Image)
+				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[3].Command)
+				assert.Empty(t, pod.Spec.Containers[3].Args, "Service container args should be empty")
+
+				assert.Equal(t, "svc-2", pod.Spec.Containers[4].Name)
+				assert.Equal(t, "test-service-2", pod.Spec.Containers[4].Image)
+				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[4].Command)
+				assert.Equal(t, []string{"argument1", "argument2"}, pod.Spec.Containers[4].Args)
+			},
+		},
+		// TODO: Remove in 12.0
+		"sets command (entrypoint) and args in old way when FF_K8S_USE_ENTRYPOINT_OVER_COMMAND is off": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Namespace:   "default",
+						HelperImage: "custom/helper-image",
+					},
+				},
+			},
+			Variables: []common.JobVariable{
+				{Key: "FF_K8S_USE_ENTRYPOINT_OVER_COMMAND", Value: "false"},
+			},
+			Options: &kubernetesOptions{
+				Image: common.Image{
+					Name: "test-image",
+				},
+				Services: common.Services{
+					{
+						Name:    "test-service-0",
+						Command: []string{"application", "--debug"},
+					},
+					{
+						Name:       "test-service-1",
+						Entrypoint: []string{"application", "--debug"},
+					},
+					{
+						Name:       "test-service-2",
+						Entrypoint: []string{"application", "--debug"},
+						Command:    []string{"argument1", "argument2"},
+					},
+				},
+			},
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
+				require.Len(t, pod.Spec.Containers, 5)
+
+				assert.Equal(t, "build", pod.Spec.Containers[0].Name)
+				assert.Equal(t, "test-image", pod.Spec.Containers[0].Image)
+				assert.Empty(t, pod.Spec.Containers[0].Command, "Build container command should be empty")
+				assert.Empty(t, pod.Spec.Containers[0].Args, "Build container args should be empty")
+
+				assert.Equal(t, "helper", pod.Spec.Containers[1].Name)
+				assert.Equal(t, "custom/helper-image", pod.Spec.Containers[1].Image)
+				assert.Empty(t, pod.Spec.Containers[1].Command, "Helper container command should be empty")
+				assert.Empty(t, pod.Spec.Containers[1].Args, "Helper container args should be empty")
+
+				assert.Equal(t, "svc-0", pod.Spec.Containers[2].Name)
+				assert.Equal(t, "test-service-0", pod.Spec.Containers[2].Image)
+				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[2].Command)
+				assert.Empty(t, pod.Spec.Containers[2].Args, "Service container command should be empty")
+
+				assert.Equal(t, "svc-1", pod.Spec.Containers[3].Name)
+				assert.Equal(t, "test-service-1", pod.Spec.Containers[3].Image)
+				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[3].Command)
+				assert.Empty(t, pod.Spec.Containers[3].Args, "Service container args should be empty")
+
+				assert.Equal(t, "svc-2", pod.Spec.Containers[4].Name)
+				assert.Equal(t, "test-service-2", pod.Spec.Containers[4].Image)
+				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[4].Command)
+				assert.Equal(t, []string{"argument1", "argument2"}, pod.Spec.Containers[4].Args)
 			},
 		},
 	}
 
-	executed := false
-	fakeClientRoundTripper := func(test testDef) func(req *http.Request) (*http.Response, error) {
-		return func(req *http.Request) (resp *http.Response, err error) {
-			executed = true
-			podBytes, err := ioutil.ReadAll(req.Body)
-
-			if err != nil {
-				t.Errorf("failed to read request body: %s", err.Error())
-				return
+	for testName, test := range tests {
+		t.Run(testName, func(t *testing.T) {
+			vars := test.Variables
+			if vars == nil {
+				vars = []common.JobVariable{}
 			}
 
-			p := new(api.Pod)
-
-			err = json.Unmarshal(podBytes, p)
-
-			if err != nil {
-				t.Errorf("error decoding pod: %s", err.Error())
-				return
+			options := test.Options
+			if options == nil {
+				options = &kubernetesOptions{}
 			}
 
-			test.VerifyFn(t, test, p)
+			rt := setupBuildPodFakeRoundTripper{
+				t:    t,
+				test: test,
+			}
 
-			resp = &http.Response{StatusCode: http.StatusOK, Body: FakeReadCloser{
-				Reader: bytes.NewBuffer(podBytes),
-			}}
-			resp.Header = make(http.Header)
-			resp.Header.Add("Content-Type", "application/json")
-
-			return
-		}
-	}
-
-	for _, test := range tests {
-		vars := test.Variables
-		if vars == nil {
-			vars = []common.JobVariable{}
-		}
-
-		options := test.Options
-		if options == nil {
-			options = &kubernetesOptions{}
-		}
-		ex := executor{
-			kubeClient: testKubernetesClient(version, fake.CreateHTTPClient(fakeClientRoundTripper(test))),
-			options:    options,
-			AbstractExecutor: executors.AbstractExecutor{
-				Config:     test.RunnerConfig,
-				BuildShell: &common.ShellConfiguration{},
-				Build: &common.Build{
-					JobResponse: common.JobResponse{
-						Variables: vars,
+			ex := executor{
+				kubeClient: testKubernetesClient(version, fake.CreateHTTPClient(rt.RoundTrip)),
+				options:    options,
+				AbstractExecutor: executors.AbstractExecutor{
+					Config:     test.RunnerConfig,
+					BuildShell: &common.ShellConfiguration{},
+					Build: &common.Build{
+						JobResponse: common.JobResponse{
+							Variables: vars,
+						},
+						Runner: &test.RunnerConfig,
 					},
-					Runner: &test.RunnerConfig,
 				},
-			},
-		}
+			}
 
-		if test.PrepareFn != nil {
-			test.PrepareFn(t, test, &ex)
-		}
+			if test.PrepareFn != nil {
+				test.PrepareFn(t, test, &ex)
+			}
 
-		executed = false
-		err := ex.prepareOverwrites(make(common.JobVariables, 0))
-		assert.NoError(t, err, "error preparing overwrites: %s")
-		err = ex.setupBuildPod()
-		assert.NoError(t, err, "error setting up build pod: %s")
-		assert.True(t, executed)
+			err := ex.prepareOverwrites(make(common.JobVariables, 0))
+			assert.NoError(t, err, "error preparing overwrites")
+
+			err = ex.setupBuildPod()
+			assert.NoError(t, err, "error setting up build pod")
+
+			assert.True(t, rt.executed, "RoundTrip for kubernetes client should be executed")
+		})
 	}
 }
 
@@ -1517,6 +1685,72 @@ func TestOverwriteServiceAccountNotMatch(t *testing.T) {
 	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not match")
+}
+
+func TestInteractiveTerminal(t *testing.T) {
+	if helpers.SkipIntegrationTests(t, "kubectl", "cluster-info") {
+		return
+	}
+
+	client, err := getKubeClient(&common.KubernetesConfig{}, &overwrites{})
+	require.NoError(t, err)
+	secrets, err := client.CoreV1().Secrets("default").List(metav1.ListOptions{})
+	require.NoError(t, err)
+
+	successfulBuild, err := common.GetRemoteBuildResponse("sleep 5")
+	require.NoError(t, err)
+	successfulBuild.Image.Name = "docker:git"
+	build := &common.Build{
+		JobResponse: successfulBuild,
+		Runner: &common.RunnerConfig{
+			RunnerSettings: common.RunnerSettings{
+				Executor: "kubernetes",
+				Kubernetes: &common.KubernetesConfig{
+					BearerToken: string(secrets.Items[0].Data["token"]),
+				},
+			},
+		},
+	}
+
+	sess, err := session.NewSession(nil)
+	build.Session = sess
+
+	outBuffer := bytes.NewBuffer(nil)
+	outCh := make(chan string)
+
+	go func() {
+		err = build.Run(
+			&common.Config{
+				SessionServer: common.SessionServer{
+					SessionTimeout: 2,
+				},
+			},
+			&common.Trace{Writer: outBuffer},
+		)
+		require.NoError(t, err)
+
+		outCh <- outBuffer.String()
+	}()
+
+	for build.Session.Mux() == nil {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	srv := httptest.NewServer(build.Session.Mux())
+	defer srv.Close()
+
+	u := url.URL{Scheme: "ws", Host: srv.Listener.Addr().String(), Path: build.Session.Endpoint + "/exec"}
+	conn, resp, err := websocket.DefaultDialer.Dial(u.String(), http.Header{"Authorization": []string{build.Session.Token}})
+	defer conn.Close()
+	require.NoError(t, err)
+	assert.Equal(t, resp.StatusCode, http.StatusSwitchingProtocols)
+
+	out := <-outCh
+	t.Log(out)
+
+	assert.Contains(t, out, "Terminal is connected, will time out in 2s...")
 }
 
 type FakeReadCloser struct {

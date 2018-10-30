@@ -3,17 +3,24 @@ package kubernetes
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/url"
 	"strings"
 
+	"gitlab.com/gitlab-org/gitlab-terminal"
 	"golang.org/x/net/context"
 	api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	// Register all available authentication methods
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	restclient "k8s.io/client-go/rest"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors"
+	terminalsession "gitlab.com/gitlab-org/gitlab-runner/session/terminal"
 )
 
 var (
@@ -143,8 +150,16 @@ func (s *executor) Run(cmd common.ExecutorCommand) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	s.Debugln(fmt.Sprintf(
+		"Starting in container %q the command %q with script: %s",
+		containerName,
+		containerCommand,
+		cmd.Script,
+	))
+
 	select {
 	case err := <-s.runInContainer(ctx, containerName, containerCommand, cmd.Script):
+		s.Debugln(fmt.Sprintf("Container %q exited with error: %v", containerName, err))
 		if err != nil && strings.Contains(err.Error(), "command terminated with exit code") {
 			return &common.BuildError{Inner: err}
 		}
@@ -172,21 +187,13 @@ func (s *executor) Cleanup() {
 	s.AbstractExecutor.Cleanup()
 }
 
-func (s *executor) buildContainer(name, image string, imageDefinition common.Image, requests, limits api.ResourceList, command ...string) api.Container {
+func (s *executor) buildContainer(name, image string, imageDefinition common.Image, requests, limits api.ResourceList, containerCommand ...string) api.Container {
 	privileged := false
 	if s.Config.Kubernetes != nil {
 		privileged = s.Config.Kubernetes.Privileged
 	}
 
-	if len(command) == 0 && len(imageDefinition.Command) > 0 {
-		command = imageDefinition.Command
-	}
-
-	var args []string
-	if len(imageDefinition.Entrypoint) > 0 {
-		args = command
-		command = imageDefinition.Entrypoint
-	}
+	command, args := s.getCommandAndArgs(imageDefinition, containerCommand...)
 
 	return api.Container{
 		Name:            name,
@@ -205,6 +212,43 @@ func (s *executor) buildContainer(name, image string, imageDefinition common.Ima
 		},
 		Stdin: true,
 	}
+}
+
+func (s *executor) getCommandAndArgs(imageDefinition common.Image, command ...string) ([]string, []string) {
+	if s.Build.IsFeatureFlagOn("FF_K8S_USE_ENTRYPOINT_OVER_COMMAND") {
+		return s.getCommandsAndArgsV2(imageDefinition, command...)
+	}
+
+	return s.getCommandsAndArgsV1(imageDefinition, command...)
+}
+
+// TODO: Remove in 12.0
+func (s *executor) getCommandsAndArgsV1(imageDefinition common.Image, command ...string) ([]string, []string) {
+	if len(command) == 0 && len(imageDefinition.Command) > 0 {
+		command = imageDefinition.Command
+	}
+
+	var args []string
+	if len(imageDefinition.Entrypoint) > 0 {
+		args = command
+		command = imageDefinition.Entrypoint
+	}
+
+	return command, args
+}
+
+// TODO: Make this the only proper way to setup command and args in 12.0
+func (s *executor) getCommandsAndArgsV2(imageDefinition common.Image, command ...string) ([]string, []string) {
+	if len(command) == 0 && len(imageDefinition.Entrypoint) > 0 {
+		command = imageDefinition.Entrypoint
+	}
+
+	var args []string
+	if len(imageDefinition.Command) > 0 {
+		args = imageDefinition.Command
+	}
+
+	return command, args
 }
 
 func (s *executor) getVolumeMounts() (mounts []api.VolumeMount) {
@@ -413,6 +457,8 @@ func (s *executor) setupBuildPod() error {
 	}
 
 	buildImage := s.Build.GetAllVariables().ExpandValue(s.options.Image.Name)
+	helperImage := common.AppVersion.Variables().ExpandValue(s.Config.Kubernetes.GetHelperImage())
+
 	pod, err := s.kubeClient.CoreV1().Pods(s.configurationOverwrites.namespace).Create(&api.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: s.Build.ProjectUniqueName(),
@@ -428,7 +474,7 @@ func (s *executor) setupBuildPod() error {
 			Containers: append([]api.Container{
 				// TODO use the build and helper template here
 				s.buildContainer("build", buildImage, s.options.Image, s.buildRequests, s.buildLimits, s.BuildShell.DockerCommand...),
-				s.buildContainer("helper", s.Config.Kubernetes.GetHelperImage(), common.Image{}, s.helperRequests, s.helperLimits, s.BuildShell.DockerCommand...),
+				s.buildContainer("helper", helperImage, common.Image{}, s.helperRequests, s.helperLimits, s.BuildShell.DockerCommand...),
 			}, services...),
 			TerminationGracePeriodSeconds: &s.Config.Kubernetes.TerminationGracePeriodSeconds,
 			ImagePullSecrets:              imagePullSecrets,
@@ -488,6 +534,91 @@ func (s *executor) runInContainer(ctx context.Context, name string, command []st
 	return errc
 }
 
+func (s *executor) Connect() (terminalsession.Conn, error) {
+	settings, err := s.getTerminalSettings()
+	if err != nil {
+		return nil, err
+	}
+
+	return terminalConn{settings: settings}, nil
+}
+
+type terminalConn struct {
+	settings *terminal.TerminalSettings
+}
+
+func (t terminalConn) Start(w http.ResponseWriter, r *http.Request, timeoutCh, disconnectCh chan error) {
+	proxy := terminal.NewWebSocketProxy(1) // one stopper: terminal exit handler
+
+	terminalsession.ProxyTerminal(
+		timeoutCh,
+		disconnectCh,
+		proxy.StopCh,
+		func() {
+			terminal.ProxyWebSocket(w, r, t.settings, proxy)
+		},
+	)
+}
+
+func (t terminalConn) Close() error {
+	return nil
+}
+
+func (s *executor) getTerminalSettings() (*terminal.TerminalSettings, error) {
+	config, err := getKubeClientConfig(s.Config.Kubernetes, s.configurationOverwrites)
+	if err != nil {
+		return nil, err
+	}
+
+	wsURL, err := s.getTerminalWebSocketURL(config)
+	if err != nil {
+		return nil, err
+	}
+
+	caCert := ""
+	if len(config.CAFile) > 0 {
+		buf, err := ioutil.ReadFile(config.CAFile)
+		if err != nil {
+			return nil, err
+		}
+		caCert = string(buf)
+	}
+
+	term := &terminal.TerminalSettings{
+		Subprotocols:   []string{"channel.k8s.io"},
+		Url:            wsURL.String(),
+		Header:         http.Header{"Authorization": []string{"Bearer " + config.BearerToken}},
+		CAPem:          caCert,
+		MaxSessionTime: 0,
+	}
+
+	return term, nil
+}
+
+func (s *executor) getTerminalWebSocketURL(config *restclient.Config) (*url.URL, error) {
+	wsURL := s.kubeClient.CoreV1().RESTClient().Post().
+		Namespace(s.pod.Namespace).
+		Resource("pods").
+		Name(s.pod.Name).
+		SubResource("exec").
+		VersionedParams(&api.PodExecOptions{
+			Stdin:     true,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       true,
+			Container: "build",
+			Command:   []string{"sh", "-c", "bash || sh"},
+		}, scheme.ParameterCodec).URL()
+
+	if wsURL.Scheme == "https" {
+		wsURL.Scheme = "wss"
+	} else if wsURL.Scheme == "http" {
+		wsURL.Scheme = "ws"
+	}
+
+	return wsURL, nil
+}
+
 func (s *executor) prepareOverwrites(variables common.JobVariables) error {
 	values, err := createOverwrites(s.Config.Kubernetes, variables, s.BuildLogger)
 	if err != nil {
@@ -545,6 +676,8 @@ func featuresFn(features *common.FeaturesInfo) {
 	features.Services = true
 	features.Artifacts = true
 	features.Cache = true
+	features.Session = true
+	features.Terminal = true
 }
 
 func init() {

@@ -288,6 +288,8 @@ func (e *executor) loadPrebuiltImage(path, ref, tag string) (*types.ImageInspect
 
 func (e *executor) getPrebuiltImage() (*types.ImageInspect, error) {
 	if imageNameFromConfig := e.Config.Docker.HelperImage; imageNameFromConfig != "" {
+		imageNameFromConfig = common.AppVersion.Variables().ExpandValue(imageNameFromConfig)
+
 		e.Debugln("Pull configured helper_image for predefined container instead of import bundled image", imageNameFromConfig, "...")
 		return e.getDockerImage(imageNameFromConfig)
 	}
@@ -417,7 +419,7 @@ func (e *executor) createCacheVolume(containerName, containerPath string) (strin
 	}
 
 	e.Debugln("Waiting for cache container", resp.ID, "...")
-	err = e.waitForContainer(resp.ID)
+	err = e.waitForContainer(e.Context, resp.ID)
 	if err != nil {
 		e.temporary = append(e.temporary, resp.ID)
 		return "", err
@@ -685,9 +687,7 @@ func (e *executor) createService(serviceIndex int, service, version, image strin
 	if len(serviceDefinition.Command) > 0 {
 		config.Cmd = serviceDefinition.Command
 	}
-	if len(serviceDefinition.Entrypoint) > 0 {
-		config.Entrypoint = serviceDefinition.Entrypoint
-	}
+	config.Entrypoint = e.overwriteEntrypoint(&serviceDefinition)
 
 	hostConfig := &container.HostConfig{
 		RestartPolicy: neverRestartPolicy,
@@ -865,9 +865,7 @@ func (e *executor) createContainer(containerType string, imageDefinition common.
 		Env:          append(e.Build.GetAllVariables().StringList(), e.BuildShell.Environment...),
 	}
 
-	if len(imageDefinition.Entrypoint) > 0 {
-		config.Entrypoint = imageDefinition.Entrypoint
-	}
+	config.Entrypoint = e.overwriteEntrypoint(&imageDefinition)
 
 	nanoCPUs, err := e.Config.Docker.GetNanoCPUs()
 	if err != nil {
@@ -891,6 +889,7 @@ func (e *executor) createContainer(containerType string, imageDefinition common.
 			CpusetCpus:        e.Config.Docker.CPUSetCPUs,
 			NanoCPUs:          nanoCPUs,
 			Devices:           e.devices,
+			OomKillDisable:    e.Config.Docker.GetOomKillDisable(),
 		},
 		DNS:           e.Config.Docker.DNS,
 		DNSSearch:     e.Config.Docker.DNSSearch,
@@ -955,14 +954,14 @@ func (e *executor) killContainer(id string, waitCh chan error) (err error) {
 	}
 }
 
-func (e *executor) waitForContainer(id string) error {
+func (e *executor) waitForContainer(ctx context.Context, id string) error {
 	e.Debugln("Waiting for container", id, "...")
 
 	retries := 0
 
 	// Use active wait
-	for {
-		container, err := e.client.ContainerInspect(e.Context, id)
+	for ctx.Err() == nil {
+		container, err := e.client.ContainerInspect(ctx, id)
 		if err != nil {
 			if docker_helpers.IsErrNotFound(err) {
 				return err
@@ -993,6 +992,8 @@ func (e *executor) waitForContainer(id string) error {
 
 		return nil
 	}
+
+	return ctx.Err()
 }
 
 func (e *executor) watchContainer(ctx context.Context, id string, input io.Reader) (err error) {
@@ -1038,7 +1039,7 @@ func (e *executor) watchContainer(ctx context.Context, id string, input io.Reade
 
 	waitCh := make(chan error, 1)
 	go func() {
-		waitCh <- e.waitForContainer(id)
+		waitCh <- e.waitForContainer(e.Context, id)
 	}()
 
 	select {
@@ -1136,6 +1137,18 @@ func (e *executor) expandImageName(imageName string, allowedInternalImages []str
 	}
 
 	return e.Config.Docker.Image, nil
+}
+
+func (e *executor) overwriteEntrypoint(image *common.Image) []string {
+	if len(image.Entrypoint) > 0 {
+		if !e.Config.Docker.DisableEntrypointOverwrite {
+			return image.Entrypoint
+		}
+
+		e.Warningln("Entrypoint override disabled")
+	}
+
+	return nil
 }
 
 func (e *executor) connectDocker() (err error) {
@@ -1309,7 +1322,7 @@ func (e *executor) runServiceHealthCheckContainer(service *types.Container, time
 
 	waitResult := make(chan error, 1)
 	go func() {
-		waitResult <- e.waitForContainer(resp.ID)
+		waitResult <- e.waitForContainer(e.Context, resp.ID)
 	}()
 
 	// these are warnings and they don't make the build fail

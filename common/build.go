@@ -15,6 +15,8 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/tls"
+	"gitlab.com/gitlab-org/gitlab-runner/session"
+	"gitlab.com/gitlab-org/gitlab-runner/session/terminal"
 )
 
 type GitStrategy int
@@ -80,9 +82,13 @@ type Build struct {
 	CurrentStage BuildStage
 	CurrentState BuildRuntimeState
 
+	Session *session.Session
+
 	executorStageResolver func() ExecutorStage
 	logger                BuildLogger
 	allVariables          JobVariables
+
+	createdAt time.Time
 }
 
 func (b *Build) Log() *logrus.Entry {
@@ -146,6 +152,8 @@ func (b *Build) StartBuild(rootDir, cacheDir string, sharedDir bool) {
 
 func (b *Build) executeStage(ctx context.Context, buildStage BuildStage, executor Executor) error {
 	b.CurrentStage = buildStage
+
+	b.Log().WithField("build_stage", buildStage).Debug("Executing build stage")
 
 	shell := executor.Shell()
 	if shell == nil {
@@ -276,6 +284,10 @@ func (b *Build) run(ctx context.Context, executor Executor) (err error) {
 	runContext, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
+	if term, ok := executor.(terminal.InteractiveTerminal); b.Session != nil && ok {
+		b.Session.SetInteractiveTerminal(term)
+	}
+
 	// Run build script
 	go func() {
 		buildFinish <- b.executeScript(runContext, executor)
@@ -335,6 +347,38 @@ func (b *Build) retryCreateExecutor(options ExecutorPrepareOptions, provider Exe
 	return
 }
 
+func (b *Build) waitForTerminal(timeout time.Duration) {
+	if b.Session == nil || !b.Session.Connected() {
+		return
+	}
+
+	b.logger.Infoln(
+		fmt.Sprintf(
+			"Terminal is connected, will time out in %s...",
+			timeout,
+		),
+	)
+
+	select {
+	case <-time.After(timeout):
+		err := fmt.Errorf(
+			"Terminal session timed out (maximum time allowed - %s)",
+			timeout,
+		)
+		b.logger.Infoln(err.Error())
+		b.Log().WithError(err).Debugln("Connection closed")
+		b.Session.TimeoutCh <- err
+	case err := <-b.Session.DisconnectCh:
+		b.logger.Infoln("Terminal disconnected")
+		b.Log().WithError(err).Debugln("Terminal disconnected")
+	case signal := <-b.SystemInterrupt:
+		err := fmt.Errorf("aborted: %v", signal)
+		b.logger.Infoln("Terminal disconnected")
+		b.Log().WithError(err).Debugln("Terminal disconnected")
+		b.Session.Kill()
+	}
+}
+
 func (b *Build) CurrentExecutorStage() ExecutorStage {
 	if b.executorStageResolver == nil {
 		b.executorStageResolver = func() ExecutorStage {
@@ -357,22 +401,27 @@ func (b *Build) Run(globalConfig *Config, trace JobTrace) (err error) {
 	b.CurrentState = BuildRunStatePending
 
 	defer func() {
+		logger := b.logger.WithFields(logrus.Fields{
+			"duration": b.Duration(),
+		})
+
 		if _, ok := err.(*BuildError); ok {
-			b.logger.SoftErrorln("Job failed:", err)
+			logger.SoftErrorln("Job failed:", err)
 			trace.Fail(err, ScriptFailure)
 		} else if err != nil {
-			b.logger.Errorln("Job failed (system failure):", err)
+			logger.Errorln("Job failed (system failure):", err)
 			trace.Fail(err, RunnerSystemFailure)
 		} else {
-			b.logger.Infoln("Job succeeded")
+			logger.Infoln("Job succeeded")
 			trace.Success()
 		}
+
 		if executor != nil {
 			executor.Cleanup()
 		}
 	}()
 
-	context, cancel := context.WithTimeout(context.Background(), b.GetBuildTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), b.GetBuildTimeout())
 	defer cancel()
 
 	trace.SetCancelFunc(cancel)
@@ -382,7 +431,7 @@ func (b *Build) Run(globalConfig *Config, trace JobTrace) (err error) {
 		Build:   b,
 		Trace:   trace,
 		User:    globalConfig.User,
-		Context: context,
+		Context: ctx,
 	}
 
 	provider := GetExecutor(b.Runner.Executor)
@@ -394,7 +443,8 @@ func (b *Build) Run(globalConfig *Config, trace JobTrace) (err error) {
 
 	executor, err = b.retryCreateExecutor(options, provider, b.logger)
 	if err == nil {
-		err = b.run(context, executor)
+		err = b.run(ctx, executor)
+		b.waitForTerminal(globalConfig.SessionServer.GetSessionTimeout())
 	}
 	if executor != nil {
 		executor.Finish(err)
@@ -410,6 +460,12 @@ func (b *Build) GetDefaultVariables() JobVariables {
 	return JobVariables{
 		{Key: "CI_PROJECT_DIR", Value: b.FullProjectDir(), Public: true, Internal: true, File: false},
 		{Key: "CI_SERVER", Value: "yes", Public: true, Internal: true, File: false},
+	}
+}
+
+func (b *Build) GetDefaultFeatureFlagsVariables() JobVariables {
+	return JobVariables{
+		{Key: "FF_K8S_USE_ENTRYPOINT_OVER_COMMAND", Value: "true", Public: true, Internal: true, File: false}, // TODO: Remove in 12.0
 	}
 }
 
@@ -462,6 +518,7 @@ func (b *Build) GetAllVariables() JobVariables {
 		variables = append(variables, b.Runner.GetVariables()...)
 	}
 	variables = append(variables, b.GetDefaultVariables()...)
+	variables = append(variables, b.GetDefaultFeatureFlagsVariables()...)
 	variables = append(variables, b.GetCITLSVariables()...)
 	variables = append(variables, b.Variables...)
 	variables = append(variables, b.GetSharedEnvVariable())
@@ -595,4 +652,38 @@ func (b *Build) GetCacheRequestTimeout() int {
 		return DefaultCacheRequestTimeout
 	}
 	return timeout
+}
+
+func (b *Build) Duration() time.Duration {
+	return time.Since(b.createdAt)
+}
+
+func NewBuild(jobData JobResponse, runnerConfig *RunnerConfig, systemInterrupt chan os.Signal, executorData ExecutorData) *Build {
+	return &Build{
+		JobResponse:     jobData,
+		Runner:          runnerConfig,
+		SystemInterrupt: systemInterrupt,
+		ExecutorData:    executorData,
+		createdAt:       time.Now(),
+	}
+}
+
+func (b *Build) IsFeatureFlagOn(name string) bool {
+	ffValue := b.GetAllVariables().Get(name)
+
+	if ffValue == "" {
+		return false
+	}
+
+	on, err := strconv.ParseBool(ffValue)
+	if err != nil {
+		logrus.WithError(err).
+			WithField("ffName", name).
+			WithField("ffValue", ffValue).
+			Error("Error while parsing the value of feature flag")
+
+		return false
+	}
+
+	return on
 }

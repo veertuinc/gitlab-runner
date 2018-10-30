@@ -13,6 +13,7 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/archives"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/url"
+	"gitlab.com/gitlab-org/gitlab-runner/log"
 )
 
 type CacheArchiverCommand struct {
@@ -71,6 +72,8 @@ func (c *CacheArchiverCommand) upload() (bool, error) {
 }
 
 func (c *CacheArchiverCommand) Execute(*cli.Context) {
+	log.SetRunnerFormatter()
+
 	if c.File == "" {
 		logrus.Fatalln("Missing --file")
 	}
@@ -99,6 +102,8 @@ func (c *CacheArchiverCommand) Execute(*cli.Context) {
 		if err != nil {
 			logrus.Fatalln(err)
 		}
+	} else {
+		logrus.Infoln("No URL provided, cache will be not uploaded to shared cache server. Cache will be stored only locally.")
 	}
 }
 
