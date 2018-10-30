@@ -1,99 +1,136 @@
-# GitLab Runner
+# GitLab Runner Fork
 
-This is the repository of the official GitLab Runner written in Go.
-It runs tests and sends the results to GitLab.
-[GitLab CI](https://about.gitlab.com/gitlab-ci) is the open-source
-continuous integration service included with GitLab that coordinates the testing.
-The old name of this project was GitLab CI Multi Runner but please use "GitLab Runner" (without CI) from now on.
+This is **NOT** the repository of the official GitLab Runner.
 
-![Build Status](https://gitlab.com/gitlab-org/gitlab-runner/badges/master/build.svg)
+# Anka cloud support
 
-## Runner and GitLab CE/EE compatibility
+You can use this fork in order to integrate your Anka cloud with gitlab.  
 
-For a list of compatible versions between GitLab and GitLab Runner, consult
-the [compatibility chart](https://docs.gitlab.com/runner/#compatibility-chart).
+For more information about Anka go to <a href="https://veertu.com" target="_blank">veertu.com</a>.  
 
-## Release process
+# How To Use This Package
 
-The description of release process of GitLab Runner project can be found in the [release documentation](docs/release_process/README.md).
+### Prepare a base image
 
-## Contributing
+Start or create an Anka VM. 
+Install git.
+Install your dependencies.
+Suspend/Stop the VM.
 
-Contributions are welcome, see [`CONTRIBUTING.md`](CONTRIBUTING.md) for more details.
-
-### Closing issues and merge requests
-
-GitLab is growing very fast and we have a limited resources to deal with reported issues
-and merge requests opened by the community volunteers. We appreciate all the contributions
-coming from our community. But to help all of us with issues and merge requests management
-we need to create some closing policy.
-
-If an issue or merge request has a ~"waiting for feedback" label and the response from the
-reporter has not been received for 14 days, we can close it using the following response
-template:
+Configure port forwarding for ssh:
 
 ```
-We haven't received an update for more than 14 days so we will assume that the
-problem is fixed or is no longer valid. If you still experience the same problem
-try upgrading to the latest version. If the issue persists, reopen this issue
-or merge request with the relevant information.
+anka modify $VM_NAME add port-forwarding --guest-port 22 --host-port 0 --protocol tcp ssh1
 ```
 
-## Documentation
+Push it to Registry.
 
-The documentation source files can be found under the [docs/](docs/) directory. You can
-read the documentation online at https://docs.gitlab.com/runner/.
 
-## Requirements
 
-[Read about the requirements of GitLab Runner.](https://docs.gitlab.com/runner/#requirements)
+Once you have a base image, there are 2 options.
 
-## Features
-
-[Read about the features of GitLab Runner.](https://docs.gitlab.com/runner/#features)
-
-## Executors compatibility chart
-
-[Read about what options each executor can offer.](https://docs.gitlab.com/runner/executors/#compatibility-chart)
-
-## Install GitLab Runner
-
-Visit the [installation documentation](https://docs.gitlab.com/runner/install/).
-
-## Use GitLab Runner
-
-See [https://docs.gitlab.com/runner/#using-gitlab-runner](https://docs.gitlab.com/runner/#using-gitlab-runner).
-
-## Select executor
-
-See [https://docs.gitlab.com/runner/executors/#selecting-the-executor](https://docs.gitlab.com/runner/executors/#selecting-the-executor).
-
-## Troubleshooting
-
-Read the [FAQ](https://docs.gitlab.com/runner/faq/).
-
-## Advanced Configuration
-
-See [https://docs.gitlab.com/runner/#advanced-configuration](https://docs.gitlab.com/runner/#advanced-configuration).
-
-## Building and development
-
-See [https://docs.gitlab.com/runner/development/](https://docs.gitlab.com/runner/development/).
-
-## Changelog
-
-Visit the [Changelog](CHANGELOG.md) to view recent changes.
-
-## The future
-
-* Please see the [GitLab Direction page](https://about.gitlab.com/direction/).
-* Feel free submit issues with feature proposals on the issue tracker.
-
-## Author
+## Option 1 - Run with Docker
 
 ```
-2014 - 2015   : [Kamil Trzciński](mailto:ayufan@ayufan.eu)
-2015 - now    : GitLab Inc. team and contributors
+docker run -t asafg6/gitlab-anka-runner --executor anka \
+--url http://YOUR_GITLAB_HOST \
+--registration-token ** \
+--ssh-user VM_USER \
+--ssh-password VM_PASSWORD \
+--anka-controller-address http://ANKA_CLOUD_ADDRESS \
+--anka-image-id IMAGE_ID \
+--name my-anka-runner
+```
+
+You can also append whatever arguments you would pass to gitlab-runner register.
+For example ---locked, --run-untagged, --tag-list, etc....
+
+More Anka optional parameters:
+
+--anka-tag value Use a specific tag  
+--anka-node-id value Run on a specific node  
+--anka-priority value Override the task's default priority  
+--anka-group-id value Run on a specific node group  
+--anka-keep-alive-on-error Keep the VM alive in case of error for debugging purposes  
+
+
+## Option 2 - Install And Run Manually
+
+### Install the alternative runner
+
+Download a binary from the <a href="https://github.com/veertuinc/gitlab-runner/releases/">releases page</a> 
+
+Copy the file to /usr/local/bin/gitlab-runner.
+
+Give the file run permission
+
+
+You can also follow the additional instructions in the <a href="https://docs.gitlab.com/runner/install/linux-manually.html">gitlab installation instructions</a>
+
+
+### Install the runner service 
+
+```
+gitlab-runner install
+```
+
+### Configure the runner
+
+Follow the instructions on <a href="https://docs.gitlab.com/runner/register/index.html">gitlab instructions page</a>.
+In step 6 "Enter the Runner executor:  
+
+enter "anka"
+
+The register process will ask you for more configuration parameters.
+
+
+For Anka Cloud Address, enter your controller url.  
+For Anka Image id, enter the id of the VM you prepared in step 1  
+If you want enter the registry tag you want Anka to use.  
+For SSH User, enter the ssh user for your anka VM  
+For SSH Password, enter the ssh password for your anka VM  
+
+After the runner is configured a config.toml file should be in ~/.gitlab-runner/config.toml or in /etc/gitlab-runner/config.toml
+
+
+your configuration should look similar to this
+
+
+```
+
+concurrent = 1
+check_interval = 0
+
+[[runners]]
+  name = "RUNNER_NAME"
+  url = "http://gitlab-server.net"
+  token = "********"
+  executor = "anka"
+  [runners.ssh]
+    user = "anka"
+    password = "admin"
+  [runners.cache]
+  [runners.anka]
+    controller_address = "http://CONTROLLER_HOST:CONTROLLER_PORT"
+    image_id = "IMAGE_ID"
+
+```
+
+More optional configuration parameters (under runners.anka):  
+
+tag - choose a specific tag to run on.  
+node_id - run the vm on a specific node.   
+priority - override the task's default priority (smaller number is higher priority).  
+group_id - Specify a group id if groups are configured.  
+keep_alive_on_error - Keep the VM alive in case of a build error.  
+
+**NOTE:** You can also use gitlab-runner register --non-interactive. add --help for available parameters.
+
+
+### Run the runner
+
+```
+gitlab-runner start
 ```
 
 ## License
