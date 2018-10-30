@@ -8,6 +8,7 @@ import (
 	"fmt"
 )
 
+
 type AnkaConnector struct {
 	client *ankaCloudClient.AnkaClient
 	netTimeToWait 	 time.Duration
