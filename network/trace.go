@@ -62,6 +62,13 @@ func (c *clientJobTrace) Fail(err error, failureReason common.JobFailureReason) 
 	c.finish()
 }
 
+func (c *clientJobTrace) IsJobSuccesFull() bool {
+	if c.state == common.Success {
+		return true
+	}
+	return false
+}
+
 func (c *clientJobTrace) SetCancelFunc(cancelFunc context.CancelFunc) {
 	c.cancelFunc = cancelFunc
 }
@@ -171,6 +178,8 @@ func (c *clientJobTrace) incrementalUpdate() common.UpdateState {
 	return common.UpdateSucceeded
 }
 
+
+
 func (c *clientJobTrace) sendPatch(trace bytes.Buffer) common.UpdateState {
 	tracePatch, err := newTracePatch(trace, c.sentTrace)
 	if err != nil {
@@ -237,6 +246,7 @@ func (c *clientJobTrace) sendUpdate(state common.JobState) common.UpdateState {
 	return status
 }
 
+
 func (c *clientJobTrace) fullUpdate() common.UpdateState {
 	c.lock.RLock()
 	state := c.state
@@ -267,6 +277,7 @@ func (c *clientJobTrace) fullUpdate() common.UpdateState {
 
 	return update
 }
+
 
 func (c *clientJobTrace) abort() bool {
 	if c.cancelFunc != nil {

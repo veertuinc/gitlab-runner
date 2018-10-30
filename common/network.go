@@ -354,6 +354,7 @@ type JobTrace interface {
 	SetCancelFunc(cancelFunc context.CancelFunc)
 	SetFailuresCollector(fc FailuresCollector)
 	IsStdout() bool
+	IsJobSuccesFull() bool
 }
 
 type JobTracePatch interface {
