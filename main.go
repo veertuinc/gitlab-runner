@@ -23,6 +23,7 @@ import (
 	_ "gitlab.com/gitlab-org/gitlab-runner/shells"
 )
 
+
 func main() {
 	defer func() {
 		if r := recover(); r != nil {

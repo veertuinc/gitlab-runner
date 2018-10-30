@@ -124,12 +124,18 @@ func (s *RegisterCommand) askVirtualBox() {
 	s.VirtualBox.BaseName = s.ask("virtualbox-base-name", "Please enter the VirtualBox VM (e.g. my-vm):")
 }
 
+
+
 func (s *RegisterCommand) askAnka() {
+	
 	s.Anka.ControllerAddress = s.ask("anka-controller-address", "Please enter the Anka Cloud Controller address")
 	s.Anka.ImageId = s.ask("anka-image-id", "Please enter the Anka Image id")
 	tag := s.ask("anka-tag", "Pleas enter the tag to use (leave empty for latest)", true)
 	s.Anka.Tag = &tag
 }
+
+
+
 
 func (s *RegisterCommand) askSSHServer() {
 	s.SSH.Host = s.ask("ssh-host", "Please enter the SSH server address (e.g. my.server.com):")
