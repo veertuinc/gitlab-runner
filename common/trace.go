@@ -40,5 +40,6 @@ func (s *Trace) IsStdout() bool {
 }
 
 func (s *Trace) IsJobSuccesFull() bool {
+	
 	return true
 }
