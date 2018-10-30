@@ -117,6 +117,11 @@ type VirtualBoxConfig struct {
 	DisableSnapshots bool   `toml:"disable_snapshots,omitzero" json:"disable_snapshots" long:"disable-snapshots" env:"VIRTUALBOX_DISABLE_SNAPSHOTS" description:"Disable snapshoting to speedup VM creation"`
 }
 
+<<<<<<< HEAD
+=======
+
+
+
 type AnkaConfig struct {
 	ControllerAddress  string  `toml:"controller_address" json:"controller_address" long:"controller-address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud controller address, example: http://anka.controller.com[:8090]"`
 	ImageId			   string  `toml:"image_id" json:"image_id" long:"image-id" env:"IMAGE_ID" description:"Image id to be used"`
@@ -127,6 +132,7 @@ type AnkaConfig struct {
 	KeepAliveOnError   bool     `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"(optional) Keep the VM alive in case of error for debugging purposes "`
 }
 
+>>>>>>> anka
 type KubernetesPullPolicy string
 
 // Get returns one of the predefined values in kubernetes notation or returns an error if the value can't match the predefined
@@ -290,7 +296,12 @@ type RunnerSettings struct {
 	Cache      *CacheConfig      `toml:"cache,omitempty" json:"cache" group:"cache configuration" namespace:"cache"`
 	Machine    *DockerMachine    `toml:"machine,omitempty" json:"machine" group:"docker machine provider" namespace:"machine"`
 	Kubernetes *KubernetesConfig `toml:"kubernetes,omitempty" json:"kubernetes" group:"kubernetes executor" namespace:"kubernetes"`
+<<<<<<< HEAD
+=======
+	// Anka *AnkaConfig 			 `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
 	Anka *AnkaConfig 			 `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
+
+>>>>>>> anka
 }
 
 type RunnerConfig struct {
@@ -310,11 +321,11 @@ type SessionServer struct {
 }
 
 type Config struct {
+	ListenAddress string        `toml:"listen_address,omitempty" json:"listen_address"`
 	SessionServer SessionServer `toml:"session_server,omitempty" json:"session_server"`
 
 	// TODO: Remove in 12.0
 	MetricsServerAddress string `toml:"metrics_server,omitempty" json:"metrics_server"` // DEPRECATED
-	ListenAddress        string `toml:"listen_address,omitempty" json:"listen_address"`
 
 	Concurrent    int             `toml:"concurrent" json:"concurrent"`
 	CheckInterval int             `toml:"check_interval" json:"check_interval" description:"Define active checking interval of jobs"`
