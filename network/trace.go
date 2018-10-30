@@ -108,6 +108,8 @@ func (c *clientJobTrace) Fail(err error, failureReason common.JobFailureReason) 
 }
 
 func (c *clientJobTrace) IsJobSuccesFull() bool {
+
+	// if c.state == common.Success {
 	if c.state == common.Success {
 		return true
 	}
