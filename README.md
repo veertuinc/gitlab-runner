@@ -133,6 +133,9 @@ keep_alive_on_error - Keep the VM alive in case of a build error.
 gitlab-runner start
 ```
 
+## Execution Flow Diagram
+![execution flow diagram](https://github.com/veertuinc/gitlab-runner/blob/master/gitlab-integration.png)
+
 ## License
 
 This code is distributed under the MIT license, see the [LICENSE](LICENSE) file.
