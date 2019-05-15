@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 type ExecutorData interface{}
@@ -48,13 +48,14 @@ type ExecutorProvider interface {
 	CanCreate() bool
 	Create() Executor
 	Acquire(config *RunnerConfig) (ExecutorData, error)
-	Release(config *RunnerConfig, data ExecutorData) error
+	Release(config *RunnerConfig, data ExecutorData)
 	GetFeatures(features *FeaturesInfo) error
 	GetDefaultShell() string
 }
 
 type BuildError struct {
-	Inner error
+	Inner         error
+	FailureReason JobFailureReason
 }
 
 func (b *BuildError) Error() string {
@@ -63,6 +64,12 @@ func (b *BuildError) Error() string {
 	}
 
 	return b.Inner.Error()
+}
+
+func MakeBuildError(format string, args ...interface{}) error {
+	return &BuildError{
+		Inner: fmt.Errorf(format, args...),
+	}
 }
 
 var executors map[string]ExecutorProvider
@@ -84,7 +91,7 @@ func validateExecutorProvider(provider ExecutorProvider) error {
 }
 
 func RegisterExecutor(executor string, provider ExecutorProvider) {
-	log.Debugln("Registering", executor, "executor...")
+	logrus.Debugln("Registering", executor, "executor...")
 
 	if err := validateExecutorProvider(provider); err != nil {
 		panic("Executor cannot be registered: " + err.Error())

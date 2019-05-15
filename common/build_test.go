@@ -1,15 +1,27 @@
 package common
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/gorilla/websocket"
+	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
+	"gitlab.com/gitlab-org/gitlab-runner/session"
+	"gitlab.com/gitlab-org/gitlab-runner/session/terminal"
 )
 
 func init() {
@@ -63,6 +75,116 @@ func TestBuildRun(t *testing.T) {
 	}
 	err = build.Run(&Config{}, &Trace{Writer: os.Stdout})
 	assert.NoError(t, err)
+}
+
+func TestBuildPredefinedVariables(t *testing.T) {
+	e := MockExecutor{}
+	defer e.AssertExpectations(t)
+
+	p := MockExecutorProvider{}
+	defer p.AssertExpectations(t)
+
+	// Create executor only once
+	p.On("CanCreate").Return(true).Once()
+	p.On("GetDefaultShell").Return("bash").Once()
+	p.On("GetFeatures", mock.Anything).Return(nil).Twice()
+
+	p.On("Create").Return(&e).Once()
+
+	// We run everything once
+	e.On("Prepare", mock.Anything).
+		Return(func(options ExecutorPrepareOptions) error {
+			options.Build.StartBuild("/root/dir", "/cache/dir", false, false)
+			return nil
+		}).Once()
+	e.On("Finish", nil).Return().Once()
+	e.On("Cleanup").Return().Once()
+
+	// Run script successfully
+	e.On("Shell").Return(&ShellScriptInfo{Shell: "script-shell"})
+	e.On("Run", matchBuildStage(BuildStagePrepare)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageGetSources)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageRestoreCache)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageDownloadArtifacts)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageUserScript)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageAfterScript)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageArchiveCache)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageUploadOnSuccessArtifacts)).Return(nil).Once()
+
+	RegisterExecutor(t.Name(), &p)
+
+	successfulBuild, err := GetSuccessfulBuild()
+	assert.NoError(t, err)
+	build := &Build{
+		JobResponse: successfulBuild,
+		Runner: &RunnerConfig{
+			RunnerSettings: RunnerSettings{
+				Executor: t.Name(),
+			},
+		},
+	}
+	err = build.Run(&Config{}, &Trace{Writer: os.Stdout})
+	assert.NoError(t, err)
+
+	projectDir := build.GetAllVariables().Get("CI_PROJECT_DIR")
+	assert.NotEmpty(t, projectDir, "should have CI_PROJECT_DIR")
+}
+
+func TestBuildRunNoModifyConfig(t *testing.T) {
+	e := MockExecutor{}
+	defer e.AssertExpectations(t)
+
+	p := MockExecutorProvider{}
+	defer p.AssertExpectations(t)
+
+	// Create executor only once
+	p.On("CanCreate").Return(true).Once()
+	p.On("GetDefaultShell").Return("bash").Once()
+	p.On("GetFeatures", mock.Anything).Return(nil).Twice()
+	p.On("Create").Return(&e).Once()
+
+	// Attempt to modify the Config object
+	e.On("Prepare", mock.Anything, mock.Anything, mock.Anything).
+		Return(func(options ExecutorPrepareOptions) error {
+			options.Config.Docker.DockerCredentials.Host = "10.0.0.2"
+			return nil
+		}).Once()
+
+	// We run everything else once
+	e.On("Finish", nil).Return().Once()
+	e.On("Cleanup").Return().Once()
+
+	// Run script successfully
+	e.On("Shell").Return(&ShellScriptInfo{Shell: "script-shell"})
+	e.On("Run", matchBuildStage(BuildStagePrepare)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageGetSources)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageRestoreCache)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageDownloadArtifacts)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageUserScript)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageAfterScript)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageArchiveCache)).Return(nil).Once()
+	e.On("Run", matchBuildStage(BuildStageUploadOnSuccessArtifacts)).Return(nil).Once()
+
+	RegisterExecutor("build-run-nomodify-test", &p)
+
+	successfulBuild, err := GetSuccessfulBuild()
+	assert.NoError(t, err)
+	rc := &RunnerConfig{
+		RunnerSettings: RunnerSettings{
+			Executor: "build-run-nomodify-test",
+			Docker: &DockerConfig{
+				DockerCredentials: docker_helpers.DockerCredentials{
+					Host: "10.0.0.1",
+				},
+			},
+		},
+	}
+	build, err := NewBuild(successfulBuild, rc, nil, nil)
+	assert.NoError(t, err)
+
+	err = build.Run(&Config{}, &Trace{Writer: os.Stdout})
+	assert.NoError(t, err)
+	assert.Equal(t, "10.0.0.1", rc.Docker.DockerCredentials.Host)
 }
 
 func TestRetryPrepare(t *testing.T) {
@@ -179,6 +301,113 @@ func TestPrepareFailureOnBuildError(t *testing.T) {
 	}
 	err = build.Run(&Config{}, &Trace{Writer: os.Stdout})
 	assert.IsType(t, err, &BuildError{})
+}
+
+func TestJobFailure(t *testing.T) {
+	e := new(MockExecutor)
+	defer e.AssertExpectations(t)
+
+	p := new(MockExecutorProvider)
+	defer p.AssertExpectations(t)
+
+	// Create executor
+	p.On("CanCreate").Return(true).Once()
+	p.On("GetDefaultShell").Return("bash").Once()
+	p.On("GetFeatures", mock.Anything).Return(nil).Twice()
+
+	p.On("Create").Return(e).Times(1)
+
+	// Prepare plan
+	e.On("Prepare", mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).Times(1)
+	e.On("Cleanup").Return().Times(1)
+
+	// Succeed a build script
+	thrownErr := &BuildError{Inner: errors.New("test error")}
+	e.On("Shell").Return(&ShellScriptInfo{Shell: "script-shell"})
+	e.On("Run", mock.Anything).Return(thrownErr)
+	e.On("Finish", thrownErr).Return().Once()
+
+	RegisterExecutor("build-run-job-failure", p)
+
+	failedBuild, err := GetFailedBuild()
+	assert.NoError(t, err)
+	build := &Build{
+		JobResponse: failedBuild,
+		Runner: &RunnerConfig{
+			RunnerSettings: RunnerSettings{
+				Executor: "build-run-job-failure",
+			},
+		},
+	}
+
+	trace := new(MockJobTrace)
+	defer trace.AssertExpectations(t)
+	trace.On("Write", mock.Anything).Return(0, nil)
+	trace.On("IsStdout").Return(true)
+	trace.On("SetCancelFunc", mock.Anything).Once()
+	trace.On("SetMasked", mock.Anything).Once()
+	trace.On("Fail", thrownErr, ScriptFailure).Once()
+
+	err = build.Run(&Config{}, trace)
+	require.IsType(t, &BuildError{}, err)
+}
+
+func TestJobFailureOnExecutionTimeout(t *testing.T) {
+	e := new(MockExecutor)
+	defer e.AssertExpectations(t)
+
+	p := new(MockExecutorProvider)
+	defer p.AssertExpectations(t)
+
+	// Create executor
+	p.On("CanCreate").Return(true).Once()
+	p.On("GetDefaultShell").Return("bash").Once()
+	p.On("GetFeatures", mock.Anything).Return(nil).Twice()
+
+	p.On("Create").Return(e).Times(1)
+
+	// Prepare plan
+	e.On("Prepare", mock.Anything, mock.Anything, mock.Anything).
+		Return(nil).Times(1)
+	e.On("Cleanup").Return().Times(1)
+
+	// Succeed a build script
+	e.On("Shell").Return(&ShellScriptInfo{Shell: "script-shell"})
+	e.On("Run", matchBuildStage(BuildStageUserScript)).Run(func(arguments mock.Arguments) {
+		time.Sleep(2 * time.Second)
+	}).Return(nil)
+	e.On("Run", mock.Anything).Return(nil)
+	e.On("Finish", mock.Anything).Return().Once()
+
+	RegisterExecutor("build-run-job-failure-on-execution-timeout", p)
+
+	successfulBuild, err := GetSuccessfulBuild()
+	assert.NoError(t, err)
+
+	successfulBuild.RunnerInfo.Timeout = 1
+
+	build := &Build{
+		JobResponse: successfulBuild,
+		Runner: &RunnerConfig{
+			RunnerSettings: RunnerSettings{
+				Executor: "build-run-job-failure-on-execution-timeout",
+			},
+		},
+	}
+
+	trace := new(MockJobTrace)
+	defer trace.AssertExpectations(t)
+	trace.On("Write", mock.Anything).Return(0, nil)
+	trace.On("IsStdout").Return(true)
+	trace.On("SetCancelFunc", mock.Anything).Once()
+	trace.On("SetMasked", mock.Anything).Once()
+	trace.On("Fail", mock.Anything, JobExecutionTimeout).Run(func(arguments mock.Arguments) {
+		assert.Error(t, arguments.Get(0).(error))
+	}).Once()
+
+	err = build.Run(&Config{}, trace)
+	require.IsType(t, &BuildError{}, err)
 }
 
 func matchBuildStage(buildStage BuildStage) interface{} {
@@ -501,26 +730,77 @@ func TestRunSuccessOnSecondAttempt(t *testing.T) {
 }
 
 func TestDebugTrace(t *testing.T) {
-	build := &Build{}
-	assert.False(t, build.IsDebugTraceEnabled(), "IsDebugTraceEnabled should be false if CI_DEBUG_TRACE is not set")
-
-	successfulBuild, err := GetSuccessfulBuild()
-	assert.NoError(t, err)
-
-	successfulBuild.Variables = append(successfulBuild.Variables, JobVariable{"CI_DEBUG_TRACE", "false", true, true, false})
-	build = &Build{
-		JobResponse: successfulBuild,
+	testCases := map[string]struct {
+		debugTraceVariableValue   string
+		expectedValue             bool
+		debugTraceFeatureDisabled bool
+		expectedLogOutput         string
+	}{
+		"variable not set": {
+			expectedValue: false,
+		},
+		"variable set to false": {
+			debugTraceVariableValue: "false",
+			expectedValue:           false,
+		},
+		"variable set to true": {
+			debugTraceVariableValue: "true",
+			expectedValue:           true,
+		},
+		"variable set to a non-bool value": {
+			debugTraceVariableValue: "xyz",
+			expectedValue:           false,
+		},
+		"variable set to true and feature disabled from configuration": {
+			debugTraceVariableValue:   "true",
+			expectedValue:             false,
+			debugTraceFeatureDisabled: true,
+			expectedLogOutput:         "CI_DEBUG_TRACE usage is disabled on this Runner",
+		},
 	}
-	assert.False(t, build.IsDebugTraceEnabled(), "IsDebugTraceEnabled should be false if CI_DEBUG_TRACE is set to false")
 
-	successfulBuild, err = GetSuccessfulBuild()
-	assert.NoError(t, err)
+	for testName, testCase := range testCases {
+		t.Run(testName, func(t *testing.T) {
+			logger, hooks := test.NewNullLogger()
 
-	successfulBuild.Variables = append(successfulBuild.Variables, JobVariable{"CI_DEBUG_TRACE", "true", true, true, false})
-	build = &Build{
-		JobResponse: successfulBuild,
+			build := &Build{
+				logger: NewBuildLogger(nil, logrus.NewEntry(logger)),
+				JobResponse: JobResponse{
+					Variables: JobVariables{},
+				},
+				Runner: &RunnerConfig{
+					RunnerSettings: RunnerSettings{
+						DebugTraceDisabled: testCase.debugTraceFeatureDisabled,
+					},
+				},
+			}
+
+			if testCase.debugTraceVariableValue != "" {
+				build.Variables = append(build.Variables, JobVariable{Key: "CI_DEBUG_TRACE", Value: testCase.debugTraceVariableValue, Public: true})
+			}
+
+			isTraceEnabled := build.IsDebugTraceEnabled()
+			assert.Equal(t, testCase.expectedValue, isTraceEnabled)
+
+			if testCase.expectedLogOutput != "" {
+				output, err := hooks.LastEntry().String()
+				require.NoError(t, err)
+				assert.Contains(t, output, testCase.expectedLogOutput)
+			}
+		})
 	}
-	assert.True(t, build.IsDebugTraceEnabled(), "IsDebugTraceEnabled should be true if CI_DEBUG_TRACE is set to true")
+}
+
+func TestDefaultEnvVariables(t *testing.T) {
+	buildDir := "/tmp/test-build/dir"
+	build := Build{
+		BuildDir: buildDir,
+	}
+
+	vars := build.GetAllVariables().StringList()
+
+	assert.Contains(t, vars, "CI_PROJECT_DIR="+filepath.FromSlash(buildDir))
+	assert.Contains(t, vars, "CI_SERVER=yes")
 }
 
 func TestSharedEnvVariables(t *testing.T) {
@@ -659,5 +939,396 @@ func TestIsFeatureFlagOn(t *testing.T) {
 			hook.Reset()
 		})
 	}
+}
 
+func TestStartBuild(t *testing.T) {
+	type startBuildArgs struct {
+		rootDir               string
+		cacheDir              string
+		customBuildDirEnabled bool
+		sharedDir             bool
+	}
+
+	tests := map[string]struct {
+		args             startBuildArgs
+		jobVariables     JobVariables
+		expectedBuildDir string
+		expectedCacheDir string
+		expectedError    bool
+	}{
+		"no job specific build dir with no shared dir": {
+			args: startBuildArgs{
+				rootDir:               "/build",
+				cacheDir:              "/cache",
+				customBuildDirEnabled: true,
+				sharedDir:             false,
+			},
+			jobVariables:     JobVariables{},
+			expectedBuildDir: "/build/test-namespace/test-repo",
+			expectedCacheDir: "/cache/test-namespace/test-repo",
+			expectedError:    false,
+		},
+		"no job specified build dir with shared dir": {
+			args: startBuildArgs{
+				rootDir:               "/builds",
+				cacheDir:              "/cache",
+				customBuildDirEnabled: true,
+				sharedDir:             true,
+			},
+			jobVariables:     JobVariables{},
+			expectedBuildDir: "/builds/1234/0/test-namespace/test-repo",
+			expectedCacheDir: "/cache/test-namespace/test-repo",
+			expectedError:    false,
+		},
+		"valid GIT_CLONE_PATH was specified": {
+			args: startBuildArgs{
+				rootDir:               "/builds",
+				cacheDir:              "/cache",
+				customBuildDirEnabled: true,
+				sharedDir:             false,
+			},
+			jobVariables: JobVariables{
+				{Key: "GIT_CLONE_PATH", Value: "/builds/go/src/gitlab.com/test-namespace/test-repo", Public: true},
+			},
+			expectedBuildDir: "/builds/go/src/gitlab.com/test-namespace/test-repo",
+			expectedCacheDir: "/cache/test-namespace/test-repo",
+			expectedError:    false,
+		},
+		"valid GIT_CLONE_PATH using CI_BUILDS_DIR was specified": {
+			args: startBuildArgs{
+				rootDir:               "/builds",
+				cacheDir:              "/cache",
+				customBuildDirEnabled: true,
+				sharedDir:             false,
+			},
+			jobVariables: JobVariables{
+				{Key: "GIT_CLONE_PATH", Value: "$CI_BUILDS_DIR/go/src/gitlab.com/test-namespace/test-repo", Public: true},
+			},
+			expectedBuildDir: "/builds/go/src/gitlab.com/test-namespace/test-repo",
+			expectedCacheDir: "/cache/test-namespace/test-repo",
+			expectedError:    false,
+		},
+		"custom build disabled": {
+			args: startBuildArgs{
+				rootDir:               "/builds",
+				cacheDir:              "/cache",
+				customBuildDirEnabled: false,
+				sharedDir:             false,
+			},
+			jobVariables: JobVariables{
+				{Key: "GIT_CLONE_PATH", Value: "/builds/go/src/gitlab.com/test-namespace/test-repo", Public: true},
+			},
+			expectedBuildDir: "/builds/test-namespace/test-repo",
+			expectedCacheDir: "/cache/test-namespace/test-repo",
+			expectedError:    true,
+		},
+		"invalid GIT_CLONE_PATH was specified": {
+			args: startBuildArgs{
+				rootDir:               "/builds",
+				cacheDir:              "/cache",
+				customBuildDirEnabled: true,
+				sharedDir:             false,
+			},
+			jobVariables: JobVariables{
+				{Key: "GIT_CLONE_PATH", Value: "/go/src/gitlab.com/test-namespace/test-repo", Public: true},
+			},
+			expectedError: true,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			build := Build{
+				JobResponse: JobResponse{
+					GitInfo: GitInfo{
+						RepoURL: "https://gitlab.com/test-namespace/test-repo.git",
+					},
+					Variables: test.jobVariables,
+				},
+				Runner: &RunnerConfig{
+					RunnerCredentials: RunnerCredentials{
+						Token: "1234",
+					},
+				},
+			}
+
+			err := build.StartBuild(test.args.rootDir, test.args.cacheDir, test.args.customBuildDirEnabled, test.args.sharedDir)
+			if test.expectedError {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, test.expectedBuildDir, build.BuildDir)
+			assert.Equal(t, test.args.rootDir, build.RootDir)
+			assert.Equal(t, test.expectedCacheDir, build.CacheDir)
+		})
+	}
+}
+
+func TestWaitForTerminal(t *testing.T) {
+	cases := []struct {
+		name                   string
+		cancelFn               func(ctxCancel context.CancelFunc, build *Build)
+		jobTimeout             int
+		waitForTerminalTimeout time.Duration
+		expectedErr            string
+	}{
+		{
+			name: "Cancel build",
+			cancelFn: func(ctxCancel context.CancelFunc, build *Build) {
+				ctxCancel()
+			},
+			jobTimeout:             3600,
+			waitForTerminalTimeout: time.Hour,
+			expectedErr:            "build cancelled, killing session",
+		},
+		{
+			name: "Terminal Timeout",
+			cancelFn: func(ctxCancel context.CancelFunc, build *Build) {
+				// noop
+			},
+			jobTimeout:             3600,
+			waitForTerminalTimeout: time.Second,
+			expectedErr:            "Terminal session timed out (maximum time allowed - 1s)",
+		},
+		{
+			name: "System Interrupt",
+			cancelFn: func(ctxCancel context.CancelFunc, build *Build) {
+				build.SystemInterrupt <- os.Interrupt
+			},
+			jobTimeout:             3600,
+			waitForTerminalTimeout: time.Hour,
+			expectedErr:            "terminal disconnected by system signal: interrupt",
+		},
+		{
+			name: "Terminal Disconnect",
+			cancelFn: func(ctxCancel context.CancelFunc, build *Build) {
+				build.Session.DisconnectCh <- errors.New("user disconnect")
+			},
+			jobTimeout:             3600,
+			waitForTerminalTimeout: time.Hour,
+			expectedErr:            "terminal disconnected: user disconnect",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			build := Build{
+				Runner: &RunnerConfig{
+					RunnerSettings: RunnerSettings{
+						Executor: "shell",
+					},
+				},
+				JobResponse: JobResponse{
+					RunnerInfo: RunnerInfo{
+						Timeout: c.jobTimeout,
+					},
+				},
+				SystemInterrupt: make(chan os.Signal),
+			}
+
+			trace := Trace{Writer: os.Stdout}
+			build.logger = NewBuildLogger(&trace, build.Log())
+			sess, err := session.NewSession(nil)
+			require.NoError(t, err)
+			build.Session = sess
+
+			srv := httptest.NewServer(build.Session.Mux())
+			defer srv.Close()
+
+			mockConn := terminal.MockConn{}
+			defer mockConn.AssertExpectations(t)
+			mockConn.On("Close").Maybe().Return(nil)
+			// On Start upgrade the web socket connection and wait for the
+			// timeoutCh to exit, to mock real work made on the websocket.
+			mockConn.On("Start", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				upgrader := &websocket.Upgrader{}
+				r := args[1].(*http.Request)
+				w := args[0].(http.ResponseWriter)
+
+				_, _ = upgrader.Upgrade(w, r, nil)
+				timeoutCh := args[2].(chan error)
+
+				<-timeoutCh
+			}).Once()
+
+			mockTerminal := terminal.MockInteractiveTerminal{}
+			defer mockTerminal.AssertExpectations(t)
+			mockTerminal.On("Connect").Return(&mockConn, nil)
+			sess.SetInteractiveTerminal(&mockTerminal)
+
+			u := url.URL{
+				Scheme: "ws",
+				Host:   srv.Listener.Addr().String(),
+				Path:   build.Session.Endpoint + "/exec",
+			}
+			headers := http.Header{
+				"Authorization": []string{build.Session.Token},
+			}
+
+			conn, _, err := websocket.DefaultDialer.Dial(u.String(), headers)
+			require.NotNil(t, conn)
+			require.NoError(t, err)
+			defer conn.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), build.GetBuildTimeout())
+
+			errCh := make(chan error)
+			go func() {
+				errCh <- build.waitForTerminal(ctx, c.waitForTerminalTimeout)
+			}()
+
+			c.cancelFn(cancel, &build)
+
+			assert.EqualError(t, <-errCh, c.expectedErr)
+		})
+	}
+}
+
+func TestBuild_IsLFSSmudgeDisabled(t *testing.T) {
+	testCases := map[string]struct {
+		isVariableUnset bool
+		variableValue   string
+		expectedResult  bool
+	}{
+		"variable not set": {
+			isVariableUnset: true,
+			expectedResult:  false,
+		},
+		"variable empty": {
+			variableValue:  "",
+			expectedResult: false,
+		},
+		"variable set to true": {
+			variableValue:  "true",
+			expectedResult: true,
+		},
+		"variable set to false": {
+			variableValue:  "false",
+			expectedResult: false,
+		},
+		"variable set to 1": {
+			variableValue:  "1",
+			expectedResult: true,
+		},
+		"variable set to 0": {
+			variableValue:  "0",
+			expectedResult: false,
+		},
+	}
+
+	for testName, testCase := range testCases {
+		t.Run(testName, func(t *testing.T) {
+			b := &Build{
+				JobResponse: JobResponse{
+					Variables: JobVariables{},
+				},
+			}
+
+			if !testCase.isVariableUnset {
+				b.Variables = append(b.Variables, JobVariable{Key: "GIT_LFS_SKIP_SMUDGE", Value: testCase.variableValue, Public: true})
+			}
+
+			assert.Equal(t, testCase.expectedResult, b.IsLFSSmudgeDisabled())
+		})
+	}
+}
+
+func TestGitCleanFlags(t *testing.T) {
+	tests := map[string]struct {
+		value          string
+		expectedResult []string
+	}{
+		"empty clean flags": {
+			value:          "",
+			expectedResult: []string{"-ffdx"},
+		},
+		"use custom flags": {
+			value:          "custom-flags",
+			expectedResult: []string{"custom-flags"},
+		},
+		"use custom flags with multiple arguments": {
+			value:          "-ffdx -e cache/",
+			expectedResult: []string{"-ffdx", "-e", "cache/"},
+		},
+		"disabled": {
+			value:          "none",
+			expectedResult: []string{},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			build := &Build{
+				Runner: &RunnerConfig{},
+				JobResponse: JobResponse{
+					Variables: JobVariables{
+						{Key: "GIT_CLEAN_FLAGS", Value: test.value},
+					},
+				},
+			}
+
+			result := build.GetGitCleanFlags()
+			assert.Equal(t, test.expectedResult, result)
+		})
+	}
+}
+
+func TestDefaultVariables(t *testing.T) {
+	tests := []struct {
+		name          string
+		jobVariables  JobVariables
+		rootDir       string
+		key           string
+		expectedValue string
+	}{
+		{
+			name:          "get default CI_SERVER value",
+			jobVariables:  JobVariables{},
+			rootDir:       "/builds",
+			key:           "CI_SERVER",
+			expectedValue: "yes",
+		},
+		{
+			name:          "get default CI_PROJECT_DIR value",
+			jobVariables:  JobVariables{},
+			rootDir:       "/builds",
+			key:           "CI_PROJECT_DIR",
+			expectedValue: "/builds/test-namespace/test-repo",
+		},
+		{
+			name: "get overwritten CI_PROJECT_DIR value",
+			jobVariables: JobVariables{
+				{Key: "GIT_CLONE_PATH", Value: "/builds/go/src/gitlab.com/gitlab-org/gitlab-runner", Public: true},
+			},
+			rootDir:       "/builds",
+			key:           "CI_PROJECT_DIR",
+			expectedValue: "/builds/go/src/gitlab.com/gitlab-org/gitlab-runner",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			build := Build{
+				JobResponse: JobResponse{
+					GitInfo: GitInfo{
+						RepoURL: "https://gitlab.com/test-namespace/test-repo.git",
+					},
+					Variables: test.jobVariables,
+				},
+				Runner: &RunnerConfig{
+					RunnerCredentials: RunnerCredentials{
+						Token: "1234",
+					},
+				},
+			}
+
+			err := build.StartBuild(test.rootDir, "/cache", true, false)
+			assert.NoError(t, err)
+
+			variable := build.GetAllVariables().Get(test.key)
+			assert.Equal(t, test.expectedValue, variable)
+		})
+	}
 }

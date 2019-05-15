@@ -20,7 +20,10 @@ type AbstractShell struct {
 func (b *AbstractShell) GetFeatures(features *common.FeaturesInfo) {
 	features.Artifacts = true
 	features.UploadMultipleArtifacts = true
+	features.UploadRawArtifacts = true
 	features.Cache = true
+	features.Refspecs = true
+	features.Masking = true
 }
 
 func (b *AbstractShell) writeCdBuildDir(w ShellWriter, info common.ShellScriptInfo) {
@@ -61,11 +64,11 @@ func (b *AbstractShell) writeGitSSLConfig(w ShellWriter, build *common.Build, wh
 	return
 }
 
+// TODO: Remove in 12.0
 func (b *AbstractShell) writeCloneCmd(w ShellWriter, build *common.Build, projectDir string) {
 	templateDir := w.MkTmpDir("git-template")
 	args := []string{"clone", "--no-checkout", build.GetRemoteURL(), projectDir, "--template", templateDir}
 
-	w.RmDir(projectDir)
 	templateFile := path.Join(templateDir, "config")
 	w.Command("git", "config", "-f", templateFile, "fetch.recurseSubmodules", "false")
 	if build.IsSharedEnv() {
@@ -83,6 +86,28 @@ func (b *AbstractShell) writeCloneCmd(w ShellWriter, build *common.Build, projec
 	w.Cd(projectDir)
 }
 
+func (b *AbstractShell) writeGitCleanup(w ShellWriter, build *common.Build) {
+	// Remove .git/{index,shallow,HEAD}.lock files from .git, which can fail the fetch command
+	// The file can be left if previous build was terminated during git operation
+	w.RmFile(".git/index.lock")
+	w.RmFile(".git/shallow.lock")
+	w.RmFile(".git/HEAD.lock")
+
+	w.RmFile(".git/hooks/post-checkout")
+
+	// TODO: Remove in 12.0
+	if build.IsFeatureFlagOn(common.FFUseLegacyGitCleanStrategy) {
+		w.Command("git", "clean", "-ffdx")
+		w.IfCmd("git", "diff", "--no-ext-diff", "--quiet", "--exit-code")
+		// git 1.7 cannot reset before a checkout, if no diffs we can avoid git reset
+		w.Print("Clean repository")
+		w.Else()
+		w.Command("git", "reset", "--hard")
+		w.EndIf()
+	}
+}
+
+// TODO: Remove in 12.0
 func (b *AbstractShell) writeFetchCmd(w ShellWriter, build *common.Build, projectDir string, gitDir string) {
 	depth := build.GetGitDepth()
 
@@ -99,18 +124,8 @@ func (b *AbstractShell) writeFetchCmd(w ShellWriter, build *common.Build, projec
 		b.writeGitSSLConfig(w, build, nil)
 	}
 
-	// Remove .git/{index,shallow,HEAD}.lock files from .git, which can fail the fetch command
-	// The file can be left if previous build was terminated during git operation
-	w.RmFile(".git/index.lock")
-	w.RmFile(".git/shallow.lock")
-	w.RmFile(".git/HEAD.lock")
+	b.writeGitCleanup(w, build)
 
-	w.IfFile(".git/hooks/post-checkout")
-	w.RmFile(".git/hooks/post-checkout")
-	w.EndIf()
-
-	w.Command("git", "clean", "-ffdx")
-	w.Command("git", "reset", "--hard")
 	w.Command("git", "remote", "set-url", "origin", build.GetRemoteURL())
 	if depth != "" {
 		var refspec string
@@ -128,9 +143,56 @@ func (b *AbstractShell) writeFetchCmd(w ShellWriter, build *common.Build, projec
 	w.EndIf()
 }
 
+func (b *AbstractShell) writeRefspecFetchCmd(w ShellWriter, build *common.Build, projectDir string, gitDir string) {
+	depth := build.GitInfo.Depth
+
+	// initializing
+	templateDir := w.MkTmpDir("git-template")
+	templateFile := path.Join(templateDir, "config")
+
+	w.Command("git", "config", "-f", templateFile, "fetch.recurseSubmodules", "false")
+	if build.IsSharedEnv() {
+		b.writeGitSSLConfig(w, build, []string{"-f", templateFile})
+	}
+
+	w.Command("git", "init", projectDir, "--template", templateDir)
+	w.Cd(projectDir)
+	b.writeGitCleanup(w, build)
+
+	// fetching
+	if depth > 0 {
+		w.Notice("Fetching changes with git depth set to %d...", depth)
+	} else {
+		w.Notice("Fetching changes...")
+	}
+
+	// Add `git remote` or update existing
+	w.IfCmd("git", "remote", "add", "origin", build.GetRemoteURL())
+	w.Notice("Created fresh repository.")
+	w.Else()
+	w.Command("git", "remote", "set-url", "origin", build.GetRemoteURL())
+	w.EndIf()
+
+	fetchArgs := []string{"fetch", "origin", "--prune"}
+	fetchArgs = append(fetchArgs, build.GitInfo.Refspecs...)
+	if depth > 0 {
+		fetchArgs = append(fetchArgs, "--depth", strconv.Itoa(depth))
+	}
+
+	w.Command("git", fetchArgs...)
+}
+
 func (b *AbstractShell) writeCheckoutCmd(w ShellWriter, build *common.Build) {
 	w.Notice("Checking out %s as %s...", build.GitInfo.Sha[0:8], build.GitInfo.Ref)
 	w.Command("git", "checkout", "-f", "-q", build.GitInfo.Sha)
+
+	if !build.IsFeatureFlagOn(common.FFUseLegacyGitCleanStrategy) {
+		cleanFlags := build.GetGitCleanFlags()
+		if len(cleanFlags) > 0 {
+			cleanArgs := append([]string{"clean"}, cleanFlags...)
+			w.Command("git", cleanArgs...)
+		}
+	}
 }
 
 func (b *AbstractShell) writeSubmoduleUpdateCmd(w ShellWriter, build *common.Build, recursive bool) {
@@ -160,6 +222,12 @@ func (b *AbstractShell) writeSubmoduleUpdateCmd(w ShellWriter, build *common.Bui
 	w.Command("git", append(foreachArgs, "git", "clean", "-ffxd")...)
 	w.Command("git", append(foreachArgs, "git", "reset", "--hard")...)
 	w.Command("git", updateArgs...)
+
+	if !build.IsLFSSmudgeDisabled() {
+		w.IfCmd("git-lfs", "version")
+		w.Command("git", append(foreachArgs, "git", "lfs", "pull")...)
+		w.EndIf()
+	}
 }
 
 func (b *AbstractShell) cacheFile(build *common.Build, userKey string) (key, file string) {
@@ -299,27 +367,82 @@ func (b *AbstractShell) writePrepareScript(w ShellWriter, info common.ShellScrip
 	return nil
 }
 
-func (b *AbstractShell) writeCloneFetchCmds(w ShellWriter, info common.ShellScriptInfo) (err error) {
+func (b *AbstractShell) writeCloneFetchCmds(w ShellWriter, info common.ShellScriptInfo) error {
 	build := info.Build
+
+	if !info.Build.RefspecsAvailable() {
+		w.Warning("DEPRECATION: this GitLab server doesn't support refspecs, gitlab-runner 12.0 will no longer work with this version of GitLab")
+	}
+
+	// If LFS smudging was disabled by the user (by setting the GIT_LFS_SKIP_SMUDGE variable
+	// when defining the job) we're skipping this step.
+	//
+	// In other case we're disabling smudging here to prevent us from memory
+	// allocation failures.
+	//
+	// Please read https://gitlab.com/gitlab-org/gitlab-runner/issues/3366 and
+	// https://github.com/git-lfs/git-lfs/issues/3524 for context.
+	if !build.IsLFSSmudgeDisabled() {
+		w.Variable(common.JobVariable{Key: "GIT_LFS_SKIP_SMUDGE", Value: "1"})
+	}
+
+	err := b.handleGetSourcesStrategy(w, build)
+	if err != nil {
+		return err
+	}
+
+	if build.GetGitCheckout() {
+		b.writeCheckoutCmd(w, build)
+
+		// If LFS smudging was disabled by the user (by setting the GIT_LFS_SKIP_SMUDGE variable
+		// when defining the job) we're skipping this step.
+		//
+		// In other case, because we've disabled LFS smudging above, we need now manually call
+		// `git lfs pull` to fetch and checkout all LFS objects that may be present in
+		// the repository.
+		//
+		// Repositories without LFS objects (and without any LFS metadata) will be not
+		// affected by this command.
+		//
+		// Please read https://gitlab.com/gitlab-org/gitlab-runner/issues/3366 and
+		// https://github.com/git-lfs/git-lfs/issues/3524 for context.
+		if !build.IsLFSSmudgeDisabled() {
+			w.IfCmd("git-lfs", "version")
+			w.Command("git", "lfs", "pull")
+			w.EmptyLine()
+			w.EndIf()
+		}
+	} else {
+		w.Notice("Skipping Git checkout")
+	}
+
+	return nil
+}
+
+func (b *AbstractShell) handleGetSourcesStrategy(w ShellWriter, build *common.Build) error {
+	hasRefspecs := build.RefspecsAvailable()
 	projectDir := build.FullProjectDir()
 	gitDir := path.Join(build.FullProjectDir(), ".git")
 
-	switch info.Build.GetGitStrategy() {
+	switch build.GetGitStrategy() {
 	case common.GitFetch:
-		b.writeFetchCmd(w, build, projectDir, gitDir)
+		if hasRefspecs {
+			b.writeRefspecFetchCmd(w, build, projectDir, gitDir)
+		} else {
+			b.writeFetchCmd(w, build, projectDir, gitDir)
+		}
 	case common.GitClone:
-		b.writeCloneCmd(w, build, projectDir)
+		w.RmDir(projectDir)
+		if hasRefspecs {
+			b.writeRefspecFetchCmd(w, build, projectDir, gitDir)
+		} else {
+			b.writeCloneCmd(w, build, projectDir)
+		}
 	case common.GitNone:
 		w.Notice("Skipping Git repository setup")
 		w.MkDir(projectDir)
 	default:
 		return errors.New("unknown GIT_STRATEGY")
-	}
-
-	if info.Build.GetGitCheckout() {
-		b.writeCheckoutCmd(w, build)
-	} else {
-		w.Notice("Skipping Git checkout")
 	}
 
 	return nil

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,11 @@ const (
 	GitClone GitStrategy = iota
 	GitFetch
 	GitNone
+)
+
+const (
+	gitCleanFlagsDefault = "-ffdx"
+	gitCleanFlagsNone    = "none"
 )
 
 type SubmoduleStrategy int
@@ -50,6 +56,7 @@ const (
 type BuildStage string
 
 const (
+	BuildStagePrepareExecutor          BuildStage = "prepare_executor"
 	BuildStagePrepare                  BuildStage = "prepare_script"
 	BuildStageGetSources               BuildStage = "get_sources"
 	BuildStageRestoreCache             BuildStage = "restore_cache"
@@ -59,6 +66,11 @@ const (
 	BuildStageArchiveCache             BuildStage = "archive_cache"
 	BuildStageUploadOnSuccessArtifacts BuildStage = "upload_artifacts_on_success"
 	BuildStageUploadOnFailureArtifacts BuildStage = "upload_artifacts_on_failure"
+)
+
+const (
+	FFDockerHelperImageV2       string = "FF_DOCKER_HELPER_IMAGE_V2"
+	FFUseLegacyGitCleanStrategy string = "FF_USE_LEGACY_GIT_CLEAN_STRATEGY"
 )
 
 type Build struct {
@@ -144,10 +156,46 @@ func (b *Build) FullProjectDir() string {
 	return helpers.ToSlash(b.BuildDir)
 }
 
-func (b *Build) StartBuild(rootDir, cacheDir string, sharedDir bool) {
+func (b *Build) TmpProjectDir() string {
+	return helpers.ToSlash(b.BuildDir) + ".tmp"
+}
+
+func (b *Build) getCustomBuildDir(rootDir, overrideKey string, customBuildDirEnabled, sharedDir bool) (string, error) {
+	dir := b.GetAllVariables().Get(overrideKey)
+	if dir == "" {
+		return path.Join(rootDir, b.ProjectUniqueDir(sharedDir)), nil
+	}
+
+	if !customBuildDirEnabled {
+		return "", MakeBuildError("setting %s is not allowed, enable `custom_build_dir` feature", overrideKey)
+	}
+
+	if !strings.HasPrefix(dir, rootDir) {
+		return "", MakeBuildError("the %s=%q has to be within %q",
+			overrideKey, dir, rootDir)
+	}
+
+	return dir, nil
+}
+
+func (b *Build) StartBuild(rootDir, cacheDir string, customBuildDirEnabled, sharedDir bool) error {
+	var err error
+
+	// We set RootDir and invalidate variables
+	// to be able to use CI_BUILDS_DIR
 	b.RootDir = rootDir
-	b.BuildDir = path.Join(rootDir, b.ProjectUniqueDir(sharedDir))
 	b.CacheDir = path.Join(cacheDir, b.ProjectUniqueDir(false))
+	b.refreshAllVariables()
+
+	b.BuildDir, err = b.getCustomBuildDir(b.RootDir, "GIT_CLONE_PATH", customBuildDirEnabled, sharedDir)
+	if err != nil {
+		return err
+	}
+
+	// We invalidate variables to be able to use
+	// CI_CACHE_DIR and CI_PROJECT_DIR
+	b.refreshAllVariables()
+	return nil
 }
 
 func (b *Build) executeStage(ctx context.Context, buildStage BuildStage, executor Executor) error {
@@ -268,7 +316,10 @@ func (b *Build) handleError(err error) error {
 
 	case context.DeadlineExceeded:
 		b.CurrentState = BuildRunRuntimeTimedout
-		return &BuildError{Inner: fmt.Errorf("execution took longer than %v seconds", b.GetBuildTimeout())}
+		return &BuildError{
+			Inner:         fmt.Errorf("execution took longer than %v seconds", b.GetBuildTimeout()),
+			FailureReason: JobExecutionTimeout,
+		}
 
 	default:
 		b.CurrentState = BuildRunRuntimeFinished
@@ -347,36 +398,89 @@ func (b *Build) retryCreateExecutor(options ExecutorPrepareOptions, provider Exe
 	return
 }
 
-func (b *Build) waitForTerminal(timeout time.Duration) {
+func (b *Build) waitForTerminal(ctx context.Context, timeout time.Duration) error {
 	if b.Session == nil || !b.Session.Connected() {
-		return
+		return nil
 	}
+
+	timeout = b.getTerminalTimeout(ctx, timeout)
 
 	b.logger.Infoln(
 		fmt.Sprintf(
 			"Terminal is connected, will time out in %s...",
-			timeout,
+			// TODO: switch to timeout.Round(time.Second) after upgrading to Go 1.9+
+			roundDuration(timeout, time.Second),
 		),
 	)
 
 	select {
+	case <-ctx.Done():
+		err := b.Session.Kill()
+		if err != nil {
+			b.Log().WithError(err).Warn("Failed to kill session")
+		}
+		return errors.New("build cancelled, killing session")
 	case <-time.After(timeout):
 		err := fmt.Errorf(
 			"Terminal session timed out (maximum time allowed - %s)",
-			timeout,
+			// TODO: switch to timeout.Round(time.Second) after upgrading to Go 1.9+
+			roundDuration(timeout, time.Second),
 		)
 		b.logger.Infoln(err.Error())
-		b.Log().WithError(err).Debugln("Connection closed")
 		b.Session.TimeoutCh <- err
+		return err
 	case err := <-b.Session.DisconnectCh:
 		b.logger.Infoln("Terminal disconnected")
-		b.Log().WithError(err).Debugln("Terminal disconnected")
+		return fmt.Errorf("terminal disconnected: %v", err)
 	case signal := <-b.SystemInterrupt:
-		err := fmt.Errorf("aborted: %v", signal)
 		b.logger.Infoln("Terminal disconnected")
-		b.Log().WithError(err).Debugln("Terminal disconnected")
-		b.Session.Kill()
+		err := b.Session.Kill()
+		if err != nil {
+			b.Log().WithError(err).Warn("Failed to kill session")
+		}
+		return fmt.Errorf("terminal disconnected by system signal: %v", signal)
 	}
+}
+
+// getTerminalTimeout checks if the the job timeout comes before the
+// configured terminal timeout.
+func (b *Build) getTerminalTimeout(ctx context.Context, timeout time.Duration) time.Duration {
+	expiryTime, _ := ctx.Deadline()
+
+	if expiryTime.Before(time.Now().Add(timeout)) {
+		timeout = expiryTime.Sub(time.Now())
+	}
+
+	return timeout
+}
+
+func (b *Build) setTraceStatus(trace JobTrace, err error) {
+	logger := b.logger.WithFields(logrus.Fields{
+		"duration": b.Duration(),
+	})
+
+	if err == nil {
+		logger.Infoln("Job succeeded")
+		trace.Success()
+
+		return
+	}
+
+	if buildError, ok := err.(*BuildError); ok {
+		logger.SoftErrorln("Job failed:", err)
+
+		failureReason := buildError.FailureReason
+		if failureReason == "" {
+			failureReason = ScriptFailure
+		}
+
+		trace.Fail(err, failureReason)
+
+		return
+	}
+
+	logger.Errorln("Job failed (system failure):", err)
+	trace.Fail(err, RunnerSystemFailure)
 }
 
 func (b *Build) CurrentExecutorStage() ExecutorStage {
@@ -401,20 +505,7 @@ func (b *Build) Run(globalConfig *Config, trace JobTrace) (err error) {
 	b.CurrentState = BuildRunStatePending
 
 	defer func() {
-		logger := b.logger.WithFields(logrus.Fields{
-			"duration": b.Duration(),
-		})
-
-		if _, ok := err.(*BuildError); ok {
-			logger.SoftErrorln("Job failed:", err)
-			trace.Fail(err, ScriptFailure)
-		} else if err != nil {
-			logger.Errorln("Job failed (system failure):", err)
-			trace.Fail(err, RunnerSystemFailure)
-		} else {
-			logger.Infoln("Job succeeded")
-			trace.Success()
-		}
+		b.setTraceStatus(trace, err)
 
 		if executor != nil {
 			executor.Cleanup()
@@ -425,6 +516,7 @@ func (b *Build) Run(globalConfig *Config, trace JobTrace) (err error) {
 	defer cancel()
 
 	trace.SetCancelFunc(cancel)
+	trace.SetMasked(b.GetAllVariables().Masked())
 
 	options := ExecutorPrepareOptions{
 		Config:  b.Runner,
@@ -441,14 +533,27 @@ func (b *Build) Run(globalConfig *Config, trace JobTrace) (err error) {
 
 	provider.GetFeatures(&b.ExecutorFeatures)
 
-	executor, err = b.retryCreateExecutor(options, provider, b.logger)
+	section := helpers.BuildSection{
+		Name:        string(BuildStagePrepareExecutor),
+		SkipMetrics: !b.JobResponse.Features.TraceSections,
+		Run: func() error {
+			executor, err = b.retryCreateExecutor(options, provider, b.logger)
+			return err
+		},
+	}
+	err = section.Execute(&b.logger)
+
 	if err == nil {
 		err = b.run(ctx, executor)
-		b.waitForTerminal(globalConfig.SessionServer.GetSessionTimeout())
+		if err := b.waitForTerminal(ctx, globalConfig.SessionServer.GetSessionTimeout()); err != nil {
+			b.Log().WithError(err).Debug("Stopped waiting for terminal")
+		}
 	}
+
 	if executor != nil {
 		executor.Finish(err)
 	}
+
 	return err
 }
 
@@ -458,7 +563,10 @@ func (b *Build) String() string {
 
 func (b *Build) GetDefaultVariables() JobVariables {
 	return JobVariables{
-		{Key: "CI_PROJECT_DIR", Value: b.FullProjectDir(), Public: true, Internal: true, File: false},
+		{Key: "CI_BUILDS_DIR", Value: filepath.FromSlash(b.RootDir), Public: true, Internal: true, File: false},
+		{Key: "CI_PROJECT_DIR", Value: filepath.FromSlash(b.FullProjectDir()), Public: true, Internal: true, File: false},
+		{Key: "CI_CONCURRENT_ID", Value: strconv.Itoa(b.RunnerID), Public: true, Internal: true, File: false},
+		{Key: "CI_CONCURRENT_PROJECT_ID", Value: strconv.Itoa(b.ProjectRunnerID), Public: true, Internal: true, File: false},
 		{Key: "CI_SERVER", Value: "yes", Public: true, Internal: true, File: false},
 	}
 }
@@ -466,6 +574,7 @@ func (b *Build) GetDefaultVariables() JobVariables {
 func (b *Build) GetDefaultFeatureFlagsVariables() JobVariables {
 	return JobVariables{
 		{Key: "FF_K8S_USE_ENTRYPOINT_OVER_COMMAND", Value: "true", Public: true, Internal: true, File: false}, // TODO: Remove in 12.0
+		{Key: FFUseLegacyGitCleanStrategy, Value: "false", Public: true, Internal: true, File: false},         // TODO: Remove in 12.0
 	}
 }
 
@@ -480,32 +589,53 @@ func (b *Build) GetSharedEnvVariable() JobVariable {
 	return env
 }
 
-func (b *Build) GetCITLSVariables() JobVariables {
+func (b *Build) GetTLSVariables(caFile, certFile, keyFile string) JobVariables {
 	variables := JobVariables{}
+
 	if b.TLSCAChain != "" {
-		variables = append(variables, JobVariable{tls.VariableCAFile, b.TLSCAChain, true, true, true})
+		variables = append(variables, JobVariable{
+			Key:      caFile,
+			Value:    b.TLSCAChain,
+			Public:   true,
+			Internal: true,
+			File:     true,
+		})
 	}
+
 	if b.TLSAuthCert != "" && b.TLSAuthKey != "" {
-		variables = append(variables, JobVariable{tls.VariableCertFile, b.TLSAuthCert, true, true, true})
-		variables = append(variables, JobVariable{tls.VariableKeyFile, b.TLSAuthKey, true, true, true})
+		variables = append(variables, JobVariable{
+			Key:      certFile,
+			Value:    b.TLSAuthCert,
+			Public:   true,
+			Internal: true,
+			File:     true,
+		})
+
+		variables = append(variables, JobVariable{
+			Key:      keyFile,
+			Value:    b.TLSAuthKey,
+			Internal: true,
+			File:     true,
+		})
 	}
+
 	return variables
 }
 
+func (b *Build) GetCITLSVariables() JobVariables {
+	return b.GetTLSVariables(tls.VariableCAFile, tls.VariableCertFile, tls.VariableKeyFile)
+}
+
 func (b *Build) GetGitTLSVariables() JobVariables {
-	variables := JobVariables{}
-	if b.TLSCAChain != "" {
-		variables = append(variables, JobVariable{"GIT_SSL_CAINFO", b.TLSCAChain, true, true, true})
-	}
-	if b.TLSAuthCert != "" && b.TLSAuthKey != "" {
-		variables = append(variables, JobVariable{"GIT_SSL_CERT", b.TLSAuthCert, true, true, true})
-		variables = append(variables, JobVariable{"GIT_SSL_KEY", b.TLSAuthKey, true, true, true})
-	}
-	return variables
+	return b.GetTLSVariables("GIT_SSL_CAINFO", "GIT_SSL_CERT", "GIT_SSL_KEY")
 }
 
 func (b *Build) IsSharedEnv() bool {
 	return b.ExecutorFeatures.Shared
+}
+
+func (b *Build) refreshAllVariables() {
+	b.allVariables = nil
 }
 
 func (b *Build) GetAllVariables() JobVariables {
@@ -547,6 +677,8 @@ func (b *Build) GetRemoteURL() string {
 	return fmt.Sprintf("%sgitlab-ci-token:%s@%s/%s.git", splits[0], ciJobToken, splits[1], ciProjectPath)
 }
 
+// GetGitDepth is deprecated and will be removed in 12.0, use build.GitInfo.Depth instead
+// TODO: Remove in 12.0
 func (b *Build) GetGitDepth() string {
 	return b.GetAllVariables().Get("GIT_DEPTH")
 }
@@ -609,9 +741,30 @@ func (b *Build) GetSubmoduleStrategy() SubmoduleStrategy {
 	}
 }
 
+func (b *Build) GetGitCleanFlags() []string {
+	flags := b.GetAllVariables().Get("GIT_CLEAN_FLAGS")
+	if flags == "" {
+		flags = gitCleanFlagsDefault
+	}
+
+	if flags == gitCleanFlagsNone {
+		return []string{}
+	}
+
+	return strings.Fields(flags)
+}
+
 func (b *Build) IsDebugTraceEnabled() bool {
 	trace, err := strconv.ParseBool(b.GetAllVariables().Get("CI_DEBUG_TRACE"))
 	if err != nil {
+		trace = false
+	}
+
+	if b.Runner.DebugTraceDisabled {
+		if trace == true {
+			b.logger.Warningln("CI_DEBUG_TRACE usage is disabled on this Runner")
+		}
+
 		return false
 	}
 
@@ -658,14 +811,24 @@ func (b *Build) Duration() time.Duration {
 	return time.Since(b.createdAt)
 }
 
-func NewBuild(jobData JobResponse, runnerConfig *RunnerConfig, systemInterrupt chan os.Signal, executorData ExecutorData) *Build {
+func (b *Build) RefspecsAvailable() bool {
+	return len(b.GitInfo.Refspecs) > 0
+}
+
+func NewBuild(jobData JobResponse, runnerConfig *RunnerConfig, systemInterrupt chan os.Signal, executorData ExecutorData) (*Build, error) {
+	// Attempt to perform a deep copy of the RunnerConfig
+	runnerConfigCopy, err := runnerConfig.DeepCopy()
+	if err != nil {
+		return nil, fmt.Errorf("deep copy of runner config failed: %v", err)
+	}
+
 	return &Build{
 		JobResponse:     jobData,
-		Runner:          runnerConfig,
+		Runner:          runnerConfigCopy,
 		SystemInterrupt: systemInterrupt,
 		ExecutorData:    executorData,
 		createdAt:       time.Now(),
-	}
+	}, nil
 }
 
 func (b *Build) IsFeatureFlagOn(name string) bool {
@@ -686,4 +849,13 @@ func (b *Build) IsFeatureFlagOn(name string) bool {
 	}
 
 	return on
+}
+
+func (b *Build) IsLFSSmudgeDisabled() bool {
+	disabled, err := strconv.ParseBool(b.GetAllVariables().Get("GIT_LFS_SKIP_SMUDGE"))
+	if err != nil {
+		return false
+	}
+
+	return disabled
 }

@@ -9,6 +9,10 @@ build environment for every build. This executor supports all systems that can
 be run on VirtualBox. The only requirement is that the virtual machine exposes
 its SSH server and provide a bash-compatible shell.
 
+NOTE: **Note:**
+GitLab Runner will use the `git lfs` command if [Git LFS](https://git-lfs.github.com) is installed on the virtual machine.
+Ensure Git LFS is up-to-date on any virtual machine where GitLab Runner will run using VirtualBox executor.
+
 ## Overview
 
 The project's source code is checked out to: `~/builds/<namespace>/<project-name>`.
@@ -18,9 +22,13 @@ Where:
 - `<namespace>` is the namespace where the project is stored on GitLab
 - `<project-name>` is the name of the project as it is stored on GitLab
 
-To overwrite the `~/builds` directory, specify the `builds_dir` option under
+To override the `~/builds` directory, specify the `builds_dir` option under
 the `[[runners]]` section in
 [`config.toml`](../configuration/advanced-configuration.md).
+
+You can also define [custom build
+directories](https://docs.gitlab.com/ce/ci/yaml/README.html#custom-build-directories) per job using the
+`GIT_CLONE_PATH`.
 
 ## Create a new base virtual machine
 
@@ -34,7 +42,7 @@ the `[[runners]]` section in
 1. If Windows VM, see [Checklist for Windows VMs](#checklist-for-windows-vms)
 1. Install the OpenSSH server
 1. Install all other dependencies required by your build
-1. If you want to upload job artifacts, install `gitlab-runner` inside the VM 
+1. If you want to upload job artifacts, install `gitlab-runner` inside the VM
 1. Log out and shutdown the virtual machine
 
 It's completely fine to use automation tools like Vagrant to provision the
@@ -66,6 +74,7 @@ When a new build is started:
 1. The Runner stops or shutdowns the virtual machine
 
 ## Checklist for Windows VMs
+
 * Install [Cygwin]
 * Install sshd and git from Cygwin (do not use *Git For Windows*, you will get lots of path issues!)
 * Install Git LFS

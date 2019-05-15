@@ -11,7 +11,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +28,7 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/executors"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	docker_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker/helperimage"
 )
 
 const (
@@ -233,27 +233,6 @@ func (e *executor) expandAndGetDockerImage(imageName string, allowedImages []str
 	return image, nil
 }
 
-func (e *executor) getArchitecture() string {
-	architecture := e.info.Architecture
-	switch architecture {
-	case "armv6l", "armv7l", "aarch64":
-		architecture = "arm"
-	case "amd64":
-		architecture = "x86_64"
-	}
-
-	if architecture != "" {
-		return architecture
-	}
-
-	switch runtime.GOARCH {
-	case "amd64":
-		return "x86_64"
-	default:
-		return runtime.GOARCH
-	}
-}
-
 func (e *executor) loadPrebuiltImage(path, ref, tag string) (*types.ImageInspect, error) {
 	file, err := os.OpenFile(path, os.O_RDONLY, 0600)
 	if err != nil {
@@ -291,12 +270,16 @@ func (e *executor) getPrebuiltImage() (*types.ImageInspect, error) {
 		imageNameFromConfig = common.AppVersion.Variables().ExpandValue(imageNameFromConfig)
 
 		e.Debugln("Pull configured helper_image for predefined container instead of import bundled image", imageNameFromConfig, "...")
+		if !e.Build.IsFeatureFlagOn(common.FFDockerHelperImageV2) {
+			e.Warningln("DEPRECATION: With gitlab-runner 12.0 we will change some tools inside the helper image, please make sure your image is compliant with the new API. https://gitlab.com/gitlab-org/gitlab-runner/issues/4013")
+		}
+
 		return e.getDockerImage(imageNameFromConfig)
 	}
 
-	architecture := e.getArchitecture()
-	if architecture == "" {
-		return nil, errors.New("unsupported docker architecture")
+	helperImageInfo, err := helperimage.GetInfo(e.info)
+	if err != nil {
+		return nil, err
 	}
 
 	revision := "latest"
@@ -304,8 +287,12 @@ func (e *executor) getPrebuiltImage() (*types.ImageInspect, error) {
 		revision = common.REVISION
 	}
 
+	tag, err := helperImageInfo.Tag(revision)
+	if err != nil {
+		return nil, err
+	}
+
 	// Try to find already loaded prebuilt image
-	tag := fmt.Sprintf("%s-%s", architecture, revision)
 	imageName := fmt.Sprintf("%s:%s", prebuiltImageName, tag)
 	e.Debugln("Looking for prebuilt image", imageName, "...")
 	image, _, err := e.client.ImageInspectWithRaw(e.Context, imageName)
@@ -314,6 +301,22 @@ func (e *executor) getPrebuiltImage() (*types.ImageInspect, error) {
 	}
 
 	// Try to load prebuilt image from local filesystem
+	loadedImage := e.getLocalDockerImage(helperImageInfo, tag)
+	if loadedImage != nil {
+		return loadedImage, nil
+	}
+
+	// Fallback to getting image from DockerHub
+	e.Debugln("Loading image from registry:", imageName)
+	return e.getDockerImage(imageName)
+}
+
+func (e *executor) getLocalDockerImage(helperImageInfo helperimage.Info, tag string) *types.ImageInspect {
+	if !helperImageInfo.IsSupportingLocalImport() {
+		return nil
+	}
+
+	architecture := helperImageInfo.Architecture()
 	for _, dockerPrebuiltImagesPath := range DockerPrebuiltImagesPaths {
 		dockerPrebuiltImageFilePath := filepath.Join(dockerPrebuiltImagesPath, "prebuilt-"+architecture+prebuiltImageExtension)
 		image, err := e.loadPrebuiltImage(dockerPrebuiltImageFilePath, prebuiltImageName, tag)
@@ -322,12 +325,10 @@ func (e *executor) getPrebuiltImage() (*types.ImageInspect, error) {
 			continue
 		}
 
-		return image, err
+		return image
 	}
 
-	// Fallback to getting image from DockerHub
-	e.Debugln("Loading image from registry:", imageName)
-	return e.getDockerImage(imageName)
+	return nil
 }
 
 func (e *executor) getBuildImage() (*types.ImageInspect, error) {
@@ -380,17 +381,21 @@ func (e *executor) getLabels(containerType string, otherLabels ...string) map[st
 
 // createCacheVolume returns the id of the created container, or an error
 func (e *executor) createCacheVolume(containerName, containerPath string) (string, error) {
-	// get busybox image
 	cacheImage, err := e.getPrebuiltImage()
 	if err != nil {
 		return "", err
 	}
 
+	cmd := []string{"gitlab-runner-helper", "cache-init", containerPath}
+	// TODO: Remove in 12.0 to start using the command from `gitlab-runner-helper`
+	if e.checkOutdatedHelperImage() {
+		e.Debugln(common.FFDockerHelperImageV2, "is not set, falling back to old command")
+		cmd = []string{"gitlab-runner-cache", containerPath}
+	}
+
 	config := &container.Config{
 		Image: cacheImage.ID,
-		Cmd: []string{
-			"gitlab-runner-cache", containerPath,
-		},
+		Cmd:   cmd,
 		Volumes: map[string]struct{}{
 			containerPath: {},
 		},
@@ -502,12 +507,9 @@ func fakeContainer(id string, names ...string) *types.Container {
 
 func (e *executor) createBuildVolume() error {
 	// Cache Git sources:
-	// take path of the projects directory,
-	// because we use `rm -rf` which could remove the mounted volume
-	parentDir := path.Dir(e.Build.FullProjectDir())
-
-	if !path.IsAbs(parentDir) && parentDir != "/" {
-		return errors.New("build directory needs to be absolute and non-root path")
+	// use a `BuildsDir`
+	if !path.IsAbs(e.Build.RootDir) || e.Build.RootDir == "/" {
+		return common.MakeBuildError("build directory needs to be absolute and non-root path")
 	}
 
 	if e.isHostMountedVolume(e.Build.RootDir, e.Config.Docker.Volumes...) {
@@ -516,11 +518,11 @@ func (e *executor) createBuildVolume() error {
 
 	if e.Build.GetGitStrategy() == common.GitFetch && !e.Config.Docker.DisableCache {
 		// create persistent cache container
-		return e.addVolume(parentDir)
+		return e.addVolume(e.Build.RootDir)
 	}
 
 	// create temporary cache container
-	id, err := e.createCacheVolume("", parentDir)
+	id, err := e.createCacheVolume("", e.Build.RootDir)
 	if err != nil {
 		return err
 	}
@@ -690,7 +692,10 @@ func (e *executor) createService(serviceIndex int, service, version, image strin
 	config.Entrypoint = e.overwriteEntrypoint(&serviceDefinition)
 
 	hostConfig := &container.HostConfig{
+		DNS:           e.Config.Docker.DNS,
+		DNSSearch:     e.Config.Docker.DNSSearch,
 		RestartPolicy: neverRestartPolicy,
+		ExtraHosts:    e.Config.Docker.ExtraHosts,
 		Privileged:    e.Config.Docker.Privileged,
 		NetworkMode:   container.NetworkMode(e.Config.Docker.NetworkMode),
 		Binds:         e.binds,
@@ -1152,7 +1157,7 @@ func (e *executor) overwriteEntrypoint(image *common.Image) []string {
 }
 
 func (e *executor) connectDocker() (err error) {
-	client, err := docker_helpers.New(e.Config.Docker.DockerCredentials, DockerAPIVersion)
+	client, err := docker_helpers.New(e.Config.Docker.DockerCredentials, "")
 	if err != nil {
 		return err
 	}
@@ -1296,8 +1301,15 @@ func (e *executor) runServiceHealthCheckContainer(service *types.Container, time
 
 	containerName := service.Names[0] + "-wait-for-service"
 
+	cmd := []string{"gitlab-runner-helper", "health-check"}
+	// TODO: Remove in 12.0 to start using the command from `gitlab-runner-helper`
+	if e.checkOutdatedHelperImage() {
+		e.Debugln(common.FFDockerHelperImageV2, "is not set, falling back to old command")
+		cmd = []string{"gitlab-runner-service"}
+	}
+
 	config := &container.Config{
-		Cmd:    []string{"gitlab-runner-service"},
+		Cmd:    cmd,
 		Image:  waitImage.ID,
 		Labels: e.getLabels("wait", "wait="+service.ID),
 	}
@@ -1395,4 +1407,8 @@ func (e *executor) readContainerLogs(containerID string) string {
 	stdcopy.StdCopy(&containerBuffer, &containerBuffer, hijacked)
 	containerLog := containerBuffer.String()
 	return strings.TrimSpace(containerLog)
+}
+
+func (e *executor) checkOutdatedHelperImage() bool {
+	return !e.Build.IsFeatureFlagOn(common.FFDockerHelperImageV2) && e.Config.Docker.HelperImage != ""
 }

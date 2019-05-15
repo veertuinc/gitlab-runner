@@ -25,9 +25,10 @@ _docker() {
 build() {
     echo -e "\033[1mBuilding image: \033[32m${1}\033[0m"
     _docker build \
-        --cache-from "${3}" \
+        --no-cache \
         --build-arg DOCKER_MACHINE_VERSION="${DOCKER_MACHINE_VERSION}" \
         --build-arg DUMB_INIT_VERSION="${DUMB_INIT_VERSION}" \
+        --build-arg GIT_LFS_VERSION="${GIT_LFS_VERSION}" \
         -t "${1}" \
         "${2}"
 }
@@ -91,8 +92,9 @@ logout() {
     _docker logout "${1}"
 }
 
-echo "${DOCKER_MACHINE_CHECKSUM}  /usr/bin/docker-machine" >> dockerfiles/checksums
+echo "${DOCKER_MACHINE_CHECKSUM}  /usr/bin/docker-machine" > dockerfiles/checksums
 echo "${DUMB_INIT_CHECKSUM}  /usr/bin/dumb-init" >> dockerfiles/checksums
+echo "${GIT_LFS_CHECKSUM}  /usr/bin/git-lfs" >> dockerfiles/checksums
 cat dockerfiles/checksums
 
 cp out/deb/gitlab-runner_amd64.deb dockerfiles/ubuntu/
@@ -100,8 +102,8 @@ cp dockerfiles/checksums dockerfiles/ubuntu
 cp out/binaries/gitlab-runner-linux-amd64 dockerfiles/alpine
 cp dockerfiles/checksums dockerfiles/alpine
 
-build "gitlab/gitlab-runner:ubuntu-${ref_tag}" dockerfiles/ubuntu gitlab/gitlab-runner:ubuntu
-build "gitlab/gitlab-runner:alpine-${ref_tag}" dockerfiles/alpine gitlab/gitlab-runner:alpine
+build "gitlab/gitlab-runner:ubuntu-${ref_tag}" dockerfiles/ubuntu
+build "gitlab/gitlab-runner:alpine-${ref_tag}" dockerfiles/alpine
 
 tag "gitlab/gitlab-runner:ubuntu-${ref_tag}" "gitlab/gitlab-runner:${ref_tag}"
 

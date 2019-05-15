@@ -3,7 +3,6 @@ package helpers
 import (
 	"archive/zip"
 	"bytes"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,7 +46,7 @@ func TestCacheExtractorValidArchive(t *testing.T) {
 func TestCacheExtractorForInvalidArchive(t *testing.T) {
 	removeHook := helpers.MakeFatalToPanic()
 	defer removeHook()
-	ioutil.WriteFile(cacheExtractorArchive, nil, 0600)
+	writeTestFile(t, cacheExtractorArchive)
 	defer os.Remove(cacheExtractorArchive)
 
 	cmd := CacheExtractorCommand{
@@ -135,7 +134,7 @@ func TestCacheExtractorRemoteServerTimedOut(t *testing.T) {
 	assert.Panics(t, func() {
 		cmd.Execute(nil)
 	})
-	assert.Contains(t, buf.String(), "net/http: request canceled (Client.Timeout")
+	assert.Contains(t, buf.String(), "Client.Timeout")
 
 	_, err := os.Stat(cacheExtractorTestArchivedFile)
 	assert.Error(t, err)

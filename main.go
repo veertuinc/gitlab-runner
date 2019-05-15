@@ -22,10 +22,8 @@ import (
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/shell"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/ssh"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/virtualbox"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/anka"
 	_ "gitlab.com/gitlab-org/gitlab-runner/shells"
 )
-
 
 func main() {
 	defer func() {
@@ -54,6 +52,7 @@ func main() {
 		logrus.Fatalln("Command", command, "not found.")
 	}
 
+	cli_helpers.InitCli()
 	cli_helpers.LogRuntimePlatform(app)
 	cli_helpers.SetupCPUProfile(app)
 	cli_helpers.FixHOME(app)

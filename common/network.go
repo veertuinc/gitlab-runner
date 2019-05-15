@@ -25,6 +25,7 @@ const (
 	NoneFailure         JobFailureReason = ""
 	ScriptFailure       JobFailureReason = "script_failure"
 	RunnerSystemFailure JobFailureReason = "runner_system_failure"
+	JobExecutionTimeout JobFailureReason = "job_execution_timeout"
 )
 
 const (
@@ -57,8 +58,11 @@ type FeaturesInfo struct {
 	Cache                   bool `json:"cache"`
 	Shared                  bool `json:"shared"`
 	UploadMultipleArtifacts bool `json:"upload_multiple_artifacts"`
+	UploadRawArtifacts      bool `json:"upload_raw_artifacts"`
 	Session                 bool `json:"session"`
 	Terminal                bool `json:"terminal"`
+	Refspecs                bool `json:"refspecs"`
+	Masking                 bool `json:"masking"`
 }
 
 type RegisterRunnerParameters struct {
@@ -132,6 +136,8 @@ type GitInfo struct {
 	Sha       string         `json:"sha"`
 	BeforeSha string         `json:"before_sha"`
 	RefType   GitInfoRefType `json:"ref_type"`
+	Refspecs  []string       `json:"refspecs"`
+	Depth     int            `json:"depth"`
 }
 
 type RunnerInfo struct {
@@ -207,6 +213,7 @@ const (
 	ArtifactFormatDefault ArtifactFormat = ""
 	ArtifactFormatZip     ArtifactFormat = "zip"
 	ArtifactFormatGzip    ArtifactFormat = "gzip"
+	ArtifactFormatRaw     ArtifactFormat = "raw"
 )
 
 type Artifact struct {
@@ -353,8 +360,8 @@ type JobTrace interface {
 	Fail(err error, failureReason JobFailureReason)
 	SetCancelFunc(cancelFunc context.CancelFunc)
 	SetFailuresCollector(fc FailuresCollector)
+	SetMasked(values []string)
 	IsStdout() bool
-	IsJobSuccesFull() bool
 }
 
 type JobTracePatch interface {

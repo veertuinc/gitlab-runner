@@ -1,9 +1,210 @@
-v 11.4.2 (2018-10-26)
-This release fixes improperly released 11.4.1 relelase.
+v11.10.0 (2019-04-22)
 
-v 11.4.1 (2018-10-26)
-This release is created to rebuild official Docker images of GitLab Runner
-(including helper images) with new git version.
+**Deprecations:**
+
+All deprecations, with a detailed description, are listed at
+https://about.gitlab.com/2019/04/22/gitlab-11-10-released/#release-deprecations
+
+1. With version 11.10 we're deprecating the feature flag
+[FF_USE_LEGACY_GIT_CLEAN_STRATEGY](https://docs.gitlab.com/runner/configuration/feature-flags.html#available-feature-flags).
+
+**Release changes:**
+
+- Fix git lfs not getting submodule objects !1298
+- Refactor slightly ./shells/shellstest !1237
+- Fix CI_PROJECT_DIR handling !1241
+- Log time took preparing executors !1196
+- Restore availability of pprof in the debug server !1242
+- Move variables defining .gopath to a shared place for all Windows jobs !1245
+- Docs: clarify runner api registration process !1244
+- add lfs support to ubuntu docker runner !1192
+- Add information about Kaniko for Kubernetes executor !1161
+- Enable the docs CI job !1251
+- Rename test to be more descriptive !1249
+- Create the reviewers guide base document !1233
+- Update codeclimate version !1252
+- Add retryable err type !1215
+- Get windows tag for helper image !1239
+- Remove unnecessary log alias for logrus inport !1256
+- Make gitlab-runner:alpine more specific, Add link to Dockerfiles sources,... !1259
+- Docs: Fix broken anchor in docker.md !1264
+- Replace the current k8s manual installation with the Helm chart !1250
+- Create cache for `/builds` dir !1265
+- Expose `CI_CONCURRENT_(PROJECT)_ID` !1268
+- DOC: note on case-sensitive proxy variables and the need for upper and lower case versions !1248
+- Add new links checker !1271
+- Update log messages for listen & session address !1275
+- Use delayed variable expansion for error check in cmd !1260
+- Unexport common.RepoRemoteURL !1276
+- Update index.md - added sudo when registering the service on macos (without... !1272
+- Add new lines around lists for renderer !1278
+- Fix color output on Windows !1208
+- Make it again possible to disable Git LFS pull !1273
+- Add cross references to Runners API !1284
+- Improve support for `git clean` !1281
+- Make Kubernetes executor to clone into /builds !1282
+- Add option to specify clone path !1267
+- Allow to disable debug tracing !1286
+- Add Route Map for runner docs !1285
+- Do not print remote addition failure message !1287
+- Add true to the run-untagged subcommand !1288
+- Cleanup k8s cleanup test !1280
+- Change helper image to servercore !1290
+- Add note about git-lfs !1294
+
+v11.9.0 (2019-03-22)
+
+**Deprecations:**
+
+All deprecations, with a detailed description, are listed at
+https://about.gitlab.com/2019/03/22/gitlab-11-9-released/#release-deprecations
+
+1. With version 11.9 we're deprecating the support for Docker Executor on CentOS 6
+
+2. With version 11.9 we've implemented a new method for cloning/fetching repositories.
+   Currently GitLab Runner still respects the old configuration sent from GitLab, but with
+   12.0 old methods will be removed and GitLab Runner will require at least GitLab 11.9
+   to work properly.
+
+3. With version 11.0 we've changed how the metrics server is configured for GitLab Runner.
+   `metrics_server` was replaced with `listen_address`. With version 12.0 the old configuration
+   option will be removed.
+
+4. With version 11.3 we've implemented support for different remote cache providers, which
+   required a change in how the cache is configured. With version 12.0 support for old
+   configuration structure will be removed.
+
+5. With version 11.4 we've fixed the way how `entrypoint:` and `command:` options of
+   Extended Docker configuration (https://docs.gitlab.com/ee/ci/docker/using_docker_images.html#extended-docker-configuration-options)
+   are being handled by Kubernetes Executor. The previous implementation was wrong and
+   was making the configuration unusable in most cases. However some users could relay
+   on this wrong behavior. Because of that we've added a feature flag `FF_K8S_USE_ENTRYPOINT_OVER_COMMAND`
+   which, when set to `false`, could bring back the old behavior. With version 12.0 the
+   feature flag as well as the old behavior will be removed.
+
+6. Some Linux distributions for which GitLab Runner is providing DEB and RPM packages
+   have reached their End of Life. With version 12.0 we'll remove support for all
+   EoL distributions at the moment of 12.0 release.
+
+7. With version 11.9 we've prepared a go-based replacement for Runner Helper commands
+   executed within Docker executor inside of the Helper Image. With version 12.0
+   we will remove support for old commands basing on bash scripts. This change will
+   affect only the users that are configuring their custom Helper Image (the image
+   will require an update to align with new requirements)
+
+**Release changes:**
+
+- fix(parallels): use the newer sntp command to time sync !1145
+- Update docker API verion !1187
+- Update alpine images to alpine 3.9 !1197
+- Fix a typo in the description of the configuration option !1205
+- Document creation of Docker volumes passed with docker exec --docker-volumes !1120
+- Correct spelling of timed out in literals !1121
+- Fix spelling and other minor improvements !1207
+- Migrate service wait script to Go !1195
+- Docs update: Run runner on kubernetes !1185
+- Increase test timeout for shell executor !1214
+- Follow style convention for documentation !1213
+- Add test for runner build limit !1186
+- Migrate cache bash script to Go for helper image !1201
+- Document OS deprecations for 12.0 !1210
+- Fix anchors in Runner documentation !1216
+- Add `build_simple` to `help` make target !1212
+- Split `make docker` for GitLab Runner Helper !1188
+- Add windows Dockerfiles for gitlab-runner-helper !1167
+- Make Runner tests working on Windows with our CI Pipeline !1219
+- Fetch code from provided refspecs !1203
+- Check either ntpdate command exists or not before trying to execute it !1189
+- Deprecate helper image commands !1218
+- Add script for building windows helper image !1178
+- Fix ShellWriter.RmFile(string) for cmd shell !1226
+- Mask log trace !1204
+- Add note about pod annotations for more clarity !1220
+- Resolve memory allocation failure when cloning repos with LFS objects bigger than available RAM !1200
+- Release also on gitlab releases page !1232
+- Restore availability of pprof in the debug server !1242
+
+v11.8.0 (2019-02-22)
+- Kubernetes executor: add support for Node tolerations !941
+- Update logrus version to v1.3.0 !1137
+- Docs - Clarify Docker Runner Documentation !1097
+- Update github.com/stretchr/testify dependency !1141
+- Update LICENSE file !1132
+- Update example of cache config !1140
+- Update documentation for autoscaling on AWS !1142
+- Remove unnecessary dep constraint !1147
+- readme: make author block render md !999
+- Corrected note when using a config container to mount custom data volume. !1126
+- Fix typo in documentation of k8s executor. !1118
+- Make new runner tokens compatible with docker-machine executor !1144
+- docs: Use `sudo tee` for apt pinning. !1047
+- docs: fix indendation !1081
+- Updated hint on running Windows 10 shell as administrator !1136
+- Fixed typo in logged information !1074
+- Update registry_and_cache_servers.md !1098
+- Update golang.org/x/sys !1149
+- Refactor frontpage for grammar and style !1151
+- Update github.com/Azure/go-ansiterm dependency !1152
+- Testing on windows with vagrant !1003
+- Add fix for race condition in windows cache extraction !863
+- Consolidate docker API version definition !1154
+- Prevent Executors from modifying Runner configuration !1134
+- Update ExecutorProvider interface signature !1159
+- Update logging for processing multi runner !1160
+- Update kubernetes.md - fix typo for bearer_token !1162
+- Update github.com/prometheus/client_golang dep !1150
+- Remove ContainerWait from docker client !1155
+- Update advanced-configuration.md: Fix blockquote not reaching the entire note !1163
+- Fix docs review app URL !1169
+- docs: Add a helpful command to reload config !1106
+- Update AWS autoscale documentation !1166
+- Refactor dockerfiles !1068
+- Add link to AWS driver about default values !1171
+- Add support for fedora/29 packages !1082
+- Add windows server 2019 as default for windows development !1165
+- Docs: Fix bad anchor links in runner docs !1177
+- Improve documentation concerning proxy setting in the case of docker-in-docker-executor !1090
+- Add few fixes to Release Checklist template !1135
+- Set table to not display under TOC !1168
+- Update Docker client SDK !1148
+- docs: add GitLab Runner Helm Chart link !945
+
+v11.7.0 (2019-01-22)
+- Docs: Cleaning up the executors doc !1114
+- Update to testify v1.2.2 !1119
+- Fix a typo in VirtualBox Executor docs !1124
+- Use the term `macOS` instead of `OS X` or `OSX` !1125
+- Update github.com/sirupsen/logrus dependency !1129
+- Docs update release checklist !1131
+- Kill session when build is cancelled !1058
+- Fix path separator for CI_PROJECT_DIR in Windows !1128
+- Make new runner tokens compatible with docker-machine executor !1144
+
+v11.6.0 (2018-12-22)
+- Make compatibility chart super clear and remove old entries !1078
+- Add slack notification option for 'dep status' check failures !1072
+- Docker executor: use DNS, DNSSearch and ExtraHosts settings from configuration !1075
+- Fix some invalid links in documentation !1085
+- Fix SC2155 where shellcheck warns about errors !1063
+- Change parallel tests configuration ENV names !1095
+- Improve documentation of IAM instance profile usage for caching !1071
+- Remove duplicate builds_dir definition from docs !952
+- Make k8s object names DNS-1123 compatible !1105
+- Docs: working example of helper image with CI_RUNNER_REVISION !1032
+- Docs: omit ImagePullPolicy !1107
+- Disable the docs lint job for now !1112
+- Docs: comment about how listen_address works !1076
+- Fix the indented bullet points of the features list in documentation !1093
+- Add note on the branch naming for documentation changes !1113
+- Docs: add session-server link to advanced list in index !1108
+
+v11.5.0 (2018-11-22)
+- Support RAW artifacts !1057
+- Docs: changing secret variable to just variable in advanced-configuration.md !1055
+- Docs: Fixing some bad links in Runner docs. !1056
+- Docs: Updating Docs links from /ce to /ee !1061
+- Docs: Fixing Substrakt Health URL !1064
+- Add failure reason for execution timeout !1051
 
 v 11.4.0 (2018-10-22)
 - Do not create apk cache !1017

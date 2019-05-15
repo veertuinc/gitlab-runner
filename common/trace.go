@@ -23,6 +23,9 @@ func (s *Trace) Write(p []byte) (n int, err error) {
 	return s.Writer.Write(p)
 }
 
+func (s *Trace) SetMasked(values []string) {
+}
+
 func (s *Trace) Success() {
 }
 
@@ -36,10 +39,5 @@ func (s *Trace) SetCancelFunc(cancelFunc context.CancelFunc) {
 func (s *Trace) SetFailuresCollector(fc FailuresCollector) {}
 
 func (s *Trace) IsStdout() bool {
-	return true
-}
-
-func (s *Trace) IsJobSuccesFull() bool {
-	
 	return true
 }

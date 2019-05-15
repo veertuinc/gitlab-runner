@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
-	"gitlab.com/gitlab-org/gitlab-runner/executors/docker"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
 )
@@ -44,6 +43,53 @@ func TestDockerCommandSuccessRun(t *testing.T) {
 
 	err = build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	assert.NoError(t, err)
+}
+
+func TestDockerCommandUsingCustomClonePath(t *testing.T) {
+	if helpers.SkipIntegrationTests(t, "docker", "info") {
+		return
+	}
+
+	jobResponse, err := common.GetRemoteBuildResponse(
+		"ls -al $CI_BUILDS_DIR/go/src/gitlab.com/gitlab-org/repo")
+	require.NoError(t, err)
+
+	tests := map[string]struct {
+		clonePath         string
+		expectedErrorType interface{}
+	}{
+		"uses custom clone path": {
+			clonePath:         "$CI_BUILDS_DIR/go/src/gitlab.com/gitlab-org/repo",
+			expectedErrorType: nil,
+		},
+		"path has to be within CI_BUILDS_DIR": {
+			clonePath:         "/unknown/go/src/gitlab.com/gitlab-org/repo",
+			expectedErrorType: &common.BuildError{},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			build := &common.Build{
+				JobResponse: jobResponse,
+				Runner: &common.RunnerConfig{
+					RunnerSettings: common.RunnerSettings{
+						Executor: "docker",
+						Docker: &common.DockerConfig{
+							Image:      common.TestAlpineImage,
+							PullPolicy: common.PullPolicyIfNotPresent,
+						},
+						Environment: []string{
+							"GIT_CLONE_PATH=" + test.clonePath,
+						},
+					},
+				},
+			}
+
+			err = build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+			assert.IsType(t, test.expectedErrorType, err)
+		})
+	}
 }
 
 func TestDockerCommandNoRootImage(t *testing.T) {
@@ -210,8 +256,7 @@ func TestDockerCommandDisableEntrypointOverwrite(t *testing.T) {
 }
 
 func isDockerOlderThan17_07(t *testing.T) bool {
-	client, err := docker_helpers.New(
-		docker_helpers.DockerCredentials{}, docker.DockerAPIVersion)
+	client, err := docker_helpers.New(docker_helpers.DockerCredentials{}, "")
 	require.NoError(t, err, "should be able to connect to docker")
 
 	types, err := client.Info(context.Background())
@@ -412,7 +457,7 @@ func TestDockerCommandOutput(t *testing.T) {
 	err = build.Run(&common.Config{}, &common.Trace{Writer: &buffer})
 	assert.NoError(t, err)
 
-	re, err := regexp.Compile("(?m)^Cloning into '/builds/gitlab-org/gitlab-test'...")
+	re, err := regexp.Compile("(?m)^Initialized empty Git repository in /builds/gitlab-org/ci-cd/tests/gitlab-test/.git/")
 	assert.NoError(t, err)
 	assert.Regexp(t, re, buffer.String())
 }
@@ -736,7 +781,7 @@ func getDockerCredentials(id string) (credentials docker_helpers.DockerCredentia
 }
 
 func waitForDocker(credentials docker_helpers.DockerCredentials) error {
-	client, err := docker_helpers.New(credentials, docker.DockerAPIVersion)
+	client, err := docker_helpers.New(credentials, "")
 	if err != nil {
 		return err
 	}
@@ -900,7 +945,7 @@ func TestDockerCommandWithBrokenGitSSLCAInfo(t *testing.T) {
 	err = build.Run(&common.Config{}, &common.Trace{Writer: &buffer})
 	assert.Error(t, err)
 	out := buffer.String()
-	assert.Contains(t, out, "Cloning repository")
+	assert.Contains(t, out, "Created fresh repository")
 	assert.NotContains(t, out, "Updating/initializing submodules")
 }
 
@@ -932,7 +977,7 @@ func TestDockerCommandWithGitSSLCAInfo(t *testing.T) {
 	err = build.Run(&common.Config{}, &common.Trace{Writer: &buffer})
 	assert.NoError(t, err)
 	out := buffer.String()
-	assert.Contains(t, out, "Cloning repository")
+	assert.Contains(t, out, "Created fresh repository")
 	assert.Contains(t, out, "Updating/initializing submodules")
 }
 

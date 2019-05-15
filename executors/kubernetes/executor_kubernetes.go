@@ -20,12 +20,16 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/dns"
 	terminalsession "gitlab.com/gitlab-org/gitlab-runner/session/terminal"
 )
 
 var (
 	executorOptions = executors.ExecutorOptions{
-		SharedBuildsDir: false,
+		DefaultCustomBuildsDirEnabled: true,
+		DefaultBuildsDir:              "/builds",
+		DefaultCacheDir:               "/cache",
+		SharedBuildsDir:               false,
 		Shell: common.ShellScriptInfo{
 			Shell:         "bash",
 			Type:          common.NormalShell,
@@ -252,12 +256,9 @@ func (s *executor) getCommandsAndArgsV2(imageDefinition common.Image, command ..
 }
 
 func (s *executor) getVolumeMounts() (mounts []api.VolumeMount) {
-	path := strings.Split(s.Build.BuildDir, "/")
-	path = path[:len(path)-1]
-
 	mounts = append(mounts, api.VolumeMount{
 		Name:      "repo",
-		MountPath: strings.Join(path, "/"),
+		MountPath: s.Build.RootDir,
 	})
 
 	for _, mount := range s.Config.Kubernetes.Volumes.HostPaths {
@@ -393,6 +394,10 @@ type dockerConfigEntry struct {
 	Username, Password string
 }
 
+func (s *executor) projectUniqueName() string {
+	return dns.MakeRFC1123Compatible(s.Build.ProjectUniqueName())
+}
+
 func (s *executor) setupCredentials() error {
 	authConfigs := make(map[string]dockerConfigEntry)
 
@@ -417,7 +422,7 @@ func (s *executor) setupCredentials() error {
 	}
 
 	secret := api.Secret{}
-	secret.GenerateName = s.Build.ProjectUniqueName()
+	secret.GenerateName = s.projectUniqueName()
 	secret.Namespace = s.configurationOverwrites.namespace
 	secret.Type = api.SecretTypeDockercfg
 	secret.Data = map[string][]byte{}
@@ -461,7 +466,7 @@ func (s *executor) setupBuildPod() error {
 
 	pod, err := s.kubeClient.CoreV1().Pods(s.configurationOverwrites.namespace).Create(&api.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: s.Build.ProjectUniqueName(),
+			GenerateName: s.projectUniqueName(),
 			Namespace:    s.configurationOverwrites.namespace,
 			Labels:       labels,
 			Annotations:  annotations,
@@ -471,6 +476,7 @@ func (s *executor) setupBuildPod() error {
 			ServiceAccountName: s.configurationOverwrites.serviceAccount,
 			RestartPolicy:      api.RestartPolicyNever,
 			NodeSelector:       s.Config.Kubernetes.NodeSelector,
+			Tolerations:        s.Config.Kubernetes.GetNodeTolerations(),
 			Containers: append([]api.Container{
 				// TODO use the build and helper template here
 				s.buildContainer("build", buildImage, s.options.Image, s.buildRequests, s.buildLimits, s.BuildShell.DockerCommand...),

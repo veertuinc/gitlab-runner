@@ -1,3 +1,7 @@
+---
+table_display_block: true
+---
+
 # Advanced configuration
 
 GitLab Runner configuration uses the [TOML][] format.
@@ -46,15 +50,15 @@ Consider the following example.
 If one would set `check_interval = 10`, and there were 2 workers in total (`runner-1` and `runner-2`),
 a subsequent request would be made each 10 seconds. The loop would look like:
 
-1. Get `check_interval` value (`10s`)
-1. Get list of workers (`runner-1`, `runner-2`)
-1. Calculate the sleep interval (`10s / 2 = 5s`)
+1. Get `check_interval` value (`10s`).
+1. Get list of workers (`runner-1`, `runner-2`).
+1. Calculate the sleep interval (`10s / 2 = 5s`).
 1. Start an infinite loop:
-  1. Request a job for `runner-1`
-  1. Sleep for `5s`
-  1. Request a job for `runner-2`
-  1. Sleep for `5s`
-  1. Repeat
+    1. Request a job for `runner-1`.
+    1. Sleep for `5s`.
+    1. Request a job for `runner-2`.
+    1. Sleep for `5s`.
+    1. Repeat.
 
 So, a request from the Runner's process is made each 5s. If `runner-1` and `runner-2` are connected to the same
 GitLab instance, it means that the request to this GitLab instance will receive a new request from this Runner
@@ -65,10 +69,10 @@ be repeated after all requests for the other workers + their sleeps are called.
 
 ## The `[session_server]` section
 
-The section `[session_server]` is a system runner level configuration, so it should be specified at the root level, 
-not per executor i.e. it should be outside `[[runners]]` section. The session server allows the user to interact 
+The section `[session_server]` is a system runner level configuration, so it should be specified at the root level,
+not per executor i.e. it should be outside `[[runners]]` section. The session server allows the user to interact
 with jobs that the Runner is responsible for. A good example of this is the
-[interactive web terminal](https://docs.gitlab.com/ce/ci/interactive_web_terminal).
+[interactive web terminal](https://docs.gitlab.com/ee/ci/interactive_web_terminal).
 
 Both `listen_address` and `advertise_address` should be provided in the form
 of `host:port`, where `host` may be an IP address (e.g., `127.0.0.1:8093`)
@@ -88,7 +92,7 @@ Example:
 
 ```bash
 [session_server]
-  listen_address = "0.0.0.0:8093"
+  listen_address = "0.0.0.0:8093" #  listen on all available interfaces on port 8093
   advertise_address = "runner-host-name.tld:8093"
   session_timeout = 1800
 ```
@@ -116,7 +120,8 @@ This defines one runner entry.
 | `pre_clone_script`   | Commands to be executed on the Runner before cloning the Git repository. this can be used to adjust the Git client configuration first, for example. To insert multiple commands, use a (triple-quoted) multi-line string or "\n" character. |
 | `pre_build_script`   | Commands to be executed on the Runner after cloning the Git repository, but before executing the build. To insert multiple commands, use a (triple-quoted) multi-line string or "\n" character. |
 | `post_build_script`  | Commands to be executed on the Runner just after executing the build, but before executing `after_script`. To insert multiple commands, use a (triple-quoted) multi-line string or "\n" character. |
-| `clone_url`	       | Overwrite the URL for the GitLab instance. Used if the Runner can't connect to GitLab on the URL GitLab exposes itself. |
+| `clone_url`          | Overwrite the URL for the GitLab instance. Used if the Runner can't connect to GitLab on the URL GitLab exposes itself. |
+| `debug_trace_disabled` | Disables the `CI_DEBUG_TRACE` feature. When set to true, then debug trace will remain disabled even if `CI_DEBUG_TRACE` will be set to `true` by the user. |
 
 Example:
 
@@ -204,7 +209,7 @@ This defines the Docker Container parameters.
 | `volumes`                   | Specify additional volumes that should be mounted (same syntax as Docker's `-v` flag) |
 | `extra_hosts`               | Specify hosts that should be defined in container environment |
 | `shm_size`                  | Specify shared memory size for images (in bytes) |
-| `volumes_from`              | Specify a list of volumes to inherit from another container in the form <code>\<container name\>[:\<ro&#124;rw\>]</code> |
+| `volumes_from`              | Specify a list of volumes to inherit from another container in the form `\<container name\>[:\<ro&#124;rw\>]` |
 | `volume_driver`             | Specify the volume driver to use for the container |
 | `links`                     | Specify containers which should be linked with building container |
 | `services`                  | Specify additional services that should be run with build. Please visit [Docker Registry](https://registry.hub.docker.com/) for list of available applications. Each service will be run in separate container and linked to the build. |
@@ -299,18 +304,18 @@ This will use `/path/to/bind/from/host` of the CI host inside the container at
 ### Using a private container registry
 
 > **Notes:**
-- This feature requires GitLab Runner **1.8** or higher
-- For GitLab Runner versions **>= 0.6, <1.8** there was a partial
+>- This feature requires GitLab Runner **1.8** or higher
+>- For GitLab Runner versions **>= 0.6, <1.8** there was a partial
   support for using private registries, which required manual configuration
   of credentials on runner's host. We recommend to upgrade your Runner to
   at least version **1.8** if you want to use private registries.
-- Using private registries with the `if-not-present` pull policy may introduce
+>- Using private registries with the `if-not-present` pull policy may introduce
   [security implications][secpull]. To fully understand how pull policies work,
   read the [pull policies documentation](../executors/docker.md#how-pull-policies-work).
 
 If you want to use private registries as a source of images for your builds,
 you can set the authorization configuration in the `DOCKER_AUTH_CONFIG`
-[secret variable]. It can be set in both GitLab Variables section of
+[variable]. It can be set in both GitLab Variables section of
 a project and in the `config.toml` file.
 
 For a detailed example, visit the [Using Docker images documentation][priv-example].
@@ -439,8 +444,7 @@ Example:
 
 ## The `[runners.machine]` section
 
->**Note:**
-Added in GitLab Runner v1.1.0.
+> Added in GitLab Runner v1.1.0.
 
 This defines the Docker Machine based autoscaling feature. More details can be
 found in the separate [runners autoscale documentation](autoscale.md).
@@ -455,8 +459,8 @@ found in the separate [runners autoscale documentation](autoscale.md).
 | `OffPeakIdleTime`   | Like `IdleTime`, but for _Off Peak_ time mperiods. |
 | `MaxBuilds`         | Builds count after which machine will be removed. |
 | `MachineName`       | Name of the machine. It **must** contain `%s`, which will be replaced with a unique machine identifier. |
-| `MachineDriver`     | Docker Machine `driver` to use. More details can be found in the [Docker Machine configuration section](autoscale.md#what-are-the-supported-cloud-providers). |
-| `MachineOptions`    | Docker Machine options. More details can be found in the [Docker Machine configuration section](autoscale.md#what-are-the-supported-cloud-providers). |
+| `MachineDriver`     | Docker Machine `driver` to use. More details can be found in the [Docker Machine configuration section](autoscale.md#supported-cloud-providers). |
+| `MachineOptions`    | Docker Machine options. More details can be found in the [Docker Machine configuration section](autoscale.md#supported-cloud-providers). |
 
 Example:
 
@@ -517,7 +521,21 @@ With GitLab Runner 11.3.0, the configuration parameters related to S3 were moved
 The old format of the configuration with S3 configured directly in `[runners.cache]` section is still supported,
 but is deprecated with GitLab Runner 11.3.0. **This support will be removed in GitLab Runner 12.0.0**.
 
-Bellow is a table containing a summary of `config.toml`, cli options and ENV variables deprecations:
+NOTE: **Note:**
+The cache mechanism uses pre-signed URLs to upload and download cache. URLs are being signed by GitLab Runner on its **own instance**.
+No matter if the job's script - so also the cache upload/download script - are being executed on local or external
+machines (e.g. `shell` or `docker` executors are running their scripts on the same
+machine where GitLab Runner process is running, while `virtualbox` or `docker+machine`
+connects to a separate VM to execute the script). This is done for security reasons:
+minimizing the possibility of leaking the cache adapter's credentials.
+
+NOTE: **Note:**
+Previous note implies [S3 cache adapter](#the-runnerscaches3-section), if configured to use
+IAM instance profile, will use the profile attached with GitLab Runner's machine.
+Similarly for [GCS cache adapter](#the-runnerscachegcs-section), if configured to
+use the `CredentialsFile`, the file needs to be present on GitLab Runner's machine.
+
+Below is a table containing a summary of `config.toml`, cli options and ENV variables deprecations:
 
 | Setting             | TOML field                               | CLI option for `register`      | ENV for `register`                | deprecated TOML field               | deprecated CLI option   | deprecated ENV        |
 |---------------------|------------------------------------------|--------------------------------|-----------------------------------|-------------------------------------|-------------------------|-----------------------|
@@ -534,7 +552,6 @@ Bellow is a table containing a summary of `config.toml`, cli options and ENV var
 | GCS.PrivateKey      | `[runners.cache.gcs] -> PrivateKey`      | `--cache-gcs-private-key`      | `$CACHE_GCS_PRIVATE_KEY`          |                                     |                         |                       |
 | GCS.CredentialsFile | `[runners.cache.gcs] -> CredentialsFile` | `--cache-gcs-credentials-file` | `$GOOGLE_APPLICATION_CREDENTIALS` |                                     |                         |                       |
 | GCS.BucketName      | `[runners.cache.gcs] -> BucketName`      | `--cache-gcs-bucket-name`      | `$CACHE_GCS_BUCKET_NAME`          |                                     |                         |                       |
-
 
 ### The `[runners.cache.s3]` section
 
@@ -575,7 +592,7 @@ get bucket metadata and modify the URL to point to the valid region (eg. `s3-eu-
 
 NOTE: **Note:**
 If any of `ServerAddress`, `AccessKey` or `SecretKey` aren't specified, then the S3 client will use the
-IAM instance profile available to the instance.
+IAM instance profile available to the `gitlab-runner` instance.
 
 ### The `[runners.cache.gcs]` section
 
@@ -621,7 +638,6 @@ Examples:
 
 ## The `[runners.kubernetes]` section
 
-> **Note:**
 > Added in GitLab Runner v1.6.0
 
 This defines the Kubernetes parameters.
@@ -720,13 +736,45 @@ of used image automatically, by using one of the
   executor = "docker"
   [runners.docker]
     (...)
-    helper_image = "my.registry.local/gitlab/gitlab-runner-helper:${CI_RUNNER_REVISION}"
+    helper_image = "my.registry.local/gitlab/gitlab-runner-helper:x86_64-${CI_RUNNER_REVISION}"
 ```
 
-With that configuration, GitLab Runner will instruct the executor to use the image in version `${CI_RUNNER_REVISION}`,
+With that configuration, GitLab Runner will instruct the executor to use the image in version `x86_64-${CI_RUNNER_REVISION}`,
 which is based on its compilation data. After updating the Runner to a new version, this will ensure that the
 Runner will try to download the proper image. This of course means that the image should be uploaded to the registry
 before upgrading the Runner, otherwise the jobs will start failing with a "No such image" error.
+
+## The `[runners.custom_build_dir]` section
+
+NOTE: **Note:**
+[Introduced][https://gitlab.com/gitlab-org/gitlab-runner/merge_requests/1267] in Gitlab Runner 11.10
+
+This section defines [custom build directories][https://docs.gitlab.com/ee/ci/yaml/README.html#custom-build-directories] parameters.
+
+Please notice, that the feature - if not configured explicitly - will be
+enabled by default for `kubernetes`, `docker`, `docker-ssh`, `docker+machine`
+and `docker-ssh+machine` executors. It will be disabled by default for all other
+executors.
+
+This feature requires that `GIT_CLONE_PATH` is within a path defined
+within `runners.builds_dir`. For the ease of using `builds_dir` the
+`$CI_BUILDS_DIR` variable can be used.
+
+The feature is by default enabled only for `docker` and `kubernetes` executors
+as they provide a good way to separate resources. This feature can be
+explicitly enabled for any executor, but special care should be taken when using
+with executors that share `builds_dir` and have `concurrent > 1`.
+
+| Parameter | Type    | Description |
+|-----------|---------|-------------|
+| `enabled` | boolean | Allow user to define a custom build directory for a job |
+
+Example:
+
+```bash
+[runners.custom_build_dir]
+  enabled = true
+```
 
 ## Note
 
@@ -736,9 +784,10 @@ It depends on what you'd like to do.
 
 [TOML]: https://github.com/toml-lang/toml
 [Docker Engine]: https://docs.docker.com/engine/
-[yaml-priv-reg]: https://docs.gitlab.com/ce/ci/yaml/README.html#image-and-services
-[ci-build-permissions-model]: https://docs.gitlab.com/ce/user/project/new_ci_build_permissions_model.html
+[yaml-priv-reg]: https://docs.gitlab.com/ee/ci/yaml/README.html#image-and-services
+[ci-build-permissions-model]: https://docs.gitlab.com/ee/user/project/new_ci_build_permissions_model.html
 [secpull]: ../security/index.md#usage-of-private-docker-images-with-if-not-present-pull-policy
-[priv-example]: https://docs.gitlab.com/ce/ci/docker/using_docker_images.html#define-an-image-from-a-private-docker-registry
-[secret variable]: https://docs.gitlab.com/ce/ci/variables/#secret-variables
-[cronvendor]: https://gitlab.com/gitlab-org/gitlab-runner/blob/master/vendor/github.com/gorhill/cronexpr/README.md
+
+[priv-example]: https://docs.gitlab.com/ee/ci/docker/using_docker_images.html#define-an-image-from-a-private-container-registry
+[variable]: https://docs.gitlab.com/ee/ci/variables/#variables
+[cronvendor]: https://github.com/gorhill/cronexpr#implementation

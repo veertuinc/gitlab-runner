@@ -3,6 +3,7 @@ package common
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -10,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/docker/go-units"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
+	api "k8s.io/api/core/v1"
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
@@ -70,7 +73,7 @@ type DockerConfig struct {
 	SecurityOpt                []string          `toml:"security_opt" json:"security_opt" long:"security-opt" env:"DOCKER_SECURITY_OPT" description:"Security Options"`
 	Devices                    []string          `toml:"devices" json:"devices" long:"devices" env:"DOCKER_DEVICES" description:"Add a host device to the container"`
 	DisableCache               bool              `toml:"disable_cache,omitzero" json:"disable_cache" long:"disable-cache" env:"DOCKER_DISABLE_CACHE" description:"Disable all container caching"`
-	Volumes                    []string          `toml:"volumes,omitempty" json:"volumes" long:"volumes" env:"DOCKER_VOLUMES" description:"Bind mount a volumes"`
+	Volumes                    []string          `toml:"volumes,omitempty" json:"volumes" long:"volumes" env:"DOCKER_VOLUMES" description:"Bind-mount a volume and create it if it doesn't exist prior to mounting. Can be specified multiple times once per mountpoint, e.g. --docker-volumes 'test0:/test0' --docker-volumes 'test1:/test1'"`
 	VolumeDriver               string            `toml:"volume_driver,omitempty" json:"volume_driver" long:"volume-driver" env:"DOCKER_VOLUME_DRIVER" description:"Volume driver to be used"`
 	CacheDir                   string            `toml:"cache_dir,omitempty" json:"cache_dir" long:"cache-dir" env:"DOCKER_CACHE_DIR" description:"Directory where to store caches"`
 	ExtraHosts                 []string          `toml:"extra_hosts,omitempty" json:"extra_hosts" long:"extra-hosts" env:"DOCKER_EXTRA_HOSTS" description:"Add a custom host-to-IP mapping"`
@@ -109,22 +112,13 @@ type ParallelsConfig struct {
 	BaseName         string `toml:"base_name" json:"base_name" long:"base-name" env:"PARALLELS_BASE_NAME" description:"VM name to be used"`
 	TemplateName     string `toml:"template_name,omitempty" json:"template_name" long:"template-name" env:"PARALLELS_TEMPLATE_NAME" description:"VM template to be created"`
 	DisableSnapshots bool   `toml:"disable_snapshots,omitzero" json:"disable_snapshots" long:"disable-snapshots" env:"PARALLELS_DISABLE_SNAPSHOTS" description:"Disable snapshoting to speedup VM creation"`
+	TimeServer       string `toml:"time_server,omitempty" json:"time_server" long:"time-server" env:"PARALLELS_TIME_SERVER" description:"Timeserver to sync the guests time from. Defaults to time.apple.com"`
 }
 
 type VirtualBoxConfig struct {
 	BaseName         string `toml:"base_name" json:"base_name" long:"base-name" env:"VIRTUALBOX_BASE_NAME" description:"VM name to be used"`
 	BaseSnapshot     string `toml:"base_snapshot,omitempty" json:"base_snapshot" long:"base-snapshot" env:"VIRTUALBOX_BASE_SNAPSHOT" description:"Name or UUID of a specific VM snapshot to clone"`
 	DisableSnapshots bool   `toml:"disable_snapshots,omitzero" json:"disable_snapshots" long:"disable-snapshots" env:"VIRTUALBOX_DISABLE_SNAPSHOTS" description:"Disable snapshoting to speedup VM creation"`
-}
-
-type AnkaConfig struct {
-	ControllerAddress  string  `toml:"controller_address" json:"controller_address" long:"controller-address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud controller address, example: http://anka.controller.com[:8090]"`
-	ImageId			   string  `toml:"image_id" json:"image_id" long:"image-id" env:"IMAGE_ID" description:"Image id to be used"`
-	Tag                *string  `toml:"tag,omitempty" json:"tag" long:"tag" env:"TAG" description:"(optional) Tag to use"`
-	NodeID             *string  `toml:"node_id,omitempty" json:"node_id" long:"node-id" env:"NODE_ID" description:"(optional) Run on a specific node"`
-	Priority		   *int     `toml:"priority,omitzero" json:"priority" long:"priority" env:"PRIORITY" description:"(optional) Override the task's default priority"`
-	GroupId 		   *string  `toml:"group_id,omitempty" json:"group_id" long:"group-id" env:"GROUP_ID" description:"(optional) Run on a specific node group "`
-	KeepAliveOnError   bool     `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"(optional) Keep the VM alive in case of error for debugging purposes "`
 }
 
 type KubernetesPullPolicy string
@@ -168,7 +162,8 @@ type KubernetesConfig struct {
 	HelperCPURequest               string               `toml:"helper_cpu_request,omitempty" json:"helper_cpu_request" long:"helper-cpu-request" env:"KUBERNETES_HELPER_CPU_REQUEST" description:"The CPU allocation requested for build helper containers"`
 	HelperMemoryRequest            string               `toml:"helper_memory_request,omitempty" json:"helper_memory_request" long:"helper-memory-request" env:"KUBERNETES_HELPER_MEMORY_REQUEST" description:"The amount of memory requested for build helper containers"`
 	PullPolicy                     KubernetesPullPolicy `toml:"pull_policy,omitempty" json:"pull_policy" long:"pull-policy" env:"KUBERNETES_PULL_POLICY" description:"Policy for if/when to pull a container image (never, if-not-present, always). The cluster default will be used if not set"`
-	NodeSelector                   map[string]string    `toml:"node_selector,omitempty" json:"node_selector" long:"node-selector" description:"A toml table/json object of key=value. Value is expected to be a string. When set this will create pods on k8s nodes that match all the key=value pairs."`
+	NodeSelector                   map[string]string    `toml:"node_selector,omitempty" json:"node_selector" long:"node-selector" env:"KUBERNETES_NODE_SELECTOR" description:"A toml table/json object of key=value. Value is expected to be a string. When set this will create pods on k8s nodes that match all the key=value pairs."`
+	NodeTolerations                map[string]string    `toml:"node_tolerations,omitempty" json:"node_tolerations" long:"node-tolerations" env:"KUBERNETES_NODE_TOLERATIONS" description:"A toml table/json object of key=value:effect. Value and effect are expected to be strings. When set, pods will tolerate the given taints. Only one toleration is supported through environment variable configuration."`
 	ImagePullSecrets               []string             `toml:"image_pull_secrets,omitempty" json:"image_pull_secrets" long:"image-pull-secrets" env:"KUBERNETES_IMAGE_PULL_SECRETS" description:"A list of image pull secrets that are used for pulling docker image"`
 	HelperImage                    string               `toml:"helper_image,omitempty" json:"helper_image" long:"helper-image" env:"KUBERNETES_HELPER_IMAGE" description:"[ADVANCED] Override the default helper image used to clone repos and upload artifacts"`
 	TerminationGracePeriodSeconds  int64                `toml:"terminationGracePeriodSeconds,omitzero" json:"terminationGracePeriodSeconds" long:"terminationGracePeriodSeconds" env:"KUBERNETES_TERMINATIONGRACEPERIODSECONDS" description:"Duration after the processes running in the pod are sent a termination signal and the time when the processes are forcibly halted with a kill signal."`
@@ -177,7 +172,7 @@ type KubernetesConfig struct {
 	PodLabels                      map[string]string    `toml:"pod_labels,omitempty" json:"pod_labels" long:"pod-labels" description:"A toml table/json object of key-value. Value is expected to be a string. When set, this will create pods with the given pod labels. Environment variables will be substituted for values here."`
 	ServiceAccount                 string               `toml:"service_account,omitempty" json:"service_account" long:"service-account" env:"KUBERNETES_SERVICE_ACCOUNT" description:"Executor pods will use this Service Account to talk to kubernetes API"`
 	ServiceAccountOverwriteAllowed string               `toml:"service_account_overwrite_allowed" json:"service_account_overwrite_allowed" long:"service_account_overwrite_allowed" env:"KUBERNETES_SERVICE_ACCOUNT_OVERWRITE_ALLOWED" description:"Regex to validate 'KUBERNETES_SERVICE_ACCOUNT' value"`
-	PodAnnotations                 map[string]string    `toml:"pod_annotations,omitempty" json:"pod_annotations" long:"pod-annotations" description:"A toml table/json object of key-value. Value is expected to be a string. When set, this will create pods with the given annotations. Can be overwritten in build with KUBERNETES_POD_ANNOTATION_* varialbes"`
+	PodAnnotations                 map[string]string    `toml:"pod_annotations,omitempty" json:"pod_annotations" long:"pod-annotations" description:"A toml table/json object of key-value. Value is expected to be a string. When set, this will create pods with the given annotations. Can be overwritten in build with KUBERNETES_POD_ANNOTATIONS_* varialbes"`
 	PodAnnotationsOverwriteAllowed string               `toml:"pod_annotations_overwrite_allowed" json:"pod_annotations_overwrite_allowed" long:"pod_annotations_overwrite_allowed" env:"KUBERNETES_POD_ANNOTATIONS_OVERWRITE_ALLOWED" description:"Regex to validate 'KUBERNETES_POD_ANNOTATIONS_*' values"`
 	Volumes                        KubernetesVolumes    `toml:"volumes"`
 }
@@ -281,16 +276,18 @@ type RunnerSettings struct {
 	PreBuildScript  string   `toml:"pre_build_script,omitempty" json:"pre_build_script" long:"pre-build-script" env:"RUNNER_PRE_BUILD_SCRIPT" description:"Runner-specific command script executed after code is pulled, just before build executes"`
 	PostBuildScript string   `toml:"post_build_script,omitempty" json:"post_build_script" long:"post-build-script" env:"RUNNER_POST_BUILD_SCRIPT" description:"Runner-specific command script executed after code is pulled and just after build executes"`
 
+	DebugTraceDisabled bool `toml:"debug_trace_disabled,omitempty" json:"debug_trace_disabled" long:"debug-trace-disabled" env:"RUNNER_DEBUG_TRACE_DISABLED" description:"When set to true Runner will disable the possibility of using the CI_DEBUG_TRACE feature"`
+
 	Shell string `toml:"shell,omitempty" json:"shell" long:"shell" env:"RUNNER_SHELL" description:"Select bash, cmd or powershell"`
 
-	SSH        *ssh.Config       `toml:"ssh,omitempty" json:"ssh" group:"ssh executor" namespace:"ssh"`
-	Docker     *DockerConfig     `toml:"docker,omitempty" json:"docker" group:"docker executor" namespace:"docker"`
-	Parallels  *ParallelsConfig  `toml:"parallels,omitempty" json:"parallels" group:"parallels executor" namespace:"parallels"`
-	VirtualBox *VirtualBoxConfig `toml:"virtualbox,omitempty" json:"virtualbox" group:"virtualbox executor" namespace:"virtualbox"`
-	Cache      *CacheConfig      `toml:"cache,omitempty" json:"cache" group:"cache configuration" namespace:"cache"`
-	Machine    *DockerMachine    `toml:"machine,omitempty" json:"machine" group:"docker machine provider" namespace:"machine"`
-	Kubernetes *KubernetesConfig `toml:"kubernetes,omitempty" json:"kubernetes" group:"kubernetes executor" namespace:"kubernetes"`
-	Anka *AnkaConfig 			 `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
+	CustomBuildDir *CustomBuildDir   `toml:"custom_build_dir,omitempty" json:"custom_build_dir" group:"custom build dir configuration" namespace:"custom_build_dir"`
+	SSH            *ssh.Config       `toml:"ssh,omitempty" json:"ssh" group:"ssh executor" namespace:"ssh"`
+	Docker         *DockerConfig     `toml:"docker,omitempty" json:"docker" group:"docker executor" namespace:"docker"`
+	Parallels      *ParallelsConfig  `toml:"parallels,omitempty" json:"parallels" group:"parallels executor" namespace:"parallels"`
+	VirtualBox     *VirtualBoxConfig `toml:"virtualbox,omitempty" json:"virtualbox" group:"virtualbox executor" namespace:"virtualbox"`
+	Cache          *CacheConfig      `toml:"cache,omitempty" json:"cache" group:"cache configuration" namespace:"cache"`
+	Machine        *DockerMachine    `toml:"machine,omitempty" json:"machine" group:"docker machine provider" namespace:"machine"`
+	Kubernetes     *KubernetesConfig `toml:"kubernetes,omitempty" json:"kubernetes" group:"kubernetes executor" namespace:"kubernetes"`
 }
 
 type RunnerConfig struct {
@@ -310,11 +307,11 @@ type SessionServer struct {
 }
 
 type Config struct {
+	ListenAddress string        `toml:"listen_address,omitempty" json:"listen_address"`
 	SessionServer SessionServer `toml:"session_server,omitempty" json:"session_server"`
 
 	// TODO: Remove in 12.0
 	MetricsServerAddress string `toml:"metrics_server,omitempty" json:"metrics_server"` // DEPRECATED
-	ListenAddress        string `toml:"listen_address,omitempty" json:"listen_address"`
 
 	Concurrent    int             `toml:"concurrent" json:"concurrent"`
 	CheckInterval int             `toml:"check_interval" json:"check_interval" description:"Define active checking interval of jobs"`
@@ -327,15 +324,19 @@ type Config struct {
 	Loaded        bool            `toml:"-"`
 }
 
+type CustomBuildDir struct {
+	Enabled bool `toml:"enabled,omitempty" json:"enabled" long:"enabled" env:"CUSTOM_BUILD_DIR_ENABLED" description:"Enable job specific build directories"`
+}
+
 func getDeprecatedStringSetting(setting string, tomlField string, envVariable string, tomlReplacement string, envReplacement string) string {
 	if setting != "" {
-		log.Warningf("%s setting is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", tomlField, tomlReplacement)
+		logrus.Warningf("%s setting is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", tomlField, tomlReplacement)
 		return setting
 	}
 
 	value := os.Getenv(envVariable)
 	if value != "" {
-		log.Warningf("%s environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", envVariable, envReplacement)
+		logrus.Warningf("%s environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", envVariable, envReplacement)
 	}
 
 	return value
@@ -343,13 +344,13 @@ func getDeprecatedStringSetting(setting string, tomlField string, envVariable st
 
 func getDeprecatedBoolSetting(setting bool, tomlField string, envVariable string, tomlReplacement string, envReplacement string) bool {
 	if setting {
-		log.Warningf("%s setting is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", tomlField, tomlReplacement)
+		logrus.Warningf("%s setting is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", tomlField, tomlReplacement)
 		return setting
 	}
 
 	value, _ := strconv.ParseBool(os.Getenv(envVariable))
 	if value {
-		log.Warningf("%s environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", envVariable, envReplacement)
+		logrus.Warningf("%s environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use %s instead", envVariable, envReplacement)
 	}
 
 	return value
@@ -366,7 +367,7 @@ func (c *CacheConfig) GetPath() string {
 
 	// TODO: Remove in 12.0
 	if c.S3CachePath != "" {
-		log.Warning("'--cache-s3-cache-path' command line option and `$S3_CACHE_PATH` environment variables are deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-path' or '$CACHE_PATH' instead")
+		logrus.Warning("'--cache-s3-cache-path' command line option and `$S3_CACHE_PATH` environment variables are deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-path' or '$CACHE_PATH' instead")
 	}
 
 	return c.S3CachePath
@@ -379,7 +380,7 @@ func (c *CacheConfig) GetShared() bool {
 
 	// TODO: Remove in 12.0
 	if c.CacheShared {
-		log.Warning("'--cache-cache-shared' command line is deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-shared' instead")
+		logrus.Warning("'--cache-cache-shared' command line is deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-shared' instead")
 	}
 
 	return c.CacheShared
@@ -481,7 +482,7 @@ func (c *DockerConfig) getMemoryBytes(size string, fieldName string) int64 {
 
 	bytes, err := units.RAMInBytes(size)
 	if err != nil {
-		log.Fatalf("Error parsing docker %s: %s", fieldName, err)
+		logrus.Fatalf("Error parsing docker %s: %s", fieldName, err)
 	}
 
 	return bytes
@@ -530,6 +531,32 @@ func (c *KubernetesConfig) GetPollInterval() int {
 	}
 
 	return c.PollInterval
+}
+
+func (c *KubernetesConfig) GetNodeTolerations() []api.Toleration {
+	var tolerations []api.Toleration
+
+	for toleration, effect := range c.NodeTolerations {
+		newToleration := api.Toleration{
+			Effect: api.TaintEffect(effect),
+		}
+
+		if strings.Contains(toleration, "=") {
+			parts := strings.Split(toleration, "=")
+			newToleration.Key = parts[0]
+			if len(parts) > 1 {
+				newToleration.Value = parts[1]
+			}
+			newToleration.Operator = api.TolerationOpEqual
+		} else {
+			newToleration.Key = toleration
+			newToleration.Operator = api.TolerationOpExists
+		}
+
+		tolerations = append(tolerations, newToleration)
+	}
+
+	return tolerations
 }
 
 func (c *DockerMachine) GetIdleCount() int {
@@ -593,11 +620,11 @@ func (c *RunnerCredentials) UniqueID() string {
 	return c.URL + c.Token
 }
 
-func (c *RunnerCredentials) Log() *log.Entry {
+func (c *RunnerCredentials) Log() *logrus.Entry {
 	if c.ShortDescription() != "" {
-		return log.WithField("runner", c.ShortDescription())
+		return logrus.WithField("runner", c.ShortDescription())
 	}
-	return log.WithFields(log.Fields{})
+	return logrus.WithFields(logrus.Fields{})
 }
 
 func (c *RunnerCredentials) SameAs(other *RunnerCredentials) bool {
@@ -626,6 +653,23 @@ func (c *RunnerConfig) GetVariables() JobVariables {
 	}
 
 	return variables
+}
+
+// DeepCopy attempts to make a deep clone of the object
+func (c *RunnerConfig) DeepCopy() (*RunnerConfig, error) {
+	var r RunnerConfig
+
+	bytes, err := json.Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("serialization of runner config failed: %v", err)
+	}
+
+	err = json.Unmarshal(bytes, &r)
+	if err != nil {
+		return nil, fmt.Errorf("deserialization of runner config failed: %v", err)
+	}
+
+	return &r, err
 }
 
 func NewConfig() *Config {
@@ -680,7 +724,7 @@ func (c *Config) SaveConfig(configFile string) error {
 	newBuffer := bufio.NewWriter(&newConfig)
 
 	if err := toml.NewEncoder(newBuffer).Encode(c); err != nil {
-		log.Fatalf("Error encoding TOML: %s", err)
+		logrus.Fatalf("Error encoding TOML: %s", err)
 		return err
 	}
 
@@ -714,7 +758,7 @@ func (c *Config) ListenOrServerMetricAddress() string {
 
 	// TODO: Remove in 12.0
 	if c.MetricsServerAddress != "" {
-		log.Warnln("'metrics_server' configuration entry is deprecated and will be removed in one of future releases; please use 'listen_address' instead")
+		logrus.Warnln("'metrics_server' configuration entry is deprecated and will be removed in one of future releases; please use 'listen_address' instead")
 	}
 
 	return c.MetricsServerAddress
