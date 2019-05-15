@@ -56,6 +56,13 @@ func (c *clientJobTrace) Fail(err error, failureReason common.JobFailureReason) 
 	c.finish()
 }
 
+func (c *clientJobTrace) IsJobSuccesFull() bool {
+	if c.state == common.Success {
+		return true
+	}
+	return false
+}
+
 func (c *clientJobTrace) Write(data []byte) (n int, err error) {
 	return c.buffer.Write(data)
 }

@@ -362,6 +362,7 @@ type JobTrace interface {
 	SetFailuresCollector(fc FailuresCollector)
 	SetMasked(values []string)
 	IsStdout() bool
+	IsJobSuccesFull() bool
 }
 
 type JobTracePatch interface {

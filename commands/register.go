@@ -124,6 +124,20 @@ func (s *RegisterCommand) askVirtualBox() {
 	s.VirtualBox.BaseName = s.ask("virtualbox-base-name", "Please enter the VirtualBox VM (e.g. my-vm):")
 }
 
+
+
+func (s *RegisterCommand) askAnka() {
+	// anka executor
+
+	s.Anka.ControllerAddress = s.ask("anka-controller-address", "Please enter the Anka Cloud Controller address")
+	s.Anka.ImageId = s.ask("anka-image-id", "Please enter the Anka Image id")
+	tag := s.ask("anka-tag", "Pleas enter the tag to use (leave empty for latest)", true)
+	s.Anka.Tag = &tag
+}
+
+
+
+
 func (s *RegisterCommand) askSSHServer() {
 	s.SSH.Host = s.ask("ssh-host", "Please enter the SSH server address (e.g. my.server.com):")
 	s.SSH.Port = s.ask("ssh-port", "Please enter the SSH server port (e.g. 22):", true)
@@ -184,6 +198,7 @@ func (s *RegisterCommand) askExecutorOptions() {
 	ssh := s.SSH
 	parallels := s.Parallels
 	virtualbox := s.VirtualBox
+	anka := s.Anka
 
 	s.Kubernetes = nil
 	s.Machine = nil
@@ -226,6 +241,11 @@ func (s *RegisterCommand) askExecutorOptions() {
 		s.SSH = ssh
 		s.VirtualBox = virtualbox
 		s.askVirtualBox()
+		s.askSSHLogin()
+	case "anka":
+		s.SSH = ssh
+		s.Anka = anka
+		s.askAnka()
 		s.askSSHLogin()
 	}
 }
@@ -335,6 +355,7 @@ func newRegisterCommand() *RegisterCommand {
 				SSH:        &ssh.Config{},
 				Parallels:  &common.ParallelsConfig{},
 				VirtualBox: &common.VirtualBoxConfig{},
+				Anka:       &common.AnkaConfig{},
 			},
 		},
 		Locked:  true,

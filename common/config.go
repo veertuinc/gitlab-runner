@@ -121,6 +121,18 @@ type VirtualBoxConfig struct {
 	DisableSnapshots bool   `toml:"disable_snapshots,omitzero" json:"disable_snapshots" long:"disable-snapshots" env:"VIRTUALBOX_DISABLE_SNAPSHOTS" description:"Disable snapshoting to speedup VM creation"`
 }
 
+
+// AnkaConfig represents the anka runner config
+type AnkaConfig struct {
+	ControllerAddress  string  `toml:"controller_address" json:"controller_address" long:"controller-address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud controller address, example: http://anka.controller.com[:8090]"`
+	ImageId			   string  `toml:"image_id" json:"image_id" long:"image-id" env:"IMAGE_ID" description:"Image id to be used"`
+	Tag                *string  `toml:"tag,omitempty" json:"tag" long:"tag" env:"TAG" description:"(optional) Tag to use"`
+	NodeID             *string  `toml:"node_id,omitempty" json:"node_id" long:"node-id" env:"NODE_ID" description:"(optional) Run on a specific node"`
+	Priority		   *int     `toml:"priority,omitzero" json:"priority" long:"priority" env:"PRIORITY" description:"(optional) Override the task's default priority"`
+	GroupId 		   *string  `toml:"group_id,omitempty" json:"group_id" long:"group-id" env:"GROUP_ID" description:"(optional) Run on a specific node group "`
+	KeepAliveOnError   bool     `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"(optional) Keep the VM alive in case of error for debugging purposes "`
+}
+
 type KubernetesPullPolicy string
 
 // Get returns one of the predefined values in kubernetes notation or returns an error if the value can't match the predefined
@@ -288,6 +300,7 @@ type RunnerSettings struct {
 	Cache          *CacheConfig      `toml:"cache,omitempty" json:"cache" group:"cache configuration" namespace:"cache"`
 	Machine        *DockerMachine    `toml:"machine,omitempty" json:"machine" group:"docker machine provider" namespace:"machine"`
 	Kubernetes     *KubernetesConfig `toml:"kubernetes,omitempty" json:"kubernetes" group:"kubernetes executor" namespace:"kubernetes"`
+	Anka *AnkaConfig                 `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
 }
 
 type RunnerConfig struct {
