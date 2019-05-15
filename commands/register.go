@@ -127,7 +127,8 @@ func (s *RegisterCommand) askVirtualBox() {
 
 
 func (s *RegisterCommand) askAnka() {
-	
+	// anka executor
+
 	s.Anka.ControllerAddress = s.ask("anka-controller-address", "Please enter the Anka Cloud Controller address")
 	s.Anka.ImageId = s.ask("anka-image-id", "Please enter the Anka Image id")
 	tag := s.ask("anka-tag", "Pleas enter the tag to use (leave empty for latest)", true)

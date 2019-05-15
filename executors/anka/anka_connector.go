@@ -3,13 +3,13 @@ package anka
 import (
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"errors"
-	"github.com/asafg6/anka-client"
+	"gitlab.com/gitlab-org/gitlab-runner/executors/anka/ankaCloudClient"
 	"time"
 	"fmt"
 )
 
 
-
+// AnkaConnector is a helper for connecting gitlab runner to anka
 type AnkaConnector struct {
 	client *ankaCloudClient.AnkaClient
 	netTimeToWait 	 time.Duration

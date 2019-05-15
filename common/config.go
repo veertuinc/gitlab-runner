@@ -117,6 +117,8 @@ type VirtualBoxConfig struct {
 	DisableSnapshots bool   `toml:"disable_snapshots,omitzero" json:"disable_snapshots" long:"disable-snapshots" env:"VIRTUALBOX_DISABLE_SNAPSHOTS" description:"Disable snapshoting to speedup VM creation"`
 }
 
+
+// AnkaConfig represents the anka runner config
 type AnkaConfig struct {
 	ControllerAddress  string  `toml:"controller_address" json:"controller_address" long:"controller-address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud controller address, example: http://anka.controller.com[:8090]"`
 	ImageId			   string  `toml:"image_id" json:"image_id" long:"image-id" env:"IMAGE_ID" description:"Image id to be used"`
