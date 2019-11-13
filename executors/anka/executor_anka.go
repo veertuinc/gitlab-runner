@@ -127,6 +127,7 @@ func (s *executor) Cleanup() {
 func init() {
 	options := executors.ExecutorOptions{
 		DefaultBuildsDir: "builds",
+		DefaultCacheDir: "cache",
 		SharedBuildsDir:  false,
 		Shell: common.ShellScriptInfo{
 			Shell:         "bash",

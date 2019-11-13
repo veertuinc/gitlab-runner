@@ -129,6 +129,7 @@ type AnkaConfig struct {
 	Priority		   *int     `toml:"priority,omitzero" json:"priority" long:"priority" env:"PRIORITY" description:"(optional) Override the task's default priority"`
 	GroupId 		   *string  `toml:"group_id,omitempty" json:"group_id" long:"group-id" env:"GROUP_ID" description:"(optional) Run on a specific node group "`
 	KeepAliveOnError   bool     `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"(optional) Keep the VM alive in case of error for debugging purposes "`
+}
 type CustomConfig struct {
 	ConfigExec        string   `toml:"config_exec,omitempty" json:"config_exec" long:"config-exec" env:"CUSTOM_CONFIG_EXEC" description:"Executable that allows to inject configuration values to the executor"`
 	ConfigArgs        []string `toml:"config_args,omitempty" json:"config_args" long:"config-args" description:"Arguments for the config executable"`
@@ -315,7 +316,7 @@ type RunnerSettings struct {
 	Cache          *CacheConfig      `toml:"cache,omitempty" json:"cache" group:"cache configuration" namespace:"cache"`
 	Machine        *DockerMachine    `toml:"machine,omitempty" json:"machine" group:"docker machine provider" namespace:"machine"`
 	Kubernetes     *KubernetesConfig `toml:"kubernetes,omitempty" json:"kubernetes" group:"kubernetes executor" namespace:"kubernetes"`
-	Anka *AnkaConfig                 `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
+	Anka 		   *AnkaConfig       `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
 	Custom         *CustomConfig     `toml:"custom,omitempty" json:"custom" group:"custom executor" namespace:"custom"`
 }
 
