@@ -9,8 +9,14 @@ stages:
 - cleanup
 
 variables:
-  CI_IMAGE: registry.gitlab.com/gitlab-org/gitlab-runner/ci:1.8.7-0
+  CI_IMAGE: registry.gitlab.com/gitlab-org/gitlab-runner/ci:1.8.7-2
   GOROOT: /usr/local/go
+  # Following variables are used in some jobs to install specified software
+  DOCKER_MACHINE_VERSION: "0.14.0"
+  DUMB_INIT_VERSION: "1.0.2"
+  GIT_VERSION: "2.21.0"
+  GIT_VERSION_BUILD: "1"
+  GIT_LFS_VERSION: "2.7.1"
 
 before_script:
   - unset GPG_KEY
@@ -24,16 +30,40 @@ image: $CI_IMAGE
   except:
   - /(^docs[\/-].*|.*-docs$)/
 
+.windows_base:
+  variables: &windows_base_variables
+    PKG_NAMESPACE: gitlab.com\gitlab-org
+    PKG_NAME: gitlab-runner
+    GOPATH: "$CI_PROJECT_DIR\\.gopath"
+    PKG_BASE_DIR: "$CI_PROJECT_DIR\\.gopath\\src\\$PKG_NAMESPACE"
+    PKG_BUILD_DIR: "$CI_PROJECT_DIR\\.gopath\\src\\$PKG_NAMESPACE\\$PKG_NAME"
+
 .docker: &docker
   <<: *except_docs
   services:
   - docker:dind
   variables: &docker_variables
-    CI_IMAGE: registry.gitlab.com/gitlab-org/gitlab-runner/ci:1.8.7-0
+    CI_IMAGE: registry.gitlab.com/gitlab-org/gitlab-runner/ci:1.8.7-2
     DOCKER_DRIVER: overlay2
     DOCKER_HOST: tcp://docker:2375
   tags:
   - docker
+
+.windows1803: &windows1803
+  variables: &windows1803_variables
+    <<: *windows_base_variables
+    WINDOWS_VERSION: servercore1803
+  tags:
+  - windows-1803
+  - shell
+
+.windows1809: &windows1809
+  variables: &windows1809_variables
+    <<: *windows_base_variables
+    WINDOWS_VERSION: servercore1809
+  tags:
+  - windows-1809
+  - shell
 
 #
 # Prepare stage
@@ -70,10 +100,11 @@ helper images:
   <<: *docker
   stage: prebuild
   script:
-  - make docker
+  - make helper-build helper-docker
   artifacts:
     paths:
     - out/helper-images/
+    - dockerfiles/build/binaries/*-windows.exe
     - .gopath/bin
     - .gopath/.ok
     expire_in: 7d
@@ -84,7 +115,7 @@ clone test repo:
   script:
   - mkdir tmp
   - succeed=0
-  - for i in {1..3}; do git clone https://gitlab.com/gitlab-org/gitlab-test.git tmp/gitlab-test && succeed=1 && break; echo "retrying"; done
+  - for i in {1..3}; do git clone https://gitlab.com/gitlab-org/ci-cd/tests/gitlab-test.git tmp/gitlab-test && succeed=1 && break; echo "retrying"; done
   - '[[ "$succeed" -eq 1 ]]'
   artifacts:
     paths:
@@ -118,10 +149,10 @@ review-docs-deploy:
   <<: *review-docs
   stage: prebuild
   environment:
-    name: review-docs/$CI_COMMIT_REF_NAME
+    name: review-docs/$CI_COMMIT_REF_SLUG
     # DOCS_REVIEW_APPS_DOMAIN and DOCS_GITLAB_REPO_SUFFIX are secret variables
     # Discussion: https://gitlab.com/gitlab-org/gitlab-ce/merge_requests/14236/diffs#note_40140693
-    url: http://$DOCS_GITLAB_REPO_SUFFIX-$CI_COMMIT_REF_SLUG.$DOCS_REVIEW_APPS_DOMAIN/$DOCS_GITLAB_REPO_SUFFIX
+    url: http://$CI_ENVIRONMENT_SLUG.$DOCS_REVIEW_APPS_DOMAIN/$DOCS_GITLAB_REPO_SUFFIX
     on_stop: review-docs-cleanup
   script:
     - ./trigger-build-docs deploy
@@ -131,12 +162,13 @@ review-docs-cleanup:
   <<: *review-docs
   stage: cleanup
   environment:
-    name: review-docs/$CI_COMMIT_REF_NAME
+    name: review-docs/$CI_COMMIT_REF_SLUG
     action: stop
   script:
     - ./trigger-build-docs cleanup
 
 tests definitions:
+  <<: *except_docs
   stage: prebuild
   # Using Go 1.10, because the `go test -list` is unavailable in <1.9
   # and it's much faster in 1.10. And since there is no real test execution
@@ -153,6 +185,25 @@ tests definitions:
     expire_in: 7d
   tags:
   - gitlab-org
+
+dep check:
+  <<: *except_docs
+  stage: prebuild
+  cache: {}
+  dependencies:
+  script:
+  - make dep_check
+
+dep status:
+  <<: *except_docs
+  stage: prebuild
+  cache: {}
+  dependencies:
+  script:
+  - make dep_status
+  only:
+    variables:
+    - $CI_DEP_STATUS_ENABLED
 
 #
 # Test stage
@@ -175,13 +226,21 @@ code_quality:
     paths: [gl-code-quality-report.json]
     expire_in: 7d
 
-.unit_tests: &unit_tests
+unit test: &unit_tests
   <<: *docker
   stage: test
+  parallel: 5
+  variables:
+    <<: *docker_variables
+    GIT_LFS_256_CHECKSUM: 7be85238cbbb957ab25de52b60279d40ba40d3faa72eeb2cb9fa77d6d92381e5
+  before_script:
+    # This' script content as well as the definition of GIT_LFS_256_CHECKSUM should be moved to
+    # "prepare ci image". Git LFS should be installed inside of the CI image. Unfortunately, building
+    # this image is currently blocked because of https://gitlab.com/gitlab-org/gitlab-runner/issues/3946.
+    # After we will resolve this issue, we should update the CI configuration and move the Git LFS installation
+    # to the proper place.
+    - ./ci/install_git_lfs
   script:
-    - JOB_NAME=( $CI_JOB_NAME )
-    - export SUITE_INDEX=${JOB_NAME[-2]}
-    - export SUITE_TOTAL=${JOB_NAME[-1]}
     - source ci/touch_make_dependencies
     - make parallel_test_execute
   artifacts:
@@ -191,63 +250,58 @@ code_quality:
     when: always
     expire_in: 7d
 
-.unit_tests_with_race: &unit_tests_with_race
+unit test with race:
   <<: *unit_tests
   allow_failure: true
   variables:
     <<: *docker_variables
+    GIT_LFS_256_CHECKSUM: 7be85238cbbb957ab25de52b60279d40ba40d3faa72eeb2cb9fa77d6d92381e5
     CGO_ENABLED: "1"
     TESTFLAGS: "-cover -race"
 
-unit tests 0 5: *unit_tests
-unit tests 1 5: *unit_tests
-unit tests 2 5: *unit_tests
-unit tests 3 5: *unit_tests
-unit tests 4 5: *unit_tests
-
-unit tests with race 0 5: *unit_tests_with_race
-unit tests with race 1 5: *unit_tests_with_race
-unit tests with race 2 5: *unit_tests_with_race
-unit tests with race 3 5: *unit_tests_with_race
-unit tests with race 4 5: *unit_tests_with_race
-
 docs check links:
-  image: "registry.gitlab.com/gitlab-org/gitlab-build-images:nanoc-bootstrap-ruby-2.4-alpine"
+  image: "registry.gitlab.com/gitlab-org/gitlab-build-images:gitlab-docs-lint"
   stage: test
   cache: {}
   dependencies: []
   before_script:
     - unset GPG_KEY
   script:
-    - mv docs/ /nanoc/content/
-    - cd /nanoc
+    - mv docs/ /tmp/gitlab-docs/content/$DOCS_GITLAB_REPO_SUFFIX
+    - cd /tmp/gitlab-docs
     # Build HTML from Markdown
     - bundle exec nanoc
     # Check the internal links
     - bundle exec nanoc check internal_links
+    # Check the internal anchor links
+    - bundle exec nanoc check internal_anchors
 
-integration windows:
-  <<: *except_docs
+.windows test:
+  extends: .except_docs
   stage: test
+  parallel: 3
+  variables:
+    GOROOT: "C:\\Go"
   before_script:
-  - $GODIR = "$env:GOPATH\src\gitlab.com\gitlab-org"
-  - $target_path = "$GODIR\gitlab-runner"
-  - $current_path = pwd
-  - md $GODIR -Force
-  - if (Test-Path $target_path) { cmd /c rmdir $target_path }
-  - cmd /c mklink /D $target_path $current_path
-  - cd $GODIR\gitlab-runner
+  - if (Test-Path $GOPATH) { Remove-Item -Force -Recurse $GOPATH }
+  - New-Item $PKG_BASE_DIR -ItemType directory -Force
+  - New-Item -ItemType SymbolicLink -Path $PKG_BUILD_DIR -Value $CI_PROJECT_DIR
+  - cd $PKG_BUILD_DIR
   script:
-  - $packages = (go list ./... | findstr -v "\/vendor\/" | Out-String | %{$_ -replace "\r\n"," "})
-  - $testCommand = "go test $packages"
-  - Invoke-Expression $testCommand
-  - if ( $LASTEXITCODE -ne 0 ) { exit $LASTEXITCODE }
+  - .\ci\test_windows.ps1
+  after_script:
+  - if (Test-Path $PKG_BUILD_DIR) { $(Get-Item $PKG_BUILD_DIR).Delete() }
   allow_failure: true
   only:
   - /.*/@gitlab-org/gitlab-runner
-  tags:
-  - integration
-  - windows
+
+windows 1803 tests:
+  <<: *windows1803
+  extends: .windows test
+
+windows 1809 tests:
+  <<: *windows1809
+  extends: .windows test
 
 git 1.7.1:
   <<: *except_docs
@@ -271,9 +325,14 @@ git 1.7.1:
 # Coverage stage
 #
 
-test coverage report: &test_coverage_report
+.coverage_job: &coverage_job
+  <<: *except_docs
   stage: coverage
   image: golang:1.10
+  when: always
+
+test coverage report:
+  <<: *coverage_job
   coverage: /regular total:\s+\(statements\)\s+\d+.\d+\%/
   script:
     - source ci/touch_make_dependencies
@@ -285,11 +344,20 @@ test coverage report: &test_coverage_report
     expire_in: 7d
 
 race conditions detector:
-  stage: coverage
-  image: golang:1.10
+  <<: *coverage_job
   script:
   - source ci/touch_make_dependencies
   - make check_race_conditions
+
+test junit report:
+  <<: *coverage_job
+  image: $CI_IMAGE
+  script:
+  - source ci/touch_make_dependencies
+  - make parallel_test_junit_report
+  artifacts:
+    reports:
+      junit: out/junit/report.xml
 
 #
 # Build stage
@@ -356,15 +424,29 @@ package-rpm: *packages
     <<: *docker_variables
     PUBLISH_IMAGES: "true"
     PUSH_TO_DOCKER_HUB: "true"
-    DOCKER_MACHINE_VERSION: "0.14.0"
     DOCKER_MACHINE_CHECKSUM: "a4c69bffb78d3cfe103b89dae61c3ea11cc2d1a91c4ff86e630c9ae88244db02"
-    DUMB_INIT_VERSION: "1.0.2"
     DUMB_INIT_CHECKSUM: "a8defac40aaca2ca0896c7c5adbc241af60c7c3df470c1a4c469a860bd805429"
+    GIT_LFS_VERSION: "2.7.1"
+    GIT_LFS_CHECKSUM: "c8952ee72af214e3669f834d829e8a0a3becd160dead18237f99e40d75a3e920"
+
   script:
   - source ci/touch_make_dependencies
   - make release_docker_images
   tags:
   - release
+
+.build_windows_docker_images:
+  <<: *except_docs
+  stage: release
+  variables:
+    PUSH_TO_DOCKER_HUB: "false"
+    GIT_256_CHECKSUM: "bd91db55bd95eaa80687df28877e2df8c8858a0266e9c67331cfddba2735f25c"
+    GIT_LFS_256_CHECKSUM: "5c12db9728b53cba23e5f58f4a53d88cb2132e82fa1de0f8a79ce9d112e4d396"
+  before_script:
+  - if (Test-Path env:GPG_KEY) { Remove-Item Env:GPG_KEY }
+  script:
+  - .\ci\build_release_windows_images.ps1
+
 
 .release: &release
   <<: *except_docs
@@ -379,6 +461,13 @@ package-rpm: *packages
   <<: *release
   script:
   - make release_s3
+  - |
+    # publish release on gitlab.com
+    if [[ -n "${CI_COMMIT_TAG}" ]]; then
+      ./ci/release_gitlab
+    else
+      echo -e "\033[0;31m****** gitlab publishing disabled ******\033[0m"
+    fi
 
 .release_packagecloud: &release_packagecloud
   <<: *release
@@ -422,6 +511,16 @@ development docker images:
   tags:
   - docker
 
+development servercore1803 helper docker image:
+  <<: *release_development
+  <<: *windows1803
+  extends: .build_windows_docker_images
+
+development servercore1809 helper docker image:
+  <<: *release_development
+  <<: *windows1809
+  extends: .build_windows_docker_images
+
 bleeding edge S3:
   <<: *release_s3
   <<: *release_bleeding_edge
@@ -441,6 +540,28 @@ bleeding edge docker images:
   <<: *release_bleeding_edge
   environment:
     name: bleeding_edge/docker_images
+    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
+
+bleeding edge servercore1803 docker images:
+  <<: *release_bleeding_edge
+  <<: *windows1803
+  extends: .build_windows_docker_images
+  variables:
+    <<: *windows1803_variables
+    PUSH_TO_DOCKER_HUB: "true"
+  environment:
+    name: bleeding_edge/docker_images/windows1803
+    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
+
+bleeding edge servercore1809 docker images:
+  <<: *release_bleeding_edge
+  <<: *windows1809
+  extends: .build_windows_docker_images
+  variables:
+    <<: *windows1809_variables
+    PUSH_TO_DOCKER_HUB: "true"
+  environment:
+    name: bleeding_edge/docker_images/windows1809
     url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
 
 stable S3:
@@ -463,3 +584,39 @@ stable docker images:
   environment:
     name: stable/docker_images
     url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
+
+stable servercore1803 docker images:
+  <<: *release_stable
+  <<: *windows1803
+  extends: .build_windows_docker_images
+  variables:
+    <<: *windows1803_variables
+    PUSH_TO_DOCKER_HUB: "true"
+  environment:
+    name: stable/docker_images/windows1803
+    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
+
+stable servercore1809 docker images:
+  <<: *release_stable
+  <<: *windows1809
+  extends: .build_windows_docker_images
+  variables:
+    <<: *windows1809_variables
+    PUSH_TO_DOCKER_HUB: "true"
+  environment:
+    name: stable/docker_images/windows1809
+    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
+
+static QA:
+  <<: *except_docs
+  stage: release
+  image: alpine:3.7
+  cache: {}
+  dependencies:
+  - code_quality
+  script: |
+    if [ "$(cat gl-code-quality-report.json)" != "[]" ] ; then
+      apk add -U --no-cache jq > /dev/null
+      jq -C . gl-code-quality-report.json
+      exit 1
+    fi

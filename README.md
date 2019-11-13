@@ -114,27 +114,8 @@ check_interval = 0
     controller_address = "http://CONTROLLER_HOST:CONTROLLER_PORT"
     image_id = "IMAGE_ID"
 
-```
-
-More optional configuration parameters (under runners.anka):  
-
-tag - choose a specific tag to run on.  
-node_id - run the vm on a specific node.   
-priority - override the task's default priority (smaller number is higher priority).  
-group_id - Specify a group id if groups are configured.  
-keep_alive_on_error - Keep the VM alive in case of a build error.  
-
-**NOTE:** You can also use gitlab-runner register --non-interactive. add --help for available parameters.
-
-
-### Run the runner
-
-```
-gitlab-runner start
-```
-
-## Execution Flow Diagram
-![execution flow diagram](https://github.com/veertuinc/gitlab-runner/blob/master/gitlab-integration.png)
+- 2014 - 2015   : [Kamil Trzciński](mailto:ayufan@ayufan.eu)
+- 2015 - now    : GitLab Inc. team and contributors
 
 ## License
 
