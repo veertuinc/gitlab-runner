@@ -1,5 +1,6 @@
-FROM ubuntu:16.04
+FROM ubuntu:18.04
 
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -y && \
     apt-get upgrade -y && \
     apt-get install -y ca-certificates wget apt-transport-https vim nano tzdata git curl && \
@@ -37,6 +38,7 @@ RUN dpkg -i /tmp/gitlab-runner_amd64.deb; \
 COPY entrypoint /
 RUN chmod +x /entrypoint
 
+STOPSIGNAL SIGQUIT
 VOLUME ["/etc/gitlab-runner", "/home/gitlab-runner"]
 ENTRYPOINT ["/usr/bin/dumb-init", "/entrypoint"]
 CMD ["run", "--user=gitlab-runner", "--working-directory=/home/gitlab-runner"]

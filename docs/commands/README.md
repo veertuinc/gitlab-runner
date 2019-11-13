@@ -38,7 +38,7 @@ USAGE:
    gitlab-runner run [command options] [arguments...]
 
 OPTIONS:
-   -c, --config "/Users/ayufan/.gitlab-runner/config.toml"	Config file [$CONFIG_FILE]
+   -c, --config "/Users/ayufan/.gitlab-runner/config.toml"      Config file [$CONFIG_FILE]
 ```
 
 ## Running in debug mode
@@ -89,9 +89,9 @@ GitLab Runner configuration uses the [TOML] format.
 
 The file to be edited can be found in:
 
-1. `/etc/gitlab-runner/config.toml` on \*nix systems when gitlab-runner is
+1. `/etc/gitlab-runner/config.toml` on \*nix systems when GitLab Runner is
    executed as super-user (`root`)
-1. `~/.gitlab-runner/config.toml` on \*nix systems when gitlab-runner is
+1. `~/.gitlab-runner/config.toml` on \*nix systems when GitLab Runner is
    executed as non-root
 1. `./config.toml` on other systems
 
@@ -141,22 +141,22 @@ AUTHOR(S):
    GitLab Inc. <support@gitlab.com>
 
 COMMANDS:
-   exec		execute a build locally
-   run		run multi runner service
-   register	register a new runner
-   install	install service
-   uninstall	uninstall service
-   start	start service
-   stop		stop service
-   restart	restart service
-   status	get status of a service
-   run-single	start single runner
-   unregister	unregister specific runner
-   verify	verify all registered runners
-   archive	find and archive files (internal)
-   artifacts	upload build artifacts (internal)
-   extract	extract files from an archive (internal)
-   help, h	Shows a list of commands or help for one command
+   exec         execute a build locally
+   run          run multi runner service
+   register     register a new runner
+   install      install service
+   uninstall    uninstall service
+   start        start service
+   stop         stop service
+   restart      restart service
+   status       get status of a service
+   run-single   start single runner
+   unregister   unregister specific runner
+   verify       verify all registered runners
+   archive      find and archive files (internal)
+   artifacts    upload build artifacts (internal)
+   extract      extract files from an archive (internal)
+   help, h      Shows a list of commands or help for one command
 ```
 
 Below we will explain what each command does in detail.
@@ -166,12 +166,12 @@ Below we will explain what each command does in detail.
 The following commands allow you to register a new runner, or list and verify
 them if they are still registered.
 
-- [gitlab-runner register](#gitlab-runner-register)
+- [`gitlab-runner register`](#gitlab-runner-register)
   - [Interactive registration](#interactive-registration)
   - [Non-interactive registration](#non-interactive-registration)
-- [gitlab-runner list](#gitlab-runner-list)
-- [gitlab-runner verify](#gitlab-runner-verify)
-- [gitlab-runner unregister](#gitlab-runner-unregister)
+- [`gitlab-runner list`](#gitlab-runner-list)
+- [`gitlab-runner verify`](#gitlab-runner-verify)
+- [`gitlab-runner unregister`](#gitlab-runner-unregister)
 
 The above commands support the following arguments:
 
@@ -179,7 +179,7 @@ The above commands support the following arguments:
 |-------------|---------|-------------|
 | `--config`  | See the [configuration file section](#configuration-file) | Specify a custom configuration file to be used |
 
-### gitlab-runner register
+### `gitlab-runner register`
 
 This command registers your GitLab Runner in GitLab using the GitLab [Runners API](https://docs.gitlab.com/ee/api/runners.html#register-a-new-runner).
 
@@ -205,19 +205,25 @@ asked multiple questions during a Runner's registration.
 
 This question can be pre-filled by adding arguments when invoking the registration command:
 
-    gitlab-runner register --name my-runner --url http://gitlab.example.com --registration-token my-registration-token
+```
+gitlab-runner register --name my-runner --url http://gitlab.example.com --registration-token my-registration-token
+```
 
 Or by configuring the environment variable before the `register` command:
 
-    export CI_SERVER_URL=http://gitlab.example.com
-    export RUNNER_NAME=my-runner
-    export REGISTRATION_TOKEN=my-registration-token
-    export REGISTER_NON_INTERACTIVE=true
-    gitlab-runner register
+```
+export CI_SERVER_URL=http://gitlab.example.com
+export RUNNER_NAME=my-runner
+export REGISTRATION_TOKEN=my-registration-token
+export REGISTER_NON_INTERACTIVE=true
+gitlab-runner register
+```
 
 To check all possible arguments and environments execute:
 
-    gitlab-runner register --help
+```
+gitlab-runner register --help
+```
 
 #### Non-interactive registration
 
@@ -225,22 +231,33 @@ It's possible to use registration in non-interactive / unattended mode.
 
 You can specify the arguments when invoking the registration command:
 
-    gitlab-runner register --non-interactive <other-arguments>
+```
+gitlab-runner register --non-interactive <other-arguments>
+```
 
 Or by configuring the environment variable before the `register` command:
 
-    <other-environment-variables>
-    export REGISTER_NON_INTERACTIVE=true
-    gitlab-runner register
+```
+<other-environment-variables>
+export REGISTER_NON_INTERACTIVE=true
+gitlab-runner register
+```
 
 > **Note:** Boolean parameters must be passed in the command line with `--key={true|false}`.
 
-### gitlab-runner list
+#### `[[runners]]` configuration template file
+
+> [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/issues/4228) in GitLab Runner 12.2.
+
+Additional options can be easily configured during Runner registration using the
+[configuration template file](../register/index.md#runners-configuration-template-file) feature.
+
+### `gitlab-runner list`
 
 This command lists all runners saved in the
 [configuration file](#configuration-file).
 
-### gitlab-runner verify
+### `gitlab-runner verify`
 
 This command checks if the registered runners can connect to GitLab, but it
 doesn't verify if the runners are being used by the GitLab Runner service. An
@@ -264,7 +281,7 @@ make sure to have a backup of `config.toml` before executing it.
 gitlab-runner verify --delete
 ```
 
-### gitlab-runner unregister
+### `gitlab-runner unregister`
 
 This command unregisters registered runners using the GitLab [Runners API](https://docs.gitlab.com/ee/api/runners.html#delete-a-registered-runner).
 
@@ -292,13 +309,13 @@ Then use this information to unregister it, using one of the following commands.
 This operation cannot be undone, it will update the configuration file, so
 make sure to have a backup of `config.toml` before executing it.
 
-#### By URL and token:
+#### By URL and token
 
 ```bash
 gitlab-runner unregister --url http://gitlab.example.com/ --token t0k3n
 ```
 
-#### By name:
+#### By name
 
 > **Note:** If there is more than one runner with the given name, only the first one will be removed
 
@@ -306,7 +323,7 @@ gitlab-runner unregister --url http://gitlab.example.com/ --token t0k3n
 gitlab-runner unregister --name test-runner
 ```
 
-#### All Runners:
+#### All Runners
 
 ```bash
 gitlab-runner unregister --all-runners
@@ -320,12 +337,12 @@ and will be removed in one of the upcoming releases.
 The following commands allow you to manage the runner as a system or user
 service. Use them to install, uninstall, start and stop the runner service.
 
-- [gitlab-runner install](#gitlab-runner-install)
-- [gitlab-runner uninstall](#gitlab-runner-uninstall)
-- [gitlab-runner start](#gitlab-runner-start)
-- [gitlab-runner stop](#gitlab-runner-stop)
-- [gitlab-runner restart](#gitlab-runner-restart)
-- [gitlab-runner status](#gitlab-runner-status)
+- [`gitlab-runner install`](#gitlab-runner-install)
+- [`gitlab-runner uninstall`](#gitlab-runner-uninstall)
+- [`gitlab-runner start`](#gitlab-runner-start)
+- [`gitlab-runner stop`](#gitlab-runner-stop)
+- [`gitlab-runner restart`](#gitlab-runner-restart)
+- [`gitlab-runner status`](#gitlab-runner-status)
 - [Multiple services](#multiple-services)
 - [**Access Denied** when running the service-related commands](#access-denied-when-running-the-service-related-commands)
 
@@ -336,7 +353,7 @@ All service related commands accept these arguments:
 | `--service` | `gitlab-runner`                                   | Specify custom service name |
 | `--config`  | See the [configuration file](#configuration-file) | Specify a custom configuration file to use |
 
-### gitlab-runner install
+### `gitlab-runner install`
 
 This command installs GitLab Runner as a service. It accepts different sets of
 arguments depending on which system it's run on.
@@ -346,29 +363,31 @@ allows you to drop privileges of builds run with the **shell** executor.
 
 | Parameter             | Default               | Description |
 |-----------------------|-----------------------|-------------|
+| `--service`           | `gitlab-runner`       | Specify service name to use |
+| `--config`           | See the [configuration file](#configuration-file) | Specify a custom configuration file to use |
 | `--syslog`            | `true`                | Specify if the service should integrate with system logging service |
 | `--working-directory` | the current directory | Specify the root directory where all data will be stored when builds will be run with the **shell** executor |
 | `--user`              | `root`                | Specify the user which will be used to execute builds |
 | `--password`          | none                  | Specify the password for the user that will be used to execute the builds |
 
-### gitlab-runner uninstall
+### `gitlab-runner uninstall`
 
 This command stops and uninstalls the GitLab Runner from being run as an
 service.
 
-### gitlab-runner start
+### `gitlab-runner start`
 
 This command starts the GitLab Runner service.
 
-### gitlab-runner stop
+### `gitlab-runner stop`
 
 This command stops the GitLab Runner service.
 
-### gitlab-runner restart
+### `gitlab-runner restart`
 
 This command stops and then starts the GitLab Runner service.
 
-### gitlab-runner status
+### `gitlab-runner status`
 
 This command prints the status of the GitLab Runner service. The exit code is zero when the service is running and non-zero when the service is not running.
 
@@ -381,7 +400,7 @@ Runner services installed, with multiple separate configurations.
 
 This command allows to fetch and process builds from GitLab.
 
-### gitlab-runner run
+### `gitlab-runner run`
 
 This is main command that is executed when GitLab Runner is started as a
 service. It reads all defined Runners from `config.toml` and tries to run all
@@ -399,7 +418,7 @@ It accepts the following parameters.
 | `--syslog`  | `false` | Send all logs to SysLog (Unix) or EventLog (Windows) |
 | `--listen-address` | empty | Address (`<host>:<port>`) on which the Prometheus metrics HTTP server should be listening |
 
-### gitlab-runner run-single
+### `gitlab-runner run-single`
 
 This is a supplementary command that can be used to run only a single build
 from a single GitLab instance. It doesn't use any configuration file and
@@ -424,7 +443,7 @@ default of `0` means that the runner has no build limit and will run jobs foreve
 You can also use the `--wait-timeout` option to control how long the runner will wait for a job before
 exiting.  The default of `0` means that the runner has no timeout and will wait forever between jobs.
 
-### gitlab-runner exec
+### `gitlab-runner exec`
 
 > Notice: Not all features of `.gitlab-ci.yml` are supported by `exec`. Please
 check what exactly is supported in the [limitations of `gitlab-runner exec`](#limitations-of-gitlab-runner-exec)
@@ -486,7 +505,7 @@ for more details.
 | stages            | no                    | `exec` can only run one job, independently from others |
 | before_script     | yes                   | supports both global and job-level `before_script` |
 | after_script      | partially             | global `after_script` is not supported, only job-level `after_script`; only commands are taken in consideration, `when` is hardcoded to `always` |
-| variables         | yes                   | Supports default (partially), global and job-level variables; default variables are pre-set as can be seen in https://gitlab.com/gitlab-org/gitlab-runner/blob/master/helpers/gitlab_ci_yaml_parser/parser.go#L147 |
+| variables         | yes                   | Supports default (partially), global and job-level variables; default variables are pre-set as can be seen in <https://gitlab.com/gitlab-org/gitlab-runner/blob/master/helpers/gitlab_ci_yaml_parser/parser.go#L147> |
 | artifacts         | no                    |          |
 | cache             | partially             | Regarding the specific configuration it may or may not work as expected |
 | cache:policy      | no                    |          |
@@ -536,19 +555,19 @@ Git sources.
 GitLab Runner is distributed as a single binary and contains a few internal
 commands that are used during builds.
 
-### gitlab-runner artifacts-downloader
+### `gitlab-runner artifacts-downloader`
 
 Download the artifacts archive from GitLab.
 
-### gitlab-runner artifacts-uploader
+### `gitlab-runner artifacts-uploader`
 
 Upload the artifacts archive to GitLab.
 
-### gitlab-runner cache-archiver
+### `gitlab-runner cache-archiver`
 
 Create a cache archive, store it locally or upload it to an external server.
 
-### gitlab-runner cache-extractor
+### `gitlab-runner cache-extractor`
 
 Restore the cache archive from a locally or externally stored file.
 
@@ -561,9 +580,9 @@ Below are some common pitfalls.
 Usually the [service related commands](#service-related-commands) require
 administrator privileges:
 
-- On Unix (Linux, OSX, FreeBSD) systems, prefix `gitlab-runner` with `sudo`
+- On Unix (Linux, macOS, FreeBSD) systems, prefix `gitlab-runner` with `sudo`
 - On Windows systems use the elevated command prompt.
-  Run an `Administrator` command prompt ([How to][prompt]).
+  Run an `Administrator` command prompt.
   The simplest way is to write `Command Prompt` in the Windows search field,
   right click and select `Run as administrator`. You will be asked to confirm
   that you want to execute the elevated command prompt.

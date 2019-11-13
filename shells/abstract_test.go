@@ -196,39 +196,29 @@ func TestWriteWritingArtifactsOnFailure(t *testing.T) {
 
 func TestGitCleanFlags(t *testing.T) {
 	tests := map[string]struct {
-		value               string
-		legacyCleanStrategy string
+		value string
 
 		expectedGitClean      bool
 		expectedGitCleanFlags []interface{}
 	}{
 		"empty clean flags": {
 			value:                 "",
-			legacyCleanStrategy:   "false",
 			expectedGitClean:      true,
 			expectedGitCleanFlags: []interface{}{"-ffdx"},
 		},
 		"use custom flags": {
 			value:                 "custom-flags",
-			legacyCleanStrategy:   "false",
 			expectedGitClean:      true,
 			expectedGitCleanFlags: []interface{}{"custom-flags"},
 		},
 		"use custom flags with multiple arguments": {
 			value:                 "-ffdx -e cache/",
-			legacyCleanStrategy:   "false",
 			expectedGitClean:      true,
 			expectedGitCleanFlags: []interface{}{"-ffdx", "-e", "cache/"},
 		},
-		"uses legacy strategy": {
-			value:               "custom-flags",
-			legacyCleanStrategy: "true",
-			expectedGitClean:    false,
-		},
 		"disabled": {
-			value:               "none",
-			legacyCleanStrategy: "false",
-			expectedGitClean:    false,
+			value:            "none",
+			expectedGitClean: false,
 		},
 	}
 
@@ -245,7 +235,6 @@ func TestGitCleanFlags(t *testing.T) {
 					GitInfo: common.GitInfo{Sha: dummySha, Ref: dummyRef},
 					Variables: common.JobVariables{
 						{Key: "GIT_CLEAN_FLAGS", Value: test.value},
-						{Key: common.FFUseLegacyGitCleanStrategy, Value: test.legacyCleanStrategy},
 					},
 				},
 			}
@@ -265,4 +254,38 @@ func TestGitCleanFlags(t *testing.T) {
 			shell.writeCheckoutCmd(mockWriter, build)
 		})
 	}
+}
+
+func TestAbstractShell_writeSubmoduleUpdateCmdRecursive(t *testing.T) {
+	shell := AbstractShell{}
+	mockWriter := new(MockShellWriter)
+	defer mockWriter.AssertExpectations(t)
+
+	mockWriter.On("Notice", "Updating/initializing submodules recursively...").Once()
+	mockWriter.On("Command", "git", "submodule", "sync", "--recursive").Once()
+	mockWriter.On("Command", "git", "submodule", "update", "--init", "--recursive").Once()
+	mockWriter.On("Command", "git", "submodule", "foreach", "--recursive", "git clean -ffxd").Once()
+	mockWriter.On("Command", "git", "submodule", "foreach", "--recursive", "git reset --hard").Once()
+	mockWriter.On("IfCmd", "git", "lfs", "version").Once()
+	mockWriter.On("Command", "git", "submodule", "foreach", "--recursive", "git lfs pull").Once()
+	mockWriter.On("EndIf").Once()
+
+	shell.writeSubmoduleUpdateCmd(mockWriter, &common.Build{}, true)
+}
+
+func TestAbstractShell_writeSubmoduleUpdateCmd(t *testing.T) {
+	shell := AbstractShell{}
+	mockWriter := new(MockShellWriter)
+	defer mockWriter.AssertExpectations(t)
+
+	mockWriter.On("Notice", "Updating/initializing submodules...").Once()
+	mockWriter.On("Command", "git", "submodule", "sync").Once()
+	mockWriter.On("Command", "git", "submodule", "update", "--init").Once()
+	mockWriter.On("Command", "git", "submodule", "foreach", "git clean -ffxd").Once()
+	mockWriter.On("Command", "git", "submodule", "foreach", "git reset --hard").Once()
+	mockWriter.On("IfCmd", "git", "lfs", "version").Once()
+	mockWriter.On("Command", "git", "submodule", "foreach", "git lfs pull").Once()
+	mockWriter.On("EndIf").Once()
+
+	shell.writeSubmoduleUpdateCmd(mockWriter, &common.Build{}, false)
 }

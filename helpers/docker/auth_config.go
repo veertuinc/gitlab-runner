@@ -54,39 +54,41 @@ func SplitDockerImageName(reposName string) (string, string) {
 
 var HomeDirectory = homedir.Get()
 
-func ReadDockerAuthConfigsFromHomeDir(userName string) (map[string]types.AuthConfig, error) {
+func ReadDockerAuthConfigsFromHomeDir(userName string) (string, map[string]types.AuthConfig, error) {
 	homeDir := HomeDirectory
 
 	if userName != "" {
 		u, err := user.Lookup(userName)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		homeDir = u.HomeDir
 	}
 
 	if homeDir == "" {
-		return nil, fmt.Errorf("Failed to get home directory")
+		return "", nil, fmt.Errorf("Failed to get home directory")
 	}
 
-	p := path.Join(homeDir, ".docker", "config.json")
+	configFile := path.Join(homeDir, ".docker", "config.json")
 
-	r, err := os.Open(p)
+	r, err := os.Open(configFile)
 	defer r.Close()
 
 	if err != nil {
-		p := path.Join(homeDir, ".dockercfg")
-		r, err = os.Open(p)
+		configFile = path.Join(homeDir, ".dockercfg")
+		r, err = os.Open(configFile)
 		if err != nil && !os.IsNotExist(err) {
-			return nil, err
+			return "", nil, err
 		}
 	}
 
 	if r == nil {
-		return make(map[string]types.AuthConfig), nil
+		return "", make(map[string]types.AuthConfig), nil
 	}
 
-	return ReadAuthConfigsFromReader(r)
+	authConfigs, err := ReadAuthConfigsFromReader(r)
+
+	return configFile, authConfigs, err
 }
 
 func ReadAuthConfigsFromReader(r io.Reader) (map[string]types.AuthConfig, error) {
@@ -107,19 +109,42 @@ func ReadAuthConfigsFromReader(r io.Reader) (map[string]types.AuthConfig, error)
 		addAll(auths, authsFromCredentialsStore)
 	}
 
+	if config.CredentialHelpers != nil {
+		authsFromCredentialsHelpers, err := readAuthConfigsFromCredentialsHelper(config)
+		if err != nil {
+			return nil, err
+		}
+		addAll(auths, authsFromCredentialsHelpers)
+	}
+
 	return auths, nil
 }
 
 func readAuthConfigsFromCredentialsStore(config *configfile.ConfigFile) (map[string]types.AuthConfig, error) {
 	store := credentials.NewNativeStore(config, config.CredentialsStore)
-
 	newAuths, err := store.GetAll()
-
 	if err != nil {
 		return nil, err
 	}
 
 	return newAuths, nil
+}
+
+func readAuthConfigsFromCredentialsHelper(config *configfile.ConfigFile) (map[string]types.AuthConfig, error) {
+	helpersAuths := make(map[string]types.AuthConfig)
+
+	for registry, helper := range config.CredentialHelpers {
+		store := credentials.NewNativeStore(config, helper)
+
+		newAuths, err := store.Get(registry)
+		if err != nil {
+			return nil, err
+		}
+
+		helpersAuths[registry] = newAuths
+	}
+
+	return helpersAuths, nil
 }
 
 func addAll(to, from map[string]types.AuthConfig) {

@@ -18,7 +18,7 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
+	docker_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
 )
 
 func TestDockerCommandSuccessRun(t *testing.T) {
@@ -394,7 +394,7 @@ func TestDockerCommandBuildCancel(t *testing.T) {
 
 	err = build.Run(&common.Config{}, trace)
 	assert.IsType(t, err, &common.BuildError{})
-	assert.EqualError(t, err, "canceled")
+	assert.Contains(t, err.Error(), "canceled")
 }
 
 func TestDockerCommandTwoServicesFromOneImage(t *testing.T) {
@@ -986,7 +986,7 @@ func TestDockerCommandWithHelperImageConfig(t *testing.T) {
 		return
 	}
 
-	helperImageConfig := "gitlab/gitlab-runner-helper:x86_64-64eea86c"
+	helperImageConfig := "gitlab/gitlab-runner-helper:x86_64-5a147c92"
 
 	successfulBuild, err := common.GetRemoteSuccessfulBuild()
 	assert.NoError(t, err)
@@ -1008,7 +1008,7 @@ func TestDockerCommandWithHelperImageConfig(t *testing.T) {
 	err = build.Run(&common.Config{}, &common.Trace{Writer: &buffer})
 	assert.NoError(t, err)
 	out := buffer.String()
-	assert.Contains(t, out, "Using docker image sha256:bbd86c6ba107ae2feb8dbf9024df4b48597c44e1b584a3d901bba91f7fc500e3 for gitlab/gitlab-runner-helper:x86_64-64eea86c ...")
+	assert.Contains(t, out, "Using docker image sha256:3cf24b1b62b6a4c55c5de43db4f50c0ff8b455238c836945d4b5c645411bfc77 for gitlab/gitlab-runner-helper:x86_64-5a147c92 ...")
 }
 
 func TestDockerCommandWithDoingPruneAndAfterScript(t *testing.T) {
@@ -1049,4 +1049,66 @@ func TestDockerCommandWithDoingPruneAndAfterScript(t *testing.T) {
 
 	err = build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	assert.NoError(t, err)
+}
+
+func TestDockerCommandUsingBuildsVolume(t *testing.T) {
+	if helpers.SkipIntegrationTests(t, "docker", "info") {
+		return
+	}
+
+	const buildsPath = "/builds"
+	// the path is taken from `repoRemoteURL`
+	const buildsGroupPath = "/builds/gitlab-org/ci-cd/tests"
+
+	tests := map[string]struct {
+		validPath   string
+		invalidPath string
+		variable    string
+	}{
+		"uses default state of FF_USE_LEGACY_BUILDS_DIR_FOR_DOCKER": {
+			validPath:   buildsPath,
+			invalidPath: buildsGroupPath,
+			variable:    "",
+		},
+		"disables FF_USE_LEGACY_BUILDS_DIR_FOR_DOCKER": {
+			validPath:   buildsPath,
+			invalidPath: buildsGroupPath,
+			variable:    "FF_USE_LEGACY_BUILDS_DIR_FOR_DOCKER=false",
+		},
+		"enables FF_USE_LEGACY_BUILDS_DIR_FOR_DOCKER": {
+			validPath:   buildsGroupPath,
+			invalidPath: buildsPath,
+			variable:    "FF_USE_LEGACY_BUILDS_DIR_FOR_DOCKER=true",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			jobResponse, err := common.GetRemoteBuildResponse(
+				"mountpoint "+test.validPath,
+				"! mountpoint "+test.invalidPath,
+			)
+			require.NoError(t, err)
+
+			build := &common.Build{
+				JobResponse: jobResponse,
+				Runner: &common.RunnerConfig{
+					RunnerSettings: common.RunnerSettings{
+						Executor: "docker",
+						Docker: &common.DockerConfig{
+							Image:      common.TestAlpineImage,
+							PullPolicy: common.PullPolicyIfNotPresent,
+						},
+						Environment: []string{
+							"GIT_STRATEGY=none",
+							test.variable,
+						},
+					},
+				},
+			}
+
+			err = build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+			assert.NoError(t, err)
+		})
+	}
 }

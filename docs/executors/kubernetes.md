@@ -1,6 +1,6 @@
 # The Kubernetes executor
 
-GitLab Runner can use Kubernetes to run builds on a kubernetes cluster. This is
+GitLab Runner can use Kubernetes to run builds on a Kubernetes cluster. This is
 possible with the use of the **Kubernetes** executor.
 
 The **Kubernetes** executor, when used with GitLab CI, connects to the Kubernetes
@@ -26,7 +26,7 @@ are then applicable:
 The Kubernetes executor divides the build into multiple steps:
 
 1. **Prepare**: Create the Pod against the Kubernetes Cluster.
-	This creates the containers required for the build and services to run.
+   This creates the containers required for the build and services to run.
 1. **Pre-build**: Clone, restore cache and download artifacts from previous
    stages. This is run on a special container as part of the Pod.
 1. **Build**: User build.
@@ -75,22 +75,23 @@ The following keywords help to define the behaviour of the Runner within Kuberne
 - `helper_cpu_request`: The CPU allocation requested for build helper containers
 - `helper_memory_request`: The amount of memory requested for build helper containers
 - `pull_policy`: specify the image pull policy: `never`, `if-not-present`, `always`. The cluster default will be used if not set.
-- `node_selector`: A `table` of `key=value` pairs of `string=string`. Setting this limits the creation of pods to kubernetes nodes matching all the `key=value` pairs
-- `node_tolerations`: A `table` of `key=value:Effect` pairs in the format of `string=string:string`. Setting this allows pods to schedule to nodes with all or a subset of tolerated taints. Only one toleration can be supplied through environment variable configuration. The `key`, `value`, and `effect` match with the corresponding field names in kubernetes pod toleration configuration.
+- `node_selector`: A `table` of `key=value` pairs of `string=string`. Setting this limits the creation of pods to Kubernetes nodes matching all the `key=value` pairs
+- `node_tolerations`: A `table` of `"key=value" = "Effect"` pairs in the format of `string=string:string`. Setting this allows pods to schedule to nodes with all or a subset of tolerated taints. Only one toleration can be supplied through environment variable configuration. The `key`, `value`, and `effect` match with the corresponding field names in Kubernetes pod toleration configuration.
 - `image_pull_secrets`: A array of secrets that are used to authenticate docker image pulling
-- `helper_image`: [ADVANCED] Override the default helper image used to clone repos and upload artifacts. Read the [helper image][advanced-configuration-helper-image] section of _advanced configuration_ page for more details
+- `helper_image`: (Advanced) [Override the default helper image](../configuration/advanced-configuration.md#helper-image) used to clone repos and upload artifacts.
 - `terminationGracePeriodSeconds`: Duration after the processes running in the pod are sent a termination signal and the time when the processes are forcibly halted with a kill signal
-- `poll_interval`: How frequently, in seconds, the runner will poll the Kubernetes pod it has just created to check its status. [Default: 3]
-- `poll_timeout`: The amount of time, in seconds, that needs to pass before the runner will timeout attempting to connect to the container it has just created (useful for queueing more builds that the cluster can handle at a time) [Default: 180]
+- `poll_interval`: How frequently, in seconds, the runner will poll the Kubernetes pod it has just created to check its status (default = 3).
+- `poll_timeout`: The amount of time, in seconds, that needs to pass before the runner will time out attempting to connect to the container it has just created. Useful for queueing more builds that the cluster can handle at a time (default = 180).
 - `pod_labels`: A set of labels to be added to each build pod created by the runner. The value of these can include environment variables for expansion.
 - `pod_annotations`: A set of annotations to be added to each build pod created by the Runner. The value of these can include environment variables for expansion. Pod annotations can be overwritten in each build.
 - `pod_annotations_overwrite_allowed`: Regular expression to validate the contents of
   the pod annotations overwrite environment variable. When empty,
-    it disables the pod annotations overwrite feature
-- `service_account`: default service account to be used for making kubernetes api calls.
+  it disables the pod annotations overwrite feature
+- `pod_security_context`: Configured through the config file, this sets a pod security context for the build pod. [Read more about security context](#using-security-context)
+- `service_account`: default service account to be used for making Kubernetes api calls.
 - `service_account_overwrite_allowed`: Regular expression to validate the contents of
   the service account overwrite environment variable. When empty,
-    it disables the service account overwrite feature
+  it disables the service account overwrite feature
 - `bearer_token`: Default bearer token used to launch build pods.
 - `bearer_token_overwrite_allowed`: Boolean to allow projects to specify a bearer token that will be used to create the build pod.
 - `volumes`: configured through the config file, the list of volumes that will be mounted in the build container. [Read more about using volumes.](#using-volumes)
@@ -124,19 +125,22 @@ Additionally, Kubernetes service account can be overwritten on `.gitlab-ci.yml` 
 
 This approach allow you to specify a service account that is attached to the namespace, useful when dealing
 with complex RBAC configurations.
+
 ``` yaml
 variables:
   KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: ci-service-account
 ```
-usefull when overwritting the namespace and RBAC is setup in the cluster.
+
+useful when overwritting the namespace and RBAC is setup in the cluster.
 
 To ensure only designated service accounts will be used during CI runs, inform the configuration
- `service_account_overwrite_allowed` or set the environment variable `KUBERNETES_SERVICE_ACCOUNT_OVERWRITE_ALLOWED`
- with proper regular expression. When left empty the overwrite behaviour is disabled.
+`service_account_overwrite_allowed` or set the environment variable `KUBERNETES_SERVICE_ACCOUNT_OVERWRITE_ALLOWED`
+with proper regular expression. When left empty the overwrite behaviour is disabled.
 
 ### Setting Bearer Token to be Used When Making Kubernetes API calls
 
 In conjunction with setting the namespace and service account as mentioned above, you may set the bearer token used when making API calls to create the build pods.  This will allow project owners to use project secret variables to specify a bearer token.  When specifying the bearer token, it is required that you set the `Host` config keyword.
+
 ``` yaml
 variables:
   KUBERNETES_BEARER_TOKEN: thebearertokenfromanothernamespace
@@ -158,7 +162,7 @@ You must specify [`pod_annotations_overwrite_allowed`](#the-keywords) to overrid
 
 ## Define keywords in the config toml
 
-Each of the keywords can be defined in the `config.toml` for the gitlab runner.
+Each of the keywords can be defined in the `config.toml` for the GitLab Runner.
 
 Here is an example `config.toml`:
 
@@ -189,6 +193,11 @@ concurrent = 4
     poll_timeout = 3600
     [runners.kubernetes.node_selector]
       gitlab = "true"
+    [runners.kubernetes.node_tolerations]
+      "node-role.kubernetes.io/master" = "NoSchedule"
+      "custom.toleration=value" = "NoSchedule"
+      "empty.value=" = "PreferNoSchedule"
+      "onlyKey" = ""
 ```
 
 ## Using volumes
@@ -272,7 +281,7 @@ that is defined in Kubernetes cluster and mount it inside of the container.
 | name       | string  | yes      | The name of the volume and at the same time the name of _configMap_ that should be used |
 | mount_path | string  | yes      | Path inside of container where the volume should be mounted |
 | read_only  | boolean | no       | Set's the volume in read-only mode (defaults to false) |
-| items      | map[string]string | no | Key-to-path mapping for keys from the _configMap_ that should be used. |
+| items      | `map[string]string` | no   | Key-to-path mapping for keys from the _configMap_ that should be used. |
 
 When using _configMap_ volume, each key from selected _configMap_ will be changed into a file
 stored inside of the selected mount path. By default all keys are present, _configMap's_ key
@@ -295,7 +304,7 @@ a _secret_ that is defined in Kubernetes cluster and mount it inside of the cont
 | name       | string  | yes      | The name of the volume and at the same time the name of _secret_ that should be used |
 | mount_path | string  | yes      | Path inside of container where the volume should be mounted |
 | read_only  | boolean | no       | Set's the volume in read-only mode (defaults to false) |
-| items      | map[string]string | no | Key-to-path mapping for keys from the _secret_ that should be used. |
+| items      | `map[string]string` | no   | Key-to-path mapping for keys from the _configMap_ that should be used. |
 
 When using _secret_ volume each key from selected _secret_ will be changed into a file
 stored inside of the selected mount path. By default all keys are present, _secret's_ key
@@ -318,16 +327,64 @@ to volume's mount path) where _secret's_ value should be saved. When using `item
 | mount_path | string  | yes      | Path inside of container where the volume should be mounted |
 | medium     | String  | no       | "Memory" will provide a tmpfs, otherwise it defaults to the node disk storage (defaults to "") |
 
+## Using Security Context
+
+[Pod security context][k8s-pod-security-docs] configuration instructs executor to set a pod security policy on the build pod.
+
+| Option              | Type     | Required | Description |
+|---------------------|----------|----------|-------------|
+| fs_group            | int      | no       | A special supplemental group that applies to all containers in a pod |
+| run_as_group        | int      | no       | The GID to run the entrypoint of the container process |
+| run_as_non_root     | boolean  | no       | Indicates that the container must run as a non-root user |
+| run_as_user         | int      | no       | The UID to run the entrypoint of the container process |
+| supplemental_groups | int list | no       | A list of groups applied to the first process run in each container, in addition to the container's primary GID |
+
+Assigining  a security context to pods provides security to your Kubernetes cluster.  For this to work you'll need to provide a helper
+image that conforms to the policy you set here.
+
+More about the helper image can be found [here](https://docs.gitlab.com/runner/configuration/advanced-configuration.html#helper-image).
+Example of building your own helper image:
+
+```Dockerfile
+ARG tag
+FROM gitlab/gitlab-runner-helper:${tag}
+RUN addgroup -g 59417 -S nonroot && \
+    adduser -u 59417 -S nonroot -G nonroot
+WORKDIR /home/nonroot
+USER 59417:59417
+```
+
+This example creates a user and group called `nonroot` and sets the image to run as that user.
+
+Example of setting pod security context in your config.toml:
+
+```toml
+concurrent = %(concurrent)s
+check_interval = 30
+  [[runners]]
+    name = "myRunner"
+    url = "gitlab.example.com"
+    executor = "kubernetes"
+    [runners.kubernetes]
+      helper_image = "gitlab-registy.example.com/helper:latest"
+      [runners.kubernetes.pod_security_context]
+        run_as_non_root = true
+        run_as_user = 59417
+        run_as_group = 59417
+        fs_group = 59417
+```
+
 ## Using Docker in your builds
 
 There are a couple of caveats when using docker in your builds while running on
-a kubernetes cluster. Most of these issues are already discussed in the
+a Kubernetes cluster. Most of these issues are already discussed in the
 [**Using Docker Build**](https://docs.gitlab.com/ee/ci/docker/using_docker_build.html)
-section of the gitlab-ci
+section of the GitLab CI
 documentation but it is worth it to revisit them here as you might run into
 some slightly different things when running this on your cluster.
 
 ### Exposing `/var/run/docker.sock`
+
 Exposing your host's `/var/run/docker.sock` into your build container, using the
 `runners.kubernetes.volumes.host_path` option, brings the same risks with it as
 always. That node's containers are accessible from the build container and
@@ -335,6 +392,7 @@ depending if you are running builds in the same cluster as your production
 containers it might not be wise to do that.
 
 ### Using `docker:dind`
+
 Running the `docker:dind` also known as the `docker-in-docker` image is also
 possible but sadly needs the containers to be run in privileged mode.
 If you're willing to take that risk other problems will arise that might not
@@ -347,8 +405,9 @@ binary tries to use it by default. To overwrite this and make the client use tcp
 to contact the docker daemon in the other container be sure to include
 `DOCKER_HOST=tcp://localhost:2375` in your environment variables of the build container.
 
-### Not supplying git
-Do *not* try to use an image that doesn't supply git and add the `GIT_STRATEGY=none`
+### Not supplying Git
+
+Do *not* try to use an image that doesn't supply Git and add the `GIT_STRATEGY=none`
 environment variable for a job that you think doesn't need to do a fetch or clone.
 Because Pods are ephemeral and do not keep state of previously run jobs your
 checked out code will not exist in both the build and the docker service container.
@@ -357,11 +416,12 @@ the docker service complaining that it cannot follow some symlinks into your
 build context because of the missing code.
 
 ### Resource separation
+
 In both the `docker:dind` and `/var/run/docker.sock` cases the docker daemon
 has access to the underlying kernel of the host machine. This means that any
 `limits` that had been set in the Pod will not work when building docker images.
 The docker daemon will report the full capacity of the node regardless of
-the limits imposed on the docker build containers spawned by kubernetes.
+the limits imposed on the docker build containers spawned by Kubernetes.
 
 One way to help minimize the exposure of the host's kernel to any build container
 when running in privileged mode or by exposing `/var/run/docker.sock` is to use
@@ -388,4 +448,4 @@ For more information, see [Building images with kaniko and GitLab CI/CD](https:/
 [k8s-secret-volume-docs]: https://kubernetes.io/docs/concepts/storage/volumes/#secret
 [k8s-config-map-docs]: https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/
 [k8s-empty-dir-volume-docs]:https://kubernetes.io/docs/concepts/storage/volumes/#emptydir
-[advanced-configuration-helper-image]: ../configuration/advanced-configuration.md#helper-image
+[k8s-pod-security-docs]:https://kubernetes.io/docs/concepts/policy/pod-security-policy/

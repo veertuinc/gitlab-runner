@@ -1,3 +1,285 @@
+v12.4.1 (2019-10-28)
+
+- Fix TLS chain building !1643
+
+v12.4.0 (2019-10-21)
+
+- Fix err logging for runner limit !1403
+- Add the note about incompatibility of session_server with helm chart runner !1575
+- Fix prepare_exec typo in docs !1576
+- Docs edits to clarify feature flags motivations and usage in Runner !1568
+- Change log levels for common errors !1578
+- Extend custom executor config !1583
+- Fix JSON inside of docs !1587
+- Update link for Helm chart issue tracker !1588
+- Add pipeline ID to docker labels !1592
+- Fix typo in helpers/path/windows_path !1594
+- Fix broken check for Git LFS that breaks lfs pulling !1599
+- Update advanced-configuration.md !1597
+- Use certutil to create certificate chain for Git !1581
+- Add Go Report Card badge to the README file !1601
+- Add pipeline link !1608
+- Rename mentions of OSX to MacOS !1440
+- Enable pinentry mode to loopback for GPG signing !1614
+- Update various runner doc links !1585
+- Add note about IAM role usage for s3 cache configuration !1598
+- Bump used Go version to 1.10.8 !1617
+- Update gopkg.in/yaml.v2 !1619
+- Update prometheus libraries !1620
+- Bump github.com/json-iterator/go to 1.1.7 !1621
+- Update k8s client go to 11.0 !1615
+- Rename log to trace in runner docs !1616
+- Change Review priority label meaning !1600
+- Add timeout when waiting for the build to finish !1609
+
+v12.3.0 (2019-09-20)
+
+- Change log levels for common errors !1578
+- Update a redirected link !1520
+- Removal of conditions which are always evaluated either to true or false !1517
+- Add initial docs for best practice !1509
+- Update VirtualBox executor docs !1527
+- Document configuration template file feature !1522
+- Rename landing page for consistency !1528
+- Edit new config template file section !1529
+- Update windows dev environment to git 2.22 !1530
+- Update PowerShell ErrorActionPreference documentation !1535
+- Remove debian buster from package list !1536
+- Update tls-self-signed.md !1537
+- Improve windows helper images build !1519
+- show which service exactly is invalid !1531
+- Change docs markdown linter from mdl to markdownlint !1540
+- Replace bastion with Runner Manager !1547
+- Add entry to FAQ, restructure also !1539
+- Change docs review and cleanup jobs to same CI stage !1543
+- docker.md: Correct Image Sizes !1542
+- Add note on shell-based Docker image requirement !1459
+- Fixed powershell commands for Windows Runner !1544
+- Remove the scripting  for release checklist issue creation !1556
+- Use new location for helm charts repo !1553
+- Make Notes look consistent !1555
+- Change markdownlint wildcard format !1554
+- Edit Docker images section !1550
+- Update capitalization in runner docs !1559
+- Docs/update ubuntu dev docs !1557
+- Use standard commands for directory creation to make it powershell core compatible !1563
+- Fix exiting with zero exit code when cmdlets fail !1558
+- Enable support for long paths !1524
+- Prevent dollar signs in shell codeblocks !1574
+- Clarify feature flag usage instructions !1566
+- Expose variable containing the 'short token' value !1571
+- Update documentation about OffPeakTimezone !1567
+- Set default PATH for helper image !1573
+
+v12.2.0 (2019-08-22)
+
+- Update docs executor titles !1454
+- Only default to Powershell on Windows if no other shell is specified !1457
+- Add more MDL rules !1462
+- Add PROCESS.md !1410
+- Fix wrong rc script for freebsd. !1418
+- Allow to build development version of DEB, RPM and Docker with make !824
+- Add custom executor documentation !1416
+- docs: clarify the requirements for pinning !823
+- Adds explanation of our review label system. !1461
+- Use FreeBSD's built-in stop and status scriplets from /etc/rc.subr !757
+- Fix typo on security docs !956
+- Update doc about Debian version !1464
+- Move note to subsection !1469
+- Correct spelling in help string !1471
+- Force an opt-out from Docker Machine bugsnag report !1443
+- Improved go install instructions for macOS !1472
+- Fix some linting issues !1424
+- Make it clear what is the default shell for Windows !1474
+- Add LXD example for custom executor !1439
+- Add libvirt custom executor example !1456
+- Update self-signed certificate docs for Windows service !1466
+- Docs/update min docker version !1480
+- Docs: Fix typo in custom executor !1479
+- Track Windows tests failures !1450
+- Add requirements for contributing new hardware architectures !1478
+- Fix markdown in runner docs (part 1) !1483
+- Fix markdown in runner docs (part 2) !1484
+- Update docs to specify default shell of OS !1485
+- Further clarify Docker requirements !1486
+- Fix typo and spacing in two runner docs !1487
+- docs: gitlab-runner helper image has no arm64 build yet !1489
+- Fix custom executor default config on register !1491
+- Update Windows test failures !1490
+- Expand markdown lint rules in runner !1492
+- Fix PowerShell capitalization !1497
+- Quarantine more windows tests !1499
+- Update tracked Windows tests failures list !1502
+- Quarantine windows tests !1501
+- Add docs for tls_verify config field !1493
+- Reorder methods in abstract.go to bring calees closer to the callers !1481
+- Update docs about bash on windows not working !1498
+- Cleanup commands/config.go !1494
+- Switch to DinD TLS for GitLab CI !1504
+- Add .gitattributes !1122
+- Prevent running multiple instances of the gitlab-runner process using the same configuration file !1496
+- Update test assertion !1510
+- Remove need for externally configured variable !1512
+- Change CI_COMMIT_REF to CI_COMMIT_SHA in docs !1513
+- Update reference to CI_COMMIT_REF to CI_COMMIT_SHA !1514
+- Configuration file template for registration command !1263
+- Update AWS autoscaling docs !1518
+- Add test for <at> and <colon> masking !1516
+
+v12.1.0 (2019-07-22)
+
+- Extend custom executor with configuration injects !1449
+- Fix "WARNING: apt does not have a stable CLI interface. Use with caution in scripts" !1143
+- Fix artifact uploading for Windows Docker containers !1414
+- Upgrade base image for gitlab/gitlab-runner:ubuntu to ubuntu:18.04 !1413
+- Add tip to execute batch from PowerShell !1412
+- Replace wget commands with curl commands !1419
+- Wrap submodule command with a string !1411
+- Add missing test cases for s3 IAM checks !1421
+- Add Markdown linting and one rule !1422
+- Fix indentation for docs !1417
+- Add docs for not supporting LCOW !1415
+- Disallow bare URLs from project !1425
+- Update zglob !1426
+- Add note in docs for mounting volumes to services !1420
+- Clarify docs for `builds_dir` & `cache_dir` !1428
+- Update docs to fix markdown and square bracket use !1429
+- Enforce consistent prefix for numbered lists !1435
+- Remove fedora/30 from supported list !1436
+- Add STOPSIGNAL to gitlab-runner docker images !1427
+- Add trace entry for Docker authConfig resolving !1431
+- Enforce consistent prefix for bullet lists !1441
+- Fix concurrent updates !1447
+- docs: add --config for install command !1433
+- Document why we no longer accept new executors !1437
+- Document limitation for Windows Docker target drive !1432
+- Trivial update to virtualbox.md - 'shutdown' is not the verb, barely the noun. !1445
+- Update description of flag in docs !1451
+- Docs: Update redirected links in runner docs !1453
+- Add lint rule that headings must increment one level at a time !1452
+- Add custom executor !1385
+
+v12.0.0 (2019-06-21)
+
+**Release notices:**
+
+With GitLab Runner 12.0 we're adding several breaking changes:
+
+- [Require refspec to clone/fetch git repository](https://gitlab.com/gitlab-org/gitlab-runner/issues/4069).
+- [Change command line API for helper images usage](https://gitlab.com/gitlab-org/gitlab-runner/issues/4013).
+- [Remove old cache configuration](https://gitlab.com/gitlab-org/gitlab-runner/issues/4070).
+- [Remove old metrics server configuration](https://gitlab.com/gitlab-org/gitlab-runner/issues/4072).
+- [Remove `FF_K8S_USE_ENTRYPOINT_OVER_COMMAND` feature flag and old behavior](https://gitlab.com/gitlab-org/gitlab-runner/issues/4073).
+- [Remove support for few Linux distributions that reached EOL](https://gitlab.com/gitlab-org/gitlab-runner/merge_requests/1130).
+- [Remove old `git clean` flow](https://gitlab.com/gitlab-org/gitlab-runner/issues/4175).
+
+Please look into linked issues for details.
+
+**Release changes:**
+
+- Support windows docker volumes configuration !1269
+- Fix powershell cloning !1338
+- Docs: Update docker register non-interactive command !1309
+- Update mocks !1343
+- Change source for go-homedir !1339
+- improve MR and issues templates !1347
+- docs: reuse previous clone !1346
+- Prevent copy and paste error due to not existed alpine tag. !1351
+- Fix typo for usage of proxies within docker containers for runners !1342
+- Add documentation for Windows Docker Executor !1345
+- Fix volume mounting when mode specified !1357
+- Update docs for docker executor description !1358
+- Show error when volume length is not expected !1360
+- Add feature flag to mounting volumes to services !1352
+- Implement session endpoint to proxy build services requests !1170
+- add build info for fedora 30 !1353
+- Limit `docker-windows` to Windows !1362
+- Update logging key for Docker Machine !1361
+- Update docs to refer to Windows Batch deprecation !1371
+- Remove deprecated git clean strategy !1370
+- Remove support for deprecated metrics_server setting !1368
+- Add labels to templates !1375
+- Remove support for deprecated entrypoint configuration for K8S !1369
+- Fix support for SELinux volume mounts & case sensitivity !1381
+- Remove old docker helper image commands !1373
+- Remove support for deprecated S3 cache configuration !1367
+- Added --system flag information into gitlab-runner install command !1378
+- Minor markdown fixes !1382
+- Remove support for deprecated distributions !1130
+- Add configuration of access_level for runners on registration !1323
+- Remove doc notice for deprecated OSes !1384
+- Remove deprecated clone/fetch command !1372
+- Allow configuration of  Pod Security Context by Kubernetes Exeutor !1036
+- Fix case sensitivity for windows volumes !1389
+- Accept docker-windows as an option on register !1388
+- Add documentation for windows development !1183
+- Document clear-docker-cache script !1390
+- Store traces on disk !1315
+- Make git init to be quiet !1383
+- Fix several typos !1392
+- Make volumes to work on linux docker on windows !1363
+- Update CHANGELOG.md with 11.11.x patch releases !1393
+- Dependencies license management with GitLab CI/CD !1279
+- Fix default cache volume docker-windows register !1391
+- Fixed date typo for v11.11.2 CHANGELOG entry !1394
+- Update github.com/Microsoft/go-winio dependency !1348
+- Update compatibility heading as it's no longer a chart/table !1401
+- Docker Credentials helper support !1386
+- Numerous typos fixed !1258
+- Update some logrus fields used in Runner logs !1405
+- Update osx.md so the update instructions work as well as the install instructions !1402
+- Make PowerShell default for new registered Windows shell executors !1406
+- Restore gofmt rules from before codeclimate update !1408
+- Update logrus to v1.4.0 !1407
+
+v11.11.2 (2019-06-03)
+
+- Fix support for SELinux volume mounts & case sensitivity !1381
+- Fix case sensitivity for windows volumes !1389
+- Update logging key for Docker Machine !1361
+- Limit `docker-windows` to Windows !1362
+- Make volumes to work on linux docker on windows !1363
+
+v11.11.1 (2019-05-24)
+
+- Fix volume mounting when mode specified !1357
+- Add documentation for Windows Docker Executor !1345
+- Add feature flag to mounting volumes to services !1352
+
+v11.11.0 (2019-05-22)
+
+- Fix PowerShell cloning !1338
+- Add PowerShell support for Docker Executor !1243
+- Support windows docker volumes configuration !1269
+- Fix git lfs not getting submodule objects !1298
+- Add homebrew installation method for macOS runners !837
+- mention the 59th second timeperiod issue in the docs !490
+- Refactor macOS install instructions !1303
+- Edit note on edge case !1304
+- Extract unsupportedOSTypeError to errors pkg !1305
+- Optimise trace handling for big traces !1292
+- Cleanup feature flags mess !1312
+- Add more documentation for node tolerations !1318
+- Typo: varialbes -> variables !1316
+- Allow to configure FF using config.toml !1321
+- Update link to the introduction of custom build directories !1302
+- Allow to use FF to configure `/builds` folder !1319
+- Create a single source of truth for feature flags !1313
+- Clear up docs on how to select shell !1209
+- Update feature flag documentation !1326
+- Refactor Helper Image package to work with Kubernetes !1306
+- Fix broken internal links !1332
+- Refactor helperimage package tests !1327
+- Change deprecation of FF_USE_LEGACY_BUILDS_DIR_FOR_DOCKER to 12.3 !1330
+- Update cmd script example !1333
+- Better explain the workflow in Docker executors doc !1310
+- Exclude mock files from coverage reporting !1334
+- Fix link syntax in advanced-configuration.md !1311
+- Docs: Update contributing links from gitlab-ce !1308
+- Update docker executor Executor Options initialization !1296
+- Add test case for Linux helper image !1335
+- Extract volumes configuration to a separate struct !1261
+
 v11.10.0 (2019-04-22)
 
 **Deprecations:**
@@ -51,6 +333,14 @@ https://about.gitlab.com/2019/04/22/gitlab-11-10-released/#release-deprecations
 - Cleanup k8s cleanup test !1280
 - Change helper image to servercore !1290
 - Add note about git-lfs !1294
+
+v11.9.2 (2019-04-09)
+- Fix git lfs not getting submodule objects !1298
+
+v11.9.1 (2019-04-03)
+- Make it again possible to disable Git LFS pull !1273
+- Use delayed variable expansion for error check in cmd !1260
+- Unexport common.RepoRemoteURL !1276
 
 v11.9.0 (2019-03-22)
 

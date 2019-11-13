@@ -3,10 +3,14 @@ package commands
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"testing"
 
+	"github.com/imdario/mergo"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -69,23 +73,27 @@ func getLogrusOutput(t *testing.T, hook *test.Hook) string {
 	for _, entry := range hook.AllEntries() {
 		message, err := entry.String()
 		require.NoError(t, err)
+
 		buf.WriteString(message)
 	}
 
 	return buf.String()
 }
 
-func mockEnv(t *testing.T, key string, value string) func() {
-	err := os.Setenv(key, value)
-	require.NoError(t, err, "Variable %q not set properly", key)
+func testRegisterCommandRun(t *testing.T, network common.Network, args ...string) (content string, output string, err error) {
+	hook := test.NewGlobal()
 
-	return func() {
-		err := os.Unsetenv(key)
-		assert.NoError(t, err, "Variable %q not unset properly", key)
-	}
-}
+	defer func() {
+		output = getLogrusOutput(t, hook)
 
-func testRegisterCommandRun(t *testing.T, network common.Network, args ...string) {
+		if r := recover(); r != nil {
+			// log panics forces exit
+			if e, ok := r.(*logrus.Entry); ok {
+				err = fmt.Errorf("command error: %s", e.Message)
+			}
+		}
+	}()
+
 	cmd := newRegisterCommand()
 	cmd.network = network
 
@@ -98,94 +106,235 @@ func testRegisterCommandRun(t *testing.T, network common.Network, args ...string
 		},
 	}
 
-	args = append([]string{"binary", "register"}, args...)
-	app.Run(args)
-}
-
-func testRegisterCommandDeprecatedOptions(t *testing.T, args ...string) (string, string) {
-	hook := test.NewGlobal()
-
-	network := new(common.MockNetwork)
-	defer network.AssertExpectations(t)
-
-	network.On("RegisterRunner", mock.Anything, mock.Anything).Once().Return(&common.RegisterRunnerResponse{
-		Token: "test-runner-token",
-	})
-
 	configFile, err := ioutil.TempFile("", "config.toml")
 	require.NoError(t, err)
 
-	configFile.Close()
+	err = configFile.Close()
+	require.NoError(t, err)
+
 	defer os.Remove(configFile.Name())
 
-	arguments := []string{
+	args = append([]string{
+		"binary", "register",
 		"-n",
 		"--config", configFile.Name(),
 		"--url", "http://gitlab.example.com/",
 		"--registration-token", "test-registration-token",
 		"--executor", "shell",
-		"--cache-type", "s3",
-	}
-	arguments = append(arguments, args...)
+	}, args...)
 
-	testRegisterCommandRun(t, network, arguments...)
+	comandErr := app.Run(args)
 
-	content, err := ioutil.ReadFile(configFile.Name())
+	fileContent, err := ioutil.ReadFile(configFile.Name())
 	require.NoError(t, err)
 
-	return string(content), getLogrusOutput(t, hook)
+	err = comandErr
+
+	return string(fileContent), "", err
 }
 
-// TODO: Remove in 12.0
-func TestRegisterCacheDeprecatedOptions_CLIOptions(t *testing.T) {
-	content, output := testRegisterCommandDeprecatedOptions(
-		t,
-		"--cache-s3-cache-path", "test_path",
-		"--cache-cache-shared",
-	)
+func TestAccessLevelSetting(t *testing.T) {
+	tests := map[string]struct {
+		accessLevel     AccessLevel
+		failureExpected bool
+	}{
+		"access level not defined": {},
+		"ref_protected used": {
+			accessLevel: RefProtected,
+		},
+		"not_protected used": {
+			accessLevel: NotProtected,
+		},
+		"unknown access level": {
+			accessLevel:     AccessLevel("unknown"),
+			failureExpected: true,
+		},
+	}
 
-	assert.Contains(t, content, `
-  [runners.cache]
-    Type = "s3"
-    Path = "test_path"
-    Shared = true
-`)
+	for testName, testCase := range tests {
+		t.Run(testName, func(t *testing.T) {
+			network := new(common.MockNetwork)
+			defer network.AssertExpectations(t)
 
-	assert.Contains(t, output, "'--cache-s3-cache-path' command line option and `$S3_CACHE_PATH` environment variables are deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-path' or '$CACHE_PATH' instead")
-	assert.Contains(t, output, "'--cache-cache-shared' command line is deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-shared' instead")
+			if !testCase.failureExpected {
+				parametersMocker := mock.MatchedBy(func(parameters common.RegisterRunnerParameters) bool {
+					return AccessLevel(parameters.AccessLevel) == testCase.accessLevel
+				})
+
+				network.On("RegisterRunner", mock.Anything, parametersMocker).
+					Return(&common.RegisterRunnerResponse{
+						Token: "test-runner-token",
+					}).
+					Once()
+			}
+
+			arguments := []string{
+				"--access-level", string(testCase.accessLevel),
+			}
+
+			_, output, err := testRegisterCommandRun(t, network, arguments...)
+
+			if testCase.failureExpected {
+				assert.EqualError(t, err, "command error: Given access-level is not valid. Please refer to gitlab-runner register -h for the correct options.")
+				assert.NotContains(t, output, "Runner registered successfully.")
+
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Contains(t, output, "Runner registered successfully.")
+		})
+	}
 }
 
-// TODO: Remove in 12.0
-func TestRegisterCacheDeprecatedOptions_EnvVariables(t *testing.T) {
-	defer mockEnv(t, "S3_CACHE_PATH", "test_path")()
-	defer mockEnv(t, "S3_SERVER_ADDRESS", "server_address")()
-	defer mockEnv(t, "S3_ACCESS_KEY", "access_key")()
-	defer mockEnv(t, "S3_SECRET_KEY", "secret_key")()
-	defer mockEnv(t, "S3_BUCKET_NAME", "bucket_name")()
-	defer mockEnv(t, "S3_BUCKET_LOCATION", "bucket_location")()
-	defer mockEnv(t, "S3_CACHE_INSECURE", "1")()
+func TestConfigTemplate_Enabled(t *testing.T) {
+	tests := map[string]struct {
+		path          string
+		expectedValue bool
+	}{
+		"configuration file defined": {
+			path:          "/path/to/file",
+			expectedValue: true,
+		},
+		"configuration file not defined": {
+			path:          "",
+			expectedValue: false,
+		},
+	}
 
-	content, output := testRegisterCommandDeprecatedOptions(t)
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			configTemplate := &configTemplate{ConfigFile: tc.path}
+			assert.Equal(t, tc.expectedValue, configTemplate.Enabled())
+		})
+	}
+}
 
-	assert.Contains(t, content, `
-  [runners.cache]
-    Type = "s3"
-    Path = "test_path"
-    [runners.cache.s3]
-      ServerAddress = "server_address"
-      AccessKey = "access_key"
-      SecretKey = "secret_key"
-      BucketName = "bucket_name"
-      BucketLocation = "bucket_location"
-      Insecure = true
-    [runners.cache.gcs]
-`)
+func prepareConfigurationTemplateFile(t *testing.T, content string) (string, func()) {
+	file, err := ioutil.TempFile("", "config.template.toml")
+	require.NoError(t, err)
 
-	assert.Contains(t, output, "'--cache-s3-cache-path' command line option and `$S3_CACHE_PATH` environment variables are deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-path' or '$CACHE_PATH' instead")
-	assert.Contains(t, output, "S3_SERVER_ADDRESS environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use CACHE_S3_SERVER_ADDRESS instead")
-	assert.Contains(t, output, "S3_ACCESS_KEY environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use CACHE_S3_ACCESS_KEY instead")
-	assert.Contains(t, output, "S3_SECRET_KEY environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use CACHE_S3_SECRET_KEY instead")
-	assert.Contains(t, output, "S3_BUCKET_NAME environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use CACHE_S3_BUCKET_NAME instead")
-	assert.Contains(t, output, "S3_BUCKET_LOCATION environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use CACHE_S3_BUCKET_LOCATION instead")
-	assert.Contains(t, output, "S3_CACHE_INSECURE environment variables is deprecated and will be removed in GitLab Runner 12.0. Please use CACHE_S3_INSECURE instead")
+	defer func() {
+		err = file.Close()
+		require.NoError(t, err)
+	}()
+
+	_, err = file.WriteString(content)
+	require.NoError(t, err)
+
+	cleanup := func() {
+		_ = os.Remove(file.Name())
+	}
+
+	return file.Name(), cleanup
+}
+
+var (
+	configTemplateMergeToInvalidConfiguration = `- , ;`
+
+	configTemplateMergeToEmptyConfiguration = ``
+
+	configTemplateMergeToTwoRunnerSectionsConfiguration = `
+[[runners]]
+[[runners]]`
+
+	configTemplateMergeToOverwritingConfiguration = `
+[[runners]]
+  token = "different_token"
+  executor = "docker"
+  limit = 100`
+
+	configTemplateMergeToAdditionalConfiguration = `
+[[runners]]
+  [runners.kubernetes]
+    [runners.kubernetes.volumes]
+      [[runners.kubernetes.volumes.empty_dir]]
+        name = "empty_dir"
+	    mount_path = "/path/to/empty_dir"
+	    medium = "Memory"`
+
+	configTemplateMergeToBaseConfiguration = &common.RunnerConfig{
+		RunnerCredentials: common.RunnerCredentials{
+			Token: "test-runner-token",
+		},
+		RunnerSettings: common.RunnerSettings{
+			Executor: "shell",
+		},
+	}
+)
+
+func TestConfigTemplate_MergeTo(t *testing.T) {
+	tests := map[string]struct {
+		templateContent string
+		config          *common.RunnerConfig
+
+		expectedError       error
+		assertConfiguration func(t *testing.T, config *common.RunnerConfig)
+	}{
+		"invalid template file": {
+			templateContent: configTemplateMergeToInvalidConfiguration,
+			config:          configTemplateMergeToBaseConfiguration,
+			expectedError:   errors.New("couldn't load configuration template file: Near line 1 (last key parsed '-'): expected key separator '=', but got ',' instead"),
+		},
+		"no runners in template": {
+			templateContent: configTemplateMergeToEmptyConfiguration,
+			config:          configTemplateMergeToBaseConfiguration,
+			expectedError:   errors.New("configuration template must contain exactly one [[runners]] entry"),
+		},
+		"multiple runners in template": {
+			templateContent: configTemplateMergeToTwoRunnerSectionsConfiguration,
+			config:          configTemplateMergeToBaseConfiguration,
+			expectedError:   errors.New("configuration template must contain exactly one [[runners]] entry"),
+		},
+		"template doesn't overwrite existing settings": {
+			templateContent: configTemplateMergeToOverwritingConfiguration,
+			config:          configTemplateMergeToBaseConfiguration,
+			assertConfiguration: func(t *testing.T, config *common.RunnerConfig) {
+				assert.Equal(t, configTemplateMergeToBaseConfiguration.Token, config.RunnerCredentials.Token)
+				assert.Equal(t, configTemplateMergeToBaseConfiguration.Executor, config.RunnerSettings.Executor)
+				assert.Equal(t, 100, config.Limit)
+			},
+			expectedError: nil,
+		},
+		"template adds additional content": {
+			templateContent: configTemplateMergeToAdditionalConfiguration,
+			config:          configTemplateMergeToBaseConfiguration,
+			assertConfiguration: func(t *testing.T, config *common.RunnerConfig) {
+				k8s := config.RunnerSettings.Kubernetes
+
+				require.NotNil(t, k8s)
+				require.NotEmpty(t, k8s.Volumes.EmptyDirs)
+				assert.Len(t, k8s.Volumes.EmptyDirs, 1)
+
+				emptyDir := k8s.Volumes.EmptyDirs[0]
+				assert.Equal(t, "empty_dir", emptyDir.Name)
+				assert.Equal(t, "/path/to/empty_dir", emptyDir.MountPath)
+				assert.Equal(t, "Memory", emptyDir.Medium)
+			},
+			expectedError: nil,
+		},
+		"error on merging": {
+			templateContent: configTemplateMergeToAdditionalConfiguration,
+			expectedError:   errors.Wrap(mergo.ErrNotSupported, "error while merging configuration with configuration template"),
+		},
+	}
+
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			file, cleanup := prepareConfigurationTemplateFile(t, tc.templateContent)
+			defer cleanup()
+
+			configTemplate := &configTemplate{ConfigFile: file}
+			err := configTemplate.MergeTo(tc.config)
+
+			if tc.expectedError != nil {
+				assert.EqualError(t, err, tc.expectedError.Error())
+
+				return
+			}
+
+			assert.NoError(t, err)
+			tc.assertConfiguration(t, tc.config)
+		})
+	}
 }

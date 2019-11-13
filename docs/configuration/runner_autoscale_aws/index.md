@@ -1,5 +1,5 @@
 ---
-last_updated: 2019-01-28
+last_updated: 2019-08-21
 ---
 
 > **[Article Type](https://docs.gitlab.com/ee/development/writing_documentation.html#types-of-technical-articles):** Admin guide ||
@@ -18,7 +18,7 @@ scalable solution.
 ## Introduction
 
 In this tutorial, we'll explore how to properly configure a GitLab Runner in
-AWS that will serve as the bastion where it will spawn new Docker machines on
+AWS that will serve as the Runner Manager where it will spawn new Docker machines on
 demand.
 
 In addition, we'll make use of [Amazon's EC2 Spot instances][spot] which will
@@ -64,16 +64,16 @@ you can disable console login for that user. Keep the tab open or copy paste the
 security credentials in an editor as we'll use them later during the
 [Runner configuration](#the-runnersmachine-section).
 
-## Prepare the bastion instance
+## Prepare the Runner Manager instance
 
 The first step is to install GitLab Runner in an EC2 instance that will serve
-as the bastion that spawns new machines. This doesn't have to be a powerful
+as the Runner Manager that spawns new machines. This doesn't have to be a powerful
 machine since it will not run any jobs itself, a `t2.micro` instance will do.
 This machine will be a dedicated host since we need it always up and running,
 thus it will be the only standard cost.
 
 NOTE: **Note:**
-For the bastion instance, choose a distribution that both Docker and GitLab
+For the Runner Manager instance, choose a distribution that both Docker and GitLab
 Runner support, for example either Ubuntu, Debian, CentOS or RHEL will work fine.
 
 Install the prerequisites:
@@ -274,7 +274,8 @@ different options to be applied.
 
 NOTE: **Note:**
 The child instances will use by default Ubuntu 16.04 unless you choose a
-different AMI ID by setting `amazonec2-ami`.
+different AMI ID by setting `amazonec2-ami`. Set only [supported
+base operating systems for Docker Machine](https://docs.docker.com/machine/drivers/os-base/).
 
 NOTE: **Note:**
 If you specify `amazonec2-private-address-only=true` as one of the machine
@@ -383,9 +384,9 @@ be sure to check on the current pricing based on the region you picked.
 
 To learn more about Amazon EC2 Spot instances, visit the following links:
 
-- https://aws.amazon.com/ec2/spot/
-- https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-requests.html
-- https://aws.amazon.com/blogs/aws/focusing-on-spot-instances-lets-talk-about-best-practices/
+- <https://aws.amazon.com/ec2/spot/>
+- <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-requests.html>
+- <https://aws.amazon.com/blogs/aws/focusing-on-spot-instances-lets-talk-about-best-practices/>
 
 ### Caveats of Spot instances
 
@@ -402,7 +403,7 @@ it will continue to request new instances. This eventually will make 60 requests
 and then AWS won't accept any more. Then once the Spot price is acceptable, you
 are locked out for a bit because the call amount limit is exceeded.
 
-If you encounter that case, you can use the following command in the bastion
+If you encounter that case, you can use the following command in the Runner Manager
 machine to see the Docker Machines state:
 
 ```sh

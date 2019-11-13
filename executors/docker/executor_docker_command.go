@@ -6,8 +6,10 @@ import (
 	"sync"
 
 	"github.com/docker/docker/api/types"
+
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors"
+	"gitlab.com/gitlab-org/gitlab-runner/executors/docker/internal/volumes/parser"
 )
 
 type commandExecutor struct {
@@ -57,7 +59,7 @@ func (s *commandExecutor) requestNewPredefinedContainer() (*types.ContainerJSON,
 		Name: prebuildImage.ID,
 	}
 
-	containerJSON, err := s.createContainer("predefined", buildImage, common.ContainerCommandBuild, []string{prebuildImage.ID})
+	containerJSON, err := s.createContainer("predefined", buildImage, s.helperImageInfo.Cmd, []string{prebuildImage.ID})
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +115,9 @@ func init() {
 			RunnerCommand: "/usr/bin/gitlab-runner-helper",
 		},
 		ShowHostname: true,
+		Metadata: map[string]string{
+			metadataOSType: osTypeLinux,
+		},
 	}
 
 	creator := func() common.Executor {
@@ -121,6 +126,7 @@ func init() {
 				AbstractExecutor: executors.AbstractExecutor{
 					ExecutorOptions: options,
 				},
+				volumeParser: parser.NewLinuxParser(),
 			},
 		}
 		e.SetCurrentStage(common.ExecutorStageCreated)

@@ -10,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/fslocker"
 	"gitlab.com/gitlab-org/gitlab-runner/network"
 )
 
@@ -41,23 +42,13 @@ func (c *configOptions) loadConfig() error {
 	return nil
 }
 
-func (c *configOptions) touchConfig() error {
-	// try to load existing config
-	err := c.loadConfig()
-	if err != nil {
-		return err
-	}
-
-	// save config for the first time
-	if !c.config.Loaded {
-		return c.saveConfig()
-	}
-	return nil
+func (c *configOptions) inLock(fn func()) error {
+	return fslocker.InLock(c.ConfigFile, fn)
 }
 
 func (c *configOptions) RunnerByName(name string) (*common.RunnerConfig, error) {
 	if c.config == nil {
-		return nil, fmt.Errorf("Config has not been loaded")
+		return nil, fmt.Errorf("config has not been loaded")
 	}
 
 	for _, runner := range c.config.Runners {
@@ -66,20 +57,20 @@ func (c *configOptions) RunnerByName(name string) (*common.RunnerConfig, error) 
 		}
 	}
 
-	return nil, fmt.Errorf("Could not find a runner with the name '%s'", name)
+	return nil, fmt.Errorf("could not find a runner with the name '%s'", name)
 }
 
 type configOptionsWithListenAddress struct {
 	configOptions
 
 	ListenAddress string `long:"listen-address" env:"LISTEN_ADDRESS" description:"Metrics / pprof server listening address"`
-
-	// TODO: Remove in 12.0
-	MetricsServerAddress string `long:"metrics-server" env:"METRICS_SERVER" description:"(DEPRECATED) Metrics / pprof server listening address"` //DEPRECATED
 }
 
 func (c *configOptionsWithListenAddress) listenAddress() (string, error) {
-	address := c.listenOrMetricsServerAddress()
+	address := c.config.ListenAddress
+	if c.ListenAddress != "" {
+		address = c.ListenAddress
+	}
 
 	if address == "" {
 		return "", nil
@@ -96,25 +87,13 @@ func (c *configOptionsWithListenAddress) listenAddress() (string, error) {
 	return address, nil
 }
 
-func (c *configOptionsWithListenAddress) listenOrMetricsServerAddress() string {
-	if c.ListenAddress != "" {
-		return c.ListenAddress
-	}
-
-	// TODO: Remove in 12.0
-	if c.MetricsServerAddress != "" {
-		logrus.Warnln("'metrics-server' command line option is deprecated and will be removed in one of future releases; please use 'listen-address' instead")
-
-		return c.MetricsServerAddress
-	}
-
-	return c.config.ListenOrServerMetricAddress()
-}
-
 func init() {
 	configFile := os.Getenv("CONFIG_FILE")
 	if configFile == "" {
-		os.Setenv("CONFIG_FILE", getDefaultConfigFile())
+		err := os.Setenv("CONFIG_FILE", getDefaultConfigFile())
+		if err != nil {
+			logrus.WithError(err).Fatal("Couldn't set CONFIG_FILE environment variable")
+		}
 	}
 
 	network.CertificateDirectory = getDefaultCertificateDirectory()

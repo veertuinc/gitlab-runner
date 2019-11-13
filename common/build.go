@@ -15,8 +15,10 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/tls"
 	"gitlab.com/gitlab-org/gitlab-runner/session"
+	"gitlab.com/gitlab-org/gitlab-runner/session/proxy"
 	"gitlab.com/gitlab-org/gitlab-runner/session/terminal"
 )
 
@@ -66,11 +68,6 @@ const (
 	BuildStageArchiveCache             BuildStage = "archive_cache"
 	BuildStageUploadOnSuccessArtifacts BuildStage = "upload_artifacts_on_success"
 	BuildStageUploadOnFailureArtifacts BuildStage = "upload_artifacts_on_failure"
-)
-
-const (
-	FFDockerHelperImageV2       string = "FF_DOCKER_HELPER_IMAGE_V2"
-	FFUseLegacyGitCleanStrategy string = "FF_USE_LEGACY_GIT_CLEAN_STRATEGY"
 )
 
 type Build struct {
@@ -179,7 +176,13 @@ func (b *Build) getCustomBuildDir(rootDir, overrideKey string, customBuildDirEna
 }
 
 func (b *Build) StartBuild(rootDir, cacheDir string, customBuildDirEnabled, sharedDir bool) error {
-	var err error
+	if rootDir == "" {
+		return MakeBuildError("the builds_dir is not configured")
+	}
+
+	if cacheDir == "" {
+		return MakeBuildError("the cache_dir is not configured")
+	}
 
 	// We set RootDir and invalidate variables
 	// to be able to use CI_BUILDS_DIR
@@ -187,6 +190,7 @@ func (b *Build) StartBuild(rootDir, cacheDir string, customBuildDirEnabled, shar
 	b.CacheDir = path.Join(cacheDir, b.ProjectUniqueDir(false))
 	b.refreshAllVariables()
 
+	var err error
 	b.BuildDir, err = b.getCustomBuildDir(b.RootDir, "GIT_CLONE_PATH", customBuildDirEnabled, sharedDir)
 	if err != nil {
 		return err
@@ -339,6 +343,10 @@ func (b *Build) run(ctx context.Context, executor Executor) (err error) {
 		b.Session.SetInteractiveTerminal(term)
 	}
 
+	if proxyPooler, ok := executor.(proxy.Pooler); b.Session != nil && ok {
+		b.Session.SetProxyPool(proxyPooler)
+	}
+
 	// Run build script
 	go func() {
 		buildFinish <- b.executeScript(runContext, executor)
@@ -363,8 +371,23 @@ func (b *Build) run(ctx context.Context, executor Executor) (err error) {
 
 	// Wait till we receive that build did finish
 	runCancel()
-	<-buildFinish
+	b.waitForBuildFinish(buildFinish, WaitForBuildFinishTimeout)
+
 	return err
+}
+
+// waitForBuildFinish will wait for the build to finish or timeout, whichever
+// comes first. This is to prevent issues where something in the build can't be
+// killed or processed and results into the Job running until the GitLab Runner
+// process exists.
+func (b *Build) waitForBuildFinish(buildFinish <-chan error, timeout time.Duration) {
+	select {
+	case <-buildFinish:
+		return
+	case <-time.After(timeout):
+		b.logger.Warningln("Timed out waiting for the build to finish")
+		return
+	}
 }
 
 func (b *Build) retryCreateExecutor(options ExecutorPrepareOptions, provider ExecutorProvider, logger BuildLogger) (executor Executor, err error) {
@@ -381,10 +404,8 @@ func (b *Build) retryCreateExecutor(options ExecutorPrepareOptions, provider Exe
 		if err == nil {
 			break
 		}
-		if executor != nil {
-			executor.Cleanup()
-			executor = nil
-		}
+		executor.Cleanup()
+		executor = nil
 		if _, ok := err.(*BuildError); ok {
 			break
 		} else if options.Context.Err() != nil {
@@ -572,10 +593,18 @@ func (b *Build) GetDefaultVariables() JobVariables {
 }
 
 func (b *Build) GetDefaultFeatureFlagsVariables() JobVariables {
-	return JobVariables{
-		{Key: "FF_K8S_USE_ENTRYPOINT_OVER_COMMAND", Value: "true", Public: true, Internal: true, File: false}, // TODO: Remove in 12.0
-		{Key: FFUseLegacyGitCleanStrategy, Value: "false", Public: true, Internal: true, File: false},         // TODO: Remove in 12.0
+	variables := make(JobVariables, 0)
+	for _, featureFlag := range featureflags.GetAll() {
+		variables = append(variables, JobVariable{
+			Key:      featureFlag.Name,
+			Value:    featureFlag.DefaultValue,
+			Public:   true,
+			Internal: true,
+			File:     false,
+		})
 	}
+
+	return variables
 }
 
 func (b *Build) GetSharedEnvVariable() JobVariable {
@@ -644,11 +673,11 @@ func (b *Build) GetAllVariables() JobVariables {
 	}
 
 	variables := make(JobVariables, 0)
+	variables = append(variables, b.GetDefaultFeatureFlagsVariables()...)
 	if b.Runner != nil {
 		variables = append(variables, b.Runner.GetVariables()...)
 	}
 	variables = append(variables, b.GetDefaultVariables()...)
-	variables = append(variables, b.GetDefaultFeatureFlagsVariables()...)
 	variables = append(variables, b.GetCITLSVariables()...)
 	variables = append(variables, b.Variables...)
 	variables = append(variables, b.GetSharedEnvVariable())
@@ -675,12 +704,6 @@ func (b *Build) GetRemoteURL() string {
 	splits := strings.SplitAfterN(cloneURL, "://", 2)
 
 	return fmt.Sprintf("%sgitlab-ci-token:%s@%s/%s.git", splits[0], ciJobToken, splits[1], ciProjectPath)
-}
-
-// GetGitDepth is deprecated and will be removed in 12.0, use build.GitInfo.Depth instead
-// TODO: Remove in 12.0
-func (b *Build) GetGitDepth() string {
-	return b.GetAllVariables().Get("GIT_DEPTH")
 }
 
 func (b *Build) GetGitStrategy() GitStrategy {
@@ -811,10 +834,6 @@ func (b *Build) Duration() time.Duration {
 	return time.Since(b.createdAt)
 }
 
-func (b *Build) RefspecsAvailable() bool {
-	return len(b.GitInfo.Refspecs) > 0
-}
-
 func NewBuild(jobData JobResponse, runnerConfig *RunnerConfig, systemInterrupt chan os.Signal, executorData ExecutorData) (*Build, error) {
 	// Attempt to perform a deep copy of the RunnerConfig
 	runnerConfigCopy, err := runnerConfig.DeepCopy()
@@ -832,17 +851,13 @@ func NewBuild(jobData JobResponse, runnerConfig *RunnerConfig, systemInterrupt c
 }
 
 func (b *Build) IsFeatureFlagOn(name string) bool {
-	ffValue := b.GetAllVariables().Get(name)
+	value := b.GetAllVariables().Get(name)
 
-	if ffValue == "" {
-		return false
-	}
-
-	on, err := strconv.ParseBool(ffValue)
+	on, err := featureflags.IsOn(value)
 	if err != nil {
 		logrus.WithError(err).
-			WithField("ffName", name).
-			WithField("ffValue", ffValue).
+			WithField("name", name).
+			WithField("value", value).
 			Error("Error while parsing the value of feature flag")
 
 		return false

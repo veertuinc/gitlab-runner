@@ -1,17 +1,32 @@
 package commands
 
 import (
+	"io/ioutil"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
 	"gitlab.com/gitlab-org/gitlab-runner/common"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers"
+	"gitlab.com/gitlab-org/gitlab-runner/log/test"
 )
 
 func TestProcessRunner_BuildLimit(t *testing.T) {
+	hook, cleanup := test.NewHook()
+	defer cleanup()
+
+	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetOutput(ioutil.Discard)
+
 	cfg := common.RunnerConfig{
 		Limit:              2,
 		RequestConcurrency: 10,
@@ -46,7 +61,7 @@ func TestProcessRunner_BuildLimit(t *testing.T) {
 	mNetwork := common.MockNetwork{}
 	defer mNetwork.AssertExpectations(t)
 	mNetwork.On("RequestJob", mock.Anything, mock.Anything).Return(&jobData, true)
-	mNetwork.On("ProcessJob", mock.Anything, mock.Anything).Return(&mJobTrace)
+	mNetwork.On("ProcessJob", mock.Anything, mock.Anything).Return(&mJobTrace, nil)
 
 	var runningBuilds uint32
 	e := common.MockExecutor{}
@@ -87,14 +102,15 @@ func TestProcessRunner_BuildLimit(t *testing.T) {
 
 	runners := make(chan *common.RunnerConfig)
 
-	// Start 5 builds.
+	// Start 2 builds.
 	wg := sync.WaitGroup{}
-	wg.Add(5)
-	for i := 0; i < 5; i++ {
+	wg.Add(3)
+	for i := 0; i < 3; i++ {
 		go func(i int) {
 			defer wg.Done()
 
-			cmd.processRunner(i, &cfg, runners)
+			err := cmd.processRunner(i, &cfg, runners)
+			assert.NoError(t, err)
 		}(i)
 	}
 
@@ -103,9 +119,86 @@ func TestProcessRunner_BuildLimit(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	err := cmd.processRunner(6, &cfg, runners)
-	assert.EqualError(t, err, "failed to request job, runner limit met")
-
 	// Wait for all builds to finish.
 	wg.Wait()
+
+	limitMetCount := 0
+	for _, entry := range hook.AllEntries() {
+		if strings.Contains(entry.Message, "runner limit met") {
+			limitMetCount++
+		}
+	}
+
+	assert.Equal(t, 1, limitMetCount)
+}
+
+func runFileLockingCmd(t *testing.T, wg *sync.WaitGroup, started chan bool, stop chan bool, filePath string, shouldPanic bool) {
+	cmd := &RunCommand{
+		configOptionsWithListenAddress: configOptionsWithListenAddress{
+			configOptions: configOptions{
+				ConfigFile: filePath,
+				config: &common.Config{
+					Concurrent: 5,
+				},
+			},
+		},
+		stopSignals:  make(chan os.Signal),
+		reloadSignal: make(chan os.Signal, 1),
+		runFinished:  make(chan bool, 1),
+	}
+
+	go func() {
+		if shouldPanic {
+			assert.Panics(t, cmd.RunWithLock, "Expected the Runner to create a new lock")
+		} else {
+			assert.NotPanics(t, cmd.RunWithLock, "Expected the Runner to reject creating a new lock")
+		}
+		wg.Done()
+	}()
+
+	close(started)
+
+	<-stop
+	cmd.stopSignal = os.Kill
+}
+
+func TestMulti_RunWithLock(t *testing.T) {
+	defer helpers.MakeFatalToPanic()()
+
+	file, err := ioutil.TempFile("", "config.toml")
+	require.NoError(t, err)
+
+	err = file.Close()
+	require.NoError(t, err)
+
+	filePath := file.Name()
+
+	wg := new(sync.WaitGroup)
+	stop := make(chan bool)
+
+	wg.Add(2)
+
+	started := make(chan bool)
+	go runFileLockingCmd(t, wg, started, stop, filePath, false)
+	<-started
+
+	time.Sleep(1 * time.Second)
+
+	started = make(chan bool)
+	go runFileLockingCmd(t, wg, started, stop, filePath, true)
+	<-started
+
+	time.Sleep(1 * time.Second)
+
+	close(stop)
+	wg.Wait()
+
+	// Try to lock the file to check if it was properly unlocked while
+	// finishing cmd.RunWithLock() call
+	fl := flock.New(filePath)
+	locked, err := fl.TryLock()
+	defer fl.Unlock()
+
+	assert.True(t, locked, "File was not unlocked!")
+	assert.NoError(t, err)
 }

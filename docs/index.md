@@ -3,14 +3,12 @@ comments: false
 last_updated: 2019-01-17
 ---
 
-# GitLab Runner
+# GitLab Runner Docs
 
 GitLab Runner is the open source project that is used to run your jobs and
 send the results back to GitLab. It is used in conjunction with [GitLab CI](https://about.gitlab.com/product/continuous-integration/),
 the open-source continuous integration service included with GitLab that
 coordinates the jobs.
-
-[![Build Status](https://gitlab.com/gitlab-org/gitlab-runner/badges/master/build.svg)](https://gitlab.com/gitlab-org/gitlab-runner)
 
 ## Requirements
 
@@ -21,8 +19,8 @@ It is designed to run on the GNU/Linux, macOS, and Windows operating systems.
 Other operating systems will probably work as long as you can compile a Go
 binary on them.
 
-If you want to use Docker make sure that you have version `v1.5.0` at least
-installed.
+If you want to [use Docker](executors/docker.md), install the latest version.
+GitLab Runner requires a minimum of Docker `v1.13.0`.
 
 ## Features
 
@@ -46,7 +44,7 @@ installed.
 - Easy installation as a service for GNU/Linux, macOS, and Windows.
 - Embedded Prometheus metrics HTTP server.
 
-## Compatibility chart
+## Compatibility with GitLab versions
 
 The GitLab Runner version should be in sync with the GitLab version. While older
 Runners may still work with newer GitLab versions, and vice versa, in some cases,
@@ -80,6 +78,7 @@ Learn how to [register a GitLab Runner](register/index.md).
 ## Using GitLab Runner
 
 - See the [commands documentation](commands/README.md).
+- See [best practice documentation](best_practice/index.md).
 
 ## Selecting the executor
 
@@ -99,6 +98,11 @@ To jump into the specific documentation of each executor, see:
 - [SSH](executors/ssh.md).
 - [Kubernetes](executors/kubernetes.md).
 
+No development of new executors is planned and we are not accepting
+contributions for new ones. Please check
+[CONTRIBUTION.md](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/CONTRIBUTING.md#contributing-a-new-executors)
+for details.
+
 ## Configuring GitLab Runner
 
 See information on [configuring GitLab Runner](configuration/index.md), and:
@@ -108,7 +112,7 @@ See information on [configuring GitLab Runner](configuration/index.md), and:
 - [Autoscaling using Docker machine](configuration/autoscale.md): Execute jobs on machines that are created on demand using Docker machine.
 - [Autoscaling GitLab Runner on AWS](configuration/runner_autoscale_aws/index.md)
 - [The init system of GitLab Runner](configuration/init.md): Learn how the Runner installs its init service files based on your operating system.
-- [Supported shells](shells/README.md): Learn what shell script generators are supported that allow to execute builds on different systems.
+- [Supported shells](shells/index.md): Learn what shell script generators are supported that allow to execute builds on different systems.
 - [Security considerations](security/index.md): Be aware of potential security implications when running your jobs with GitLab Runner.
 - [Runner monitoring](monitoring/README.md): Learn how to monitor the Runner's behavior.
 - [Cleanup the Docker images automatically](https://gitlab.com/gitlab-org/gitlab-runner-docker-cleanup): A simple Docker application that automatically garbage collects the GitLab Runner caches and images when running low on disk space.
@@ -122,8 +126,9 @@ Read the [FAQ](faq/README.md) for troubleshooting common issues.
 
 ## Release process
 
-The description of release process of the GitLab Runner project can be found in
-the [release documentation](release_process/README.md).
+The description of release process of the GitLab Runner project can be
+found in
+[PROCESS.md](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/PROCESS.md)
 
 ## Contributing
 

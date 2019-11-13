@@ -13,6 +13,8 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 )
 
+const dockerWindowsExecutor = "docker-windows"
+
 type PowerShell struct {
 	AbstractShell
 }
@@ -67,7 +69,7 @@ func (b *PsWriter) Unindent() {
 }
 
 func (b *PsWriter) checkErrorLevel() {
-	b.Line("if(!$?) { Exit $LASTEXITCODE }")
+	b.Line("if(!$?) { Exit &{if($LASTEXITCODE) {$LASTEXITCODE} else {1}} }")
 	b.Line("")
 }
 
@@ -100,7 +102,7 @@ func (b *PsWriter) EnvVariableKey(name string) string {
 func (b *PsWriter) Variable(variable common.JobVariable) {
 	if variable.File {
 		variableFile := b.TmpFile(variable.Key)
-		b.Line(fmt.Sprintf("md %s -Force | out-null", psQuote(helpers.ToBackslash(b.TemporaryPath))))
+		b.Line(fmt.Sprintf("New-Item -ItemType directory -Force -Path %s | out-null", psQuote(helpers.ToBackslash(b.TemporaryPath))))
 		b.Line(fmt.Sprintf("Set-Content %s -Value %s -Encoding UTF8 -Force", psQuote(variableFile), psQuoteVariable(variable.Value)))
 		b.Line("$" + variable.Key + "=" + psQuote(variableFile))
 	} else {
@@ -121,14 +123,26 @@ func (b *PsWriter) IfFile(path string) {
 }
 
 func (b *PsWriter) IfCmd(cmd string, arguments ...string) {
-	b.Line(b.buildCommand(cmd, arguments...) + " 2>$null")
-	b.Line("if($?) {")
-	b.Indent()
+	b.ifInTryCatch(b.buildCommand(cmd, arguments...) + " 2>$null")
 }
 
 func (b *PsWriter) IfCmdWithOutput(cmd string, arguments ...string) {
-	b.Line(b.buildCommand(cmd, arguments...))
-	b.Line("if($?) {")
+	b.ifInTryCatch(b.buildCommand(cmd, arguments...))
+}
+
+func (b *PsWriter) ifInTryCatch(cmd string) {
+	b.Line("Set-Variable -Name cmdErr -Value $false")
+	b.Line("Try {")
+	b.Indent()
+	b.Line(cmd)
+	b.Line("if(!$?) { throw &{if($LASTEXITCODE) {$LASTEXITCODE} else {1}} }")
+	b.Unindent()
+	b.Line("} Catch {")
+	b.Indent()
+	b.Line("Set-Variable -Name cmdErr -Value $true")
+	b.Unindent()
+	b.Line("}")
+	b.Line("if(!$cmdErr) {")
 	b.Indent()
 }
 
@@ -149,7 +163,7 @@ func (b *PsWriter) Cd(path string) {
 }
 
 func (b *PsWriter) MkDir(path string) {
-	b.Line(fmt.Sprintf("md %s -Force | out-null", psQuote(helpers.ToBackslash(path))))
+	b.Line(fmt.Sprintf("New-Item -ItemType directory -Force -Path %s | out-null", psQuote(helpers.ToBackslash(path))))
 }
 
 func (b *PsWriter) MkTmpDir(name string) string {
@@ -230,6 +244,8 @@ func (b *PsWriter) Finish(trace bool) string {
 		io.WriteString(w, "Set-PSDebug -Trace 2\r\n")
 	}
 
+	// add empty line to close code-block when it is piped to STDIN
+	b.Line("")
 	io.WriteString(w, b.String())
 	w.Flush()
 	return buffer.String()
@@ -241,10 +257,11 @@ func (b *PowerShell) GetName() string {
 
 func (b *PowerShell) GetConfiguration(info common.ShellScriptInfo) (script *common.ShellConfiguration, err error) {
 	script = &common.ShellConfiguration{
-		Command:   "powershell",
-		Arguments: []string{"-noprofile", "-noninteractive", "-executionpolicy", "Bypass", "-command"},
-		PassFile:  true,
-		Extension: "ps1",
+		Command:       "powershell",
+		Arguments:     []string{"-noprofile", "-noninteractive", "-executionpolicy", "Bypass", "-command"},
+		PassFile:      info.Build.Runner.Executor != dockerWindowsExecutor,
+		Extension:     "ps1",
+		DockerCommand: []string{"PowerShell", "-NoProfile", "-NoLogo", "-InputFormat", "text", "-OutputFormat", "text", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"},
 	}
 	return
 }
@@ -263,7 +280,12 @@ func (b *PowerShell) GenerateScript(buildStage common.BuildStage, info common.Sh
 	}
 
 	err = b.writeScript(w, buildStage, info)
-	script = w.Finish(info.Build.IsDebugTraceEnabled())
+
+	// No need to set up BOM or tracing since no script was generated.
+	if w.Buffer.Len() > 0 {
+		script = w.Finish(info.Build.IsDebugTraceEnabled())
+	}
+
 	return
 }
 

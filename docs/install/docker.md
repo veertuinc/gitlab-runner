@@ -49,44 +49,44 @@ Docker container.
 
 1. Install Docker first:
 
-    ```bash
-    curl -sSL https://get.docker.com/ | sh
-    ```
+   ```bash
+   curl -sSL https://get.docker.com/ | sh
+   ```
 
 1. You need to mount a config volume into the `gitlab-runner` container to
    be used for configs and other resources:
 
-    ```bash
-    docker run -d --name gitlab-runner --restart always \
-      -v /srv/gitlab-runner/config:/etc/gitlab-runner \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      gitlab/gitlab-runner:latest
-    ```
+   ```bash
+   docker run -d --name gitlab-runner --restart always \
+     -v /srv/gitlab-runner/config:/etc/gitlab-runner \
+     -v /var/run/docker.sock:/var/run/docker.sock \
+     gitlab/gitlab-runner:latest
+   ```
 
-    TIP: **Tip:**
-    On macOS, use `/Users/Shared` instead of `/srv`.
+   TIP: **Tip:**
+   On macOS, use `/Users/Shared` instead of `/srv`.
 
-    Or, you can use a config container to mount your custom data volume:
+   Or, you can use a config container to mount your custom data volume:
 
-    ```bash
-    docker run -d --name gitlab-runner-config \
-        -v /etc/gitlab-runner \
-        busybox:latest \
-        /bin/true
-    ```
+   ```bash
+   docker run -d --name gitlab-runner-config \
+       -v /etc/gitlab-runner \
+       busybox:latest \
+       /bin/true
+   ```
 
-    And then, run the Runner:
+   And then, run the Runner:
 
-    ```bash
-    docker run -d --name gitlab-runner --restart always \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        --volumes-from gitlab-runner-config \
-        gitlab/gitlab-runner:latest
-    ```
+   ```bash
+   docker run -d --name gitlab-runner --restart always \
+       -v /var/run/docker.sock:/var/run/docker.sock \
+       --volumes-from gitlab-runner-config \
+       gitlab/gitlab-runner:latest
+   ```
 
 1. Register the runner you just launched by following the instructions in the
-    [Docker section of Registering Runners](../register/index.md#docker).
-    The runner won't pick up any jobs until it's registered.
+   [Docker section of Registering Runners](../register/index.md#docker).
+   The runner won't pick up any jobs until it's registered.
 
 Make sure that you read the [FAQ](../faq/README.md) section which describes
 some of the most common problems with GitLab Runner.
@@ -148,12 +148,12 @@ where `gitlab-runner` is the name of the container, set with `--name gitlab-runn
 the first command.
 
 You may find more information about handling container logs at the [Docker documentation
-page](https://docs.docker.com/engine/reference/commandline/logs).
+page](https://docs.docker.com/engine/reference/commandline/logs/).
 
 ## Installing trusted SSL server certificates
 
 If your GitLab CI server is using self-signed SSL certificates then you should
-make sure the GitLab CI server certificate is trusted by the gitlab-runner
+make sure the GitLab CI server certificate is trusted by the GitLab Runner
 container for them to be able to talk to each other.
 
 The `gitlab/gitlab-runner` image is configured to look for the trusted SSL
@@ -162,17 +162,21 @@ certificates at `/etc/gitlab-runner/certs/ca.crt`, this can however be changed u
 
 Copy the `ca.crt` file into the `certs` directory on the data volume (or container).
 The `ca.crt` file should contain the root certificates of all the servers you
-want gitlab-runner to trust. The gitlab-runner container will
+want GitLab Runner to trust. The GitLab Runner container will
 import the `ca.crt` file on startup so if your container is already running you
 may need to restart it for the changes to take effect.
 
-## Docker Images
+## Docker images
 
-The original `gitlab/gitlab-runner:latest` is based on Ubuntu, see [gitlab-org/gitlab-runner](https://gitlab.com/gitlab-org/gitlab-runner/tree/master/dockerfiles) source for possible build instructions for both Ubuntu and Alpine images.
+The following Docker images are available:
 
-You can alternatively use [Alpine Linux](https://www.alpinelinux.org/) based image called `gitlab/gitlab-runner:alpine` with much smaller footprint (~400 MB Ubuntu vs ~100 MB Alpine):
+- `gitlab/gitlab-runner:latest` based on Ubuntu.
+- `gitlab/gitlab-runner:alpine` based on Alpine with much a smaller footprint
+  (~160/350 MB Ubuntu vs ~45/130 MB Alpine compressed/decompressed).
 
-**Alpine Linux image is designed to use only Docker as the method of spawning runners.**
+TIP: **Tip:**
+See [gitlab-org/gitlab-runner](https://gitlab.com/gitlab-org/gitlab-runner/tree/master/dockerfiles)
+source for possible build instructions for both Ubuntu and Alpine images.
 
 ## SELinux
 
@@ -182,7 +186,7 @@ The special care must be taken when dealing with such configuration.
 
 1. If you want to use Docker executor to run builds in containers you need to access the `/var/run/docker.sock`.
    However, if you have a SELinux in enforcing mode, you will see the `Permission denied` when accessing the `/var/run/docker.sock`.
-   Install the `selinux-dockersock` and to resolve the issue: https://github.com/dpw/selinux-dockersock.
+   Install the `selinux-dockersock` and to resolve the issue: <https://github.com/dpw/selinux-dockersock>.
 1. Make sure that persistent directory is created on host: `mkdir -p /srv/gitlab-runner/config`.
 1. Run docker with `:Z` on volumes:
 
@@ -194,4 +198,4 @@ docker run -d --name gitlab-runner --restart always \
 ```
 
 More information about the cause and resolution can be found here:
-http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/
+<http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/>

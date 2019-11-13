@@ -35,30 +35,30 @@ world won't be able to.
 
 1. Find the IP that Docker is using:
 
-    ```sh
-    ip -4 -oneline addr show dev docker0
-    ```
+   ```sh
+   ip -4 -oneline addr show dev docker0
+   ```
 
-    This is usually `172.17.0.1`, let's call it `docker0_interface_ip`.
+   This is usually `172.17.0.1`, let's call it `docker0_interface_ip`.
 
 1. Open the config file for CNTLM (`/etc/cntlm.conf`). Enter your username,
    password, domain and proxy hosts, and configure the `Listen` IP address
    which you found from the previous step. It should look like this:
 
-    ```
-    Username     testuser
-    Domain       corp-uk
-    Password     password
-    Proxy        10.0.0.41:8080
-    Proxy        10.0.0.42:8080
-    Listen       172.17.0.1:3128 # Change to your docker0 interface IP
-    ```
+   ```
+   Username     testuser
+   Domain       corp-uk
+   Password     password
+   Proxy        10.0.0.41:8080
+   Proxy        10.0.0.42:8080
+   Listen       172.17.0.1:3128 # Change to your docker0 interface IP
+   ```
 
 1. Save the changes and restart its service:
 
-    ```sh
-    sudo systemctl restart cntlm
-    ```
+   ```sh
+   sudo systemctl restart cntlm
+   ```
 
 ## Configuring Docker for downloading images
 
@@ -85,47 +85,47 @@ This is basically the same as adding the proxy to the Docker service above:
 
 1. Create a systemd drop-in directory for the `gitlab-runner` service:
 
-    ```sh
-    mkdir /etc/systemd/system/gitlab-runner.service.d
-    ```
+   ```sh
+   mkdir /etc/systemd/system/gitlab-runner.service.d
+   ```
 
 1. Create a file called `/etc/systemd/system/gitlab-runner.service.d/http-proxy.conf`
    that adds the `HTTP_PROXY` environment variable(s):
 
-    ```ini
-    [Service]
-    Environment="HTTP_PROXY=http://docker0_interface_ip:3128/"
-    Environment="HTTPS_PROXY=http://docker0_interface_ip:3128/"
-    ```
+   ```ini
+   [Service]
+   Environment="HTTP_PROXY=http://docker0_interface_ip:3128/"
+   Environment="HTTPS_PROXY=http://docker0_interface_ip:3128/"
+   ```
 
 1. Save the file and flush changes:
 
-    ```sh
-    systemctl daemon-reload
-    ```
+   ```sh
+   systemctl daemon-reload
+   ```
 
 1. Restart GitLab Runner:
 
-    ```sh
-    sudo systemctl restart gitlab-runner
-    ```
+   ```sh
+   sudo systemctl restart gitlab-runner
+   ```
 
 1. Verify that the configuration has been loaded:
 
-    ```sh
-    systemctl show --property=Environment gitlab-runner
-    ```
+   ```sh
+   systemctl show --property=Environment gitlab-runner
+   ```
 
-      You should see:
+   You should see:
 
-      ```ini
-      Environment=HTTP_PROXY=http://docker0_interface_ip:3128/ HTTPS_PROXY=http://docker0_interface_ip:3128/
-      ```
+   ```ini
+   Environment=HTTP_PROXY=http://docker0_interface_ip:3128/ HTTPS_PROXY=http://docker0_interface_ip:3128/
+   ```
 
 ## Adding the proxy to the Docker containers
 
 After you [registered your Runner](../register/index.md), you might want to
-propagate your proxy settings to the Docker containers (for git clone and other
+propagate your proxy settings to the Docker containers (for `git clone` and other
 stuff).
 
 To do that, you need to edit `/etc/gitlab-runner/config.toml` and add the
@@ -133,7 +133,7 @@ following to the `[[runners]]` section:
 
 ```toml
 pre_clone_script = "git config --global http.proxy $HTTP_PROXY; git config --global https.proxy $HTTPS_PROXY"
-environment = ["https_proxy=docker0_interface_ip:3128", "http_proxy=docker0_interface_ip:3128", "HTTPS_PROXY=docker0_interface_ip:3128", "HTTP_PROXY=docker0_interface_ip:3128"]
+environment = ["https_proxy=http://docker0_interface_ip:3128", "http_proxy=http://docker0_interface_ip:3128", "HTTPS_PROXY=docker0_interface_ip:3128", "HTTP_PROXY=docker0_interface_ip:3128"]
 ```
 
 Where `docker0_interface_ip` is the IP address of the `docker0` interface. You need to
@@ -160,7 +160,7 @@ The ports can be required because otherwise `docker push` will be blocked
 as it originates from the IP mapped to docker. However, in that case, it is meant to go through the proxy.
 
 When testing the communication between `dockerd` from dind and a `docker` client locally
-(as described here: https://hub.docker.com/_/docker/),
+(as described here: <https://hub.docker.com/_/docker/>),
 `dockerd` from dind is initially started as a client on the host system by root,
 and the proxy variables are taken from `/root/.docker/config.json`.
 
@@ -184,10 +184,11 @@ These are available as environment variables as is (in contrast to `.docker/conf
 in the dind containers running `dockerd` as a service and `docker` client executing `.gitlab-ci.yml`.
 In `.gitlab-ci.yml`, the environment variables will be picked up by any program honouring the proxy settings from default environment variables. For example,
 `wget`, `apt`, `apk`, `docker info` and `docker pull` (but not by `docker run` or `docker build` as per:
-https://github.com/moby/moby/issues/24697#issuecomment-366680499).
+<https://github.com/moby/moby/issues/24697#issuecomment-366680499>).
+
 `docker run` or `docker build` executed inside the container of the docker executor
 will look for the proxy settings in `$HOME/.docker/config.json`,
-which is now inside the executor container (and initally empty).
+which is now inside the executor container (and initially empty).
 Therefore, `docker run` or `docker build` executions will have no proxy settings. In order to pass on the settings,
 a `$HOME/.docker/config.json` needs to be created in the executor container. For example:
 

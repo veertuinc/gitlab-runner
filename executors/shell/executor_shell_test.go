@@ -687,6 +687,43 @@ func TestBuildWithGitSubmoduleStrategyRecursive(t *testing.T) {
 	})
 }
 
+func TestBuildWithGitFetchSubmoduleStrategyRecursive(t *testing.T) {
+	skipOnGit17x(t)
+
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		successfulBuild, err := common.GetSuccessfulBuild()
+		assert.NoError(t, err)
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+
+		build.Variables = append(build.Variables, common.JobVariable{Key: "GIT_STRATEGY", Value: "fetch"})
+		build.Variables = append(build.Variables, common.JobVariable{Key: "GIT_SUBMODULE_STRATEGY", Value: "recursive"})
+
+		out, err := runBuildReturningOutput(t, build)
+		assert.NoError(t, err)
+		assert.NotContains(t, out, "Skipping Git submodules setup")
+		assert.NotContains(t, out, "Updating/initializing submodules...")
+		assert.Contains(t, out, "Updating/initializing submodules recursively...")
+
+		_, err = os.Stat(filepath.Join(build.BuildDir, "gitlab-grack", ".git"))
+		assert.NoError(t, err, "Submodule should have been initialized")
+
+		_, err = os.Stat(filepath.Join(build.BuildDir, "gitlab-grack", "tests", "example", ".git"))
+		assert.NoError(t, err, "The submodule's submodule should have been initialized")
+
+		// Create a file not tracked that should be cleaned in submodule.
+		excludedFilePath := filepath.Join(build.BuildDir, "gitlab-grack", "excluded_file")
+		err = ioutil.WriteFile(excludedFilePath, []byte{}, os.ModePerm)
+		require.NoError(t, err)
+
+		// Run second build, to run fetch.
+		out, err = runBuildReturningOutput(t, build)
+		assert.NoError(t, err)
+		assert.NotContains(t, out, "Created fresh repository")
+		assert.Contains(t, out, "Removing excluded_file")
+	})
+}
+
 func TestBuildWithGitSubmoduleStrategyInvalid(t *testing.T) {
 	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
 		successfulBuild, err := common.GetSuccessfulBuild()
@@ -742,7 +779,7 @@ func TestBuildWithGitSubmoduleModified(t *testing.T) {
 		submoduleReadme := filepath.Join(submoduleDir, "README.md")
 
 		// modify submodule and commit
-		modifySubmoduleBeforeCommit := "commited change"
+		modifySubmoduleBeforeCommit := "committed change"
 		err = ioutil.WriteFile(submoduleReadme, []byte(modifySubmoduleBeforeCommit), os.ModeSticky)
 		require.NoError(t, err)
 		_, err = gitInDir(submoduleDir, "add", "README.md")
@@ -920,6 +957,40 @@ func TestBuildChangesBranchesWhenFetchingRepo(t *testing.T) {
 	})
 }
 
+func TestBuildPowerShellCatchesExceptions(t *testing.T) {
+	if helpers.SkipIntegrationTests(t, "powershell") {
+		t.Skip()
+	}
+
+	successfulBuild, err := common.GetRemoteSuccessfulBuild()
+	assert.NoError(t, err)
+	build, cleanup := newBuild(t, successfulBuild, "powershell")
+	defer cleanup()
+	build.Variables = append(build.Variables, common.JobVariable{Key: "ErrorActionPreference", Value: "Stop"})
+	build.Variables = append(build.Variables, common.JobVariable{Key: "GIT_STRATEGY", Value: "fetch"})
+
+	out, err := runBuildReturningOutput(t, build)
+	assert.NoError(t, err)
+	assert.Contains(t, out, "Created fresh repository")
+
+	out, err = runBuildReturningOutput(t, build)
+	assert.NoError(t, err)
+	assert.NotContains(t, out, "Created fresh repository")
+	assert.Regexp(t, "Checking out [a-f0-9]+ as", out)
+
+	build.Variables = append(build.Variables, common.JobVariable{Key: "ErrorActionPreference", Value: "Continue"})
+	out, err = runBuildReturningOutput(t, build)
+	assert.NoError(t, err)
+	assert.NotContains(t, out, "Created fresh repository")
+	assert.Regexp(t, "Checking out [a-f0-9]+ as", out)
+
+	build.Variables = append(build.Variables, common.JobVariable{Key: "ErrorActionPreference", Value: "SilentlyContinue"})
+	out, err = runBuildReturningOutput(t, build)
+	assert.NoError(t, err)
+	assert.NotContains(t, out, "Created fresh repository")
+	assert.Regexp(t, "Checking out [a-f0-9]+ as", out)
+}
+
 func TestInteractiveTerminal(t *testing.T) {
 	cases := []struct {
 		app                string
@@ -1052,49 +1123,5 @@ func TestBuildWithGitCleanFlags(t *testing.T) {
 		assert.NoError(t, err, "excluded_file does exist")
 		_, err = os.Stat(cleanUpFilePath)
 		assert.Error(t, err, "cleanup_file does not exist")
-	})
-}
-
-// TODO: Remove in 12.0
-func TestBuildNoRefspecs(t *testing.T) {
-	strategies := []string{"clone", "fetch", "none"}
-	expectedOutputs := map[string]string{
-		"clone": "Cloning repository...",
-		"fetch": "Fetching changes...",
-		"none":  "Skipping Git repository setup",
-	}
-
-	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
-		for _, strategy := range strategies {
-			t.Run(fmt.Sprintf("GIT_STRATEGY %s", strategy), func(t *testing.T) {
-				apiBuild, err := common.GetSuccessfulBuild()
-				assert.NoError(t, err)
-
-				apiBuild.GitInfo.Refspecs = []string{}
-				build, cleanup := newBuild(t, apiBuild, shell)
-				defer cleanup()
-
-				build.Variables = append(build.Variables, common.JobVariable{Key: "GIT_STRATEGY", Value: strategy})
-
-				expectedOutput, ok := expectedOutputs[strategy]
-				require.True(t, ok, "missing expectancies for %s strategy", strategy)
-
-				err = runBuild(t, build)
-				require.NoError(t, err)
-
-				// run twice because script behavior changes based on build directory existence
-				out, err := runBuildReturningOutput(t, build)
-				require.NoError(t, err)
-				require.Contains(t, out, expectedOutput)
-
-				for s, notExpected := range expectedOutputs {
-					if s == strategy {
-						continue
-					}
-
-					require.NotContains(t, out, notExpected)
-				}
-			})
-		}
 	})
 }

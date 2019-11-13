@@ -63,6 +63,7 @@ type FeaturesInfo struct {
 	Terminal                bool `json:"terminal"`
 	Refspecs                bool `json:"refspecs"`
 	Masking                 bool `json:"masking"`
+	Proxy                   bool `json:"proxy"`
 }
 
 type RegisterRunnerParameters struct {
@@ -70,6 +71,7 @@ type RegisterRunnerParameters struct {
 	Tags           string `json:"tag_list,omitempty"`
 	RunUntagged    bool   `json:"run_untagged"`
 	Locked         bool   `json:"locked"`
+	AccessLevel    string `json:"access_level,omitempty"`
 	MaximumTimeout int    `json:"maximum_timeout,omitempty"`
 	Active         bool   `json:"active"`
 }
@@ -185,6 +187,13 @@ type Image struct {
 	Alias      string   `json:"alias,omitempty"`
 	Command    []string `json:"command,omitempty"`
 	Entrypoint []string `json:"entrypoint,omitempty"`
+	Ports      []Port   `json:"ports,omitempty"`
+}
+
+type Port struct {
+	Number   int    `json:"number,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	Name     string `json:"name,omitempty"`
 }
 
 type Services []Image
@@ -304,7 +313,6 @@ type UpdateJobRequest struct {
 	Token         string           `json:"token,omitempty"`
 	State         JobState         `json:"state,omitempty"`
 	FailureReason JobFailureReason `json:"failure_reason,omitempty"`
-	Trace         *string          `json:"trace,omitempty"`
 }
 
 type JobCredentials struct {
@@ -339,7 +347,6 @@ func (j *JobCredentials) GetToken() string {
 type UpdateJobInfo struct {
 	ID            int
 	State         JobState
-	Trace         *string
 	FailureReason JobFailureReason
 }
 
@@ -365,22 +372,14 @@ type JobTrace interface {
 	IsJobSuccesFull() bool
 }
 
-type JobTracePatch interface {
-	Patch() []byte
-	Offset() int
-	TotalSize() int
-	SetNewOffset(newOffset int)
-	ValidateRange() bool
-}
-
 type Network interface {
 	RegisterRunner(config RunnerCredentials, parameters RegisterRunnerParameters) *RegisterRunnerResponse
 	VerifyRunner(config RunnerCredentials) bool
 	UnregisterRunner(config RunnerCredentials) bool
 	RequestJob(config RunnerConfig, sessionInfo *SessionInfo) (*JobResponse, bool)
 	UpdateJob(config RunnerConfig, jobCredentials *JobCredentials, jobInfo UpdateJobInfo) UpdateState
-	PatchTrace(config RunnerConfig, jobCredentials *JobCredentials, tracePart JobTracePatch) UpdateState
+	PatchTrace(config RunnerConfig, jobCredentials *JobCredentials, content []byte, startOffset int) (int, UpdateState)
 	DownloadArtifacts(config JobCredentials, artifactsFile string) DownloadState
 	UploadRawArtifacts(config JobCredentials, reader io.Reader, options ArtifactsOptions) UploadState
-	ProcessJob(config RunnerConfig, buildCredentials *JobCredentials) JobTrace
+	ProcessJob(config RunnerConfig, buildCredentials *JobCredentials) (JobTrace, error)
 }

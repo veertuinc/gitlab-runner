@@ -17,15 +17,59 @@ _This notice should stay as the first item in the CONTRIBUTING.md file._
 
 ---
 
-## Contribute to GitLab runner
+## Contribute to GitLab Runner
 
-The following contents has to be considered as an extension over [gitlab-ce contributing guidelines](https://gitlab.com/gitlab-org/gitlab-ce/blob/master/CONTRIBUTING.md).
+The following contents has to be considered as an extension over [gitlab-ce contributing guidelines](https://docs.gitlab.com/ce/development/contributing/index.html).
 
-## Workflow lables
+### How we prioritize MRs from the wider community
 
-We have some additional labels plus those defined in [gitlab-ce workflow labels](https://gitlab.com/gitlab-org/gitlab-ce/blob/master/CONTRIBUTING.md#workflow-labels) 
+Currently we use a system of [scoped labels](https://docs.gitlab.com/ee/user/project/labels.html#scoped-labels-premium) to help us prioritize which MRs our team will review.
+
+| Label | Meaning | Use Cases |
+| ---- | ----- | ----- |
+| ~"Review::P1" | Highest priority to review. | Indicates a merge request that might solve an urgent pain point for users, contributes to the strategic direction of Runner development as laid out by the Product team, or fixes a critical issue. A hard cap on the number of contributions labelled ~"Review::P1" is set at 3. |
+| ~"Review::P2" | Important merge requests. | When a merge request is important, but has lower impact to customers when compared to merge requests labelled ~"Review::P1". |
+| ~"Review::P3" | Default priority to review. | All incoming merge requests should default to this. |
+
+### Contributing new [executors](https://docs.gitlab.com/runner/#selecting-the-executor)
+
+We are no longer accepting or developing new executors for a few
+reasons listed below:
+
+- Some executors require licensed software or hardware that GitLab Inc.
+  doesn't have.
+- Each new executor brings its own set of problems when it comes to
+  testing it properly.
+- Adding new executors can add new dependencies, which adds maintenance costs.
+- Having a lot of executors adds to maintenance costs.
+
+With GitLab 12.1, we introduced the [custom
+executor](https://gitlab.com/gitlab-org/gitlab-runner/issues/2885),
+which will provide a way to create an executor of choice.
+
+### Contributing new hardware architectures
+
+We're currently exploring how we can add builds for new and different hardware
+architectures. Adding and supporting new architectures brings added levels of
+complexity and may require hardware that GitLab Inc. doesn't have access to.
+
+At the current time, new hardware architectures will only be considered if the
+following criteria are met:
+
+1. GitLab Inc. must be able to build and test for the new architecture on our Shared Runners on GitLab.com
+1. If adding support for the new architecture in the helper image, Docker must also support the architecture upstream
+
+As we explore adding more architectures other requirements may come up.
+
+We are currently discussing the ability of providing builds for architectures that we
+don't have the ability to support and [we welcome contributions to that discussion](https://gitlab.com/gitlab-org/gitlab-runner/issues/4229).
+
+## Workflow labels
+
+We have some additional labels plus those defined in [gitlab-ce workflow labels](https://docs.gitlab.com/ce/development/contributing/issue_workflow.html)
 
 - Additional subjects: ~cache, ~executors, ~"git operations"
-- OS: ~"os::Linux" ~"os::MacOSX" ~"os:FreeBSD" ~"os::Windows" 
-- executor: ~"executor::docker" ~"executor::kubernetes" ~"executor::docker\-machine" ~"executor::docker\-machine" ~"executor::shell" ~"executor::parallels" ~"executor::virtualbox" 
+- OS: ~"os::Linux" ~"os::MacOSX" ~"os:FreeBSD" ~"os::Windows"
+- executor: ~"executor::docker" ~"executor::kubernetes" ~"executor::docker\-machine" ~"executor::docker\-machine" ~"executor::shell" ~"executor::parallels" ~"executor::virtualbox"
+
 

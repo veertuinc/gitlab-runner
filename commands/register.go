@@ -2,10 +2,14 @@ package commands
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 
+	"github.com/imdario/mergo"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
@@ -14,6 +18,47 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/network"
 )
 
+type configTemplate struct {
+	*common.Config
+
+	ConfigFile string `long:"config" env:"TEMPLATE_CONFIG_FILE" description:"Path to the configuration template file"`
+}
+
+func (c *configTemplate) Enabled() bool {
+	return c.ConfigFile != ""
+}
+
+func (c *configTemplate) MergeTo(config *common.RunnerConfig) error {
+	err := c.loadConfigTemplate()
+	if err != nil {
+		return errors.Wrap(err, "couldn't load configuration template file")
+	}
+
+	if len(c.Runners) != 1 {
+		return errors.New("configuration template must contain exactly one [[runners]] entry")
+	}
+
+	err = mergo.Merge(config, c.Runners[0])
+	if err != nil {
+		return errors.Wrap(err, "error while merging configuration with configuration template")
+	}
+
+	return nil
+}
+
+func (c *configTemplate) loadConfigTemplate() error {
+	config := common.NewConfig()
+
+	err := config.LoadConfig(c.ConfigFile)
+	if err != nil {
+		return err
+	}
+
+	c.Config = config
+
+	return nil
+}
+
 type RegisterCommand struct {
 	context    *cli.Context
 	network    common.Network
@@ -21,17 +66,32 @@ type RegisterCommand struct {
 	registered bool
 
 	configOptions
+
+	ConfigTemplate configTemplate `namespace:"template"`
+
 	TagList           string `long:"tag-list" env:"RUNNER_TAG_LIST" description:"Tag list"`
 	NonInteractive    bool   `short:"n" long:"non-interactive" env:"REGISTER_NON_INTERACTIVE" description:"Run registration unattended"`
 	LeaveRunner       bool   `long:"leave-runner" env:"REGISTER_LEAVE_RUNNER" description:"Don't remove runner if registration fails"`
 	RegistrationToken string `short:"r" long:"registration-token" env:"REGISTRATION_TOKEN" description:"Runner's registration token"`
 	RunUntagged       bool   `long:"run-untagged" env:"REGISTER_RUN_UNTAGGED" description:"Register to run untagged builds; defaults to 'true' when 'tag-list' is empty"`
 	Locked            bool   `long:"locked" env:"REGISTER_LOCKED" description:"Lock Runner for current project, defaults to 'true'"`
+	AccessLevel       string `long:"access-level" env:"REGISTER_ACCESS_LEVEL" description:"Set access_level of the runner to not_protected or ref_protected; defaults to not_protected"`
 	MaximumTimeout    int    `long:"maximum-timeout" env:"REGISTER_MAXIMUM_TIMEOUT" description:"What is the maximum timeout (in seconds) that will be set for job when using this Runner"`
 	Paused            bool   `long:"paused" env:"REGISTER_PAUSED" description:"Set Runner to be paused, defaults to 'false'"`
 
 	common.RunnerConfig
 }
+
+type AccessLevel string
+
+const (
+	NotProtected AccessLevel = "not_protected"
+	RefProtected AccessLevel = "ref_protected"
+)
+
+const (
+	defaultDockerWindowCacheDir = "c:\\cache"
+)
 
 func (s *RegisterCommand) askOnce(prompt string, result *string, allowEmpty bool) bool {
 	println(prompt)
@@ -102,10 +162,7 @@ func (s *RegisterCommand) askExecutor() {
 }
 
 func (s *RegisterCommand) askDocker() {
-	if s.Docker == nil {
-		s.Docker = &common.DockerConfig{}
-	}
-	s.Docker.Image = s.ask("docker-image", "Please enter the default Docker image (e.g. ruby:2.1):")
+	s.askBasicDocker("ruby:2.6")
 
 	for _, volume := range s.Docker.Volumes {
 		parts := strings.Split(volume, ":")
@@ -114,6 +171,27 @@ func (s *RegisterCommand) askDocker() {
 		}
 	}
 	s.Docker.Volumes = append(s.Docker.Volumes, "/cache")
+}
+
+func (s *RegisterCommand) askDockerWindows() {
+	s.askBasicDocker("mcr.microsoft.com/windows/servercore:1809")
+
+	for _, volume := range s.Docker.Volumes {
+		// This does not cover all the possibilities since we don't have access
+		// to volume parsing package since it's internal.
+		if strings.Contains(volume, defaultDockerWindowCacheDir) {
+			return
+		}
+	}
+	s.Docker.Volumes = append(s.Docker.Volumes, defaultDockerWindowCacheDir)
+}
+
+func (s *RegisterCommand) askBasicDocker(exampleHelperImage string) {
+	if s.Docker == nil {
+		s.Docker = &common.DockerConfig{}
+	}
+
+	s.Docker.Image = s.ask("docker-image", fmt.Sprintf("Please enter the default Docker image (e.g. %s):", exampleHelperImage))
 }
 
 func (s *RegisterCommand) askParallels() {
@@ -180,6 +258,7 @@ func (s *RegisterCommand) askRunner() {
 			Description:    s.Name,
 			Tags:           s.TagList,
 			Locked:         s.Locked,
+			AccessLevel:    s.AccessLevel,
 			RunUntagged:    s.RunUntagged,
 			MaximumTimeout: s.MaximumTimeout,
 			Active:         !s.Paused,
@@ -203,6 +282,7 @@ func (s *RegisterCommand) askExecutorOptions() {
 	parallels := s.Parallels
 	virtualbox := s.VirtualBox
 	anka := s.Anka
+	custom := s.Custom
 
 	s.Kubernetes = nil
 	s.Machine = nil
@@ -210,90 +290,75 @@ func (s *RegisterCommand) askExecutorOptions() {
 	s.SSH = nil
 	s.Parallels = nil
 	s.VirtualBox = nil
+	s.Custom = nil
 
-	switch s.Executor {
-	case "kubernetes":
-		s.Kubernetes = kubernetes
-	case "docker+machine":
-		s.Machine = machine
-		s.Docker = docker
-		s.askDocker()
-	case "docker-ssh+machine":
-		s.Machine = machine
-		s.Docker = docker
-		s.SSH = ssh
-		s.askDocker()
-		s.askSSHLogin()
-	case "docker":
-		s.Docker = docker
-		s.askDocker()
-	case "docker-ssh":
-		s.Docker = docker
-		s.SSH = ssh
-		s.askDocker()
-		s.askSSHLogin()
-	case "ssh":
-		s.SSH = ssh
-		s.askSSHServer()
-		s.askSSHLogin()
-	case "parallels":
-		s.SSH = ssh
-		s.Parallels = parallels
-		s.askParallels()
-		s.askSSHServer()
-	case "virtualbox":
-		s.SSH = ssh
-		s.VirtualBox = virtualbox
-		s.askVirtualBox()
-		s.askSSHLogin()
-	case "anka":
-		s.SSH = ssh
-		s.Anka = anka
-		s.askAnka()
-		s.askSSHLogin()
-	}
-}
-
-// DEPRECATED
-// TODO: Remove in 12.0
-//
-// Writes cache configuration section using new syntax, even if
-// old CLI options/env variables were used.
-func (s *RegisterCommand) prepareCache() {
-	cache := s.RunnerConfig.Cache
-	if cache == nil {
-		return
-	}
-
-	// Called to log deprecated usage, if old cli options/env variables are used
-	cache.Path = cache.GetPath()
-	cache.Shared = cache.GetShared()
-
-	// Called to assign values and log deprecated usage, if old env variables are used
-	setStringIfUnset(&cache.S3.ServerAddress, cache.GetServerAddress())
-	setStringIfUnset(&cache.S3.AccessKey, cache.GetAccessKey())
-	setStringIfUnset(&cache.S3.SecretKey, cache.GetSecretKey())
-	setStringIfUnset(&cache.S3.BucketName, cache.GetBucketName())
-	setStringIfUnset(&cache.S3.BucketLocation, cache.GetBucketLocation())
-	setBoolIfUnset(&cache.S3.Insecure, cache.GetInsecure())
-}
-
-// TODO: Remove in 12.0
-func setStringIfUnset(setting *string, newSetting string) {
-	if *setting != "" {
-		return
+	executorFns := map[string]func(){
+		"kubernetes": func() {
+			s.Kubernetes = kubernetes
+		},
+		"docker+machine": func() {
+			s.Machine = machine
+			s.Docker = docker
+			s.askDocker()
+		},
+		"docker-ssh+machine": func() {
+			s.Machine = machine
+			s.Docker = docker
+			s.SSH = ssh
+			s.askDocker()
+			s.askSSHLogin()
+		},
+		"docker": func() {
+			s.Docker = docker
+			s.askDocker()
+		},
+		"docker-windows": func() {
+			s.Docker = docker
+			s.askDockerWindows()
+		},
+		"docker-ssh": func() {
+			s.Docker = docker
+			s.SSH = ssh
+			s.askDocker()
+			s.askSSHLogin()
+		},
+		"ssh": func() {
+			s.SSH = ssh
+			s.askSSHServer()
+			s.askSSHLogin()
+		},
+		"parallels": func() {
+			s.SSH = ssh
+			s.Parallels = parallels
+			s.askParallels()
+			s.askSSHServer()
+		},
+		"virtualbox": func() {
+			s.SSH = ssh
+			s.VirtualBox = virtualbox
+			s.askVirtualBox()
+			s.askSSHLogin()
+		},
+		"shell": func() {
+			if runtime.GOOS == "windows" && s.RunnerConfig.Shell == "" {
+				s.Shell = "powershell"
+			}
+		},
+		"custom": func() {
+			s.Custom = custom
+		},
+		"anka": func() {
+			s.SSH = ssh
+			s.Anka = anka
+			s.askAnka()
+			s.askSSHLogin()
+		},
 	}
 
-	*setting = newSetting
-}
-
-// TODO: Remove in 12.0
-func setBoolIfUnset(setting *bool, newSetting bool) {
-	if *setting {
-		return
+	executorFn, ok := executorFns[s.Executor]
+	if ok {
+		executorFn()
 	}
-
-	*setting = newSetting
 }
 
 func (s *RegisterCommand) Execute(context *cli.Context) {
@@ -304,6 +369,13 @@ func (s *RegisterCommand) Execute(context *cli.Context) {
 	if err != nil {
 		logrus.Panicln(err)
 	}
+
+	validAccessLevels := []AccessLevel{NotProtected, RefProtected}
+	if !accessLevelValid(validAccessLevels, AccessLevel(s.AccessLevel)) {
+		logrus.Panicln("Given access-level is not valid. " +
+			"Please refer to gitlab-runner register -h for the correct options.")
+	}
+
 	s.askRunner()
 
 	if !s.LeaveRunner {
@@ -335,11 +407,29 @@ func (s *RegisterCommand) Execute(context *cli.Context) {
 
 	s.askExecutor()
 	s.askExecutorOptions()
+
+	s.mergeTemplate()
+
 	s.addRunner(&s.RunnerConfig)
-	s.prepareCache()
-	s.saveConfig()
+	err = s.saveConfig()
+	if err != nil {
+		logrus.Panicln(err)
+	}
 
 	logrus.Printf("Runner registered successfully. Feel free to start it, but if it's running already the config should be automatically reloaded!")
+}
+
+func (s *RegisterCommand) mergeTemplate() {
+	if !s.ConfigTemplate.Enabled() {
+		return
+	}
+
+	logrus.Infof("Merging configuration from template file %q", s.ConfigTemplate.ConfigFile)
+
+	err := s.ConfigTemplate.MergeTo(&s.RunnerConfig)
+	if err != nil {
+		logrus.WithError(err).Fatal("Could not handle configuration merging from template file")
+	}
 }
 
 func getHostname() string {
@@ -366,6 +456,20 @@ func newRegisterCommand() *RegisterCommand {
 		Paused:  false,
 		network: network.NewGitLabClient(),
 	}
+}
+
+func accessLevelValid(levels []AccessLevel, givenLevel AccessLevel) bool {
+	if givenLevel == "" {
+		return true
+	}
+
+	for _, level := range levels {
+		if givenLevel == level {
+			return true
+		}
+	}
+
+	return false
 }
 
 func init() {

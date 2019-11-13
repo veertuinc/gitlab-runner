@@ -39,7 +39,9 @@ func TestCacheArchiverIsUpToDate(t *testing.T) {
 	// We need to wait one second, since the FS doesn't save milliseconds
 	time.Sleep(time.Second)
 
-	os.Chtimes(cacheArchiverTestArchivedFile, time.Now(), time.Now())
+	err := os.Chtimes(cacheArchiverTestArchivedFile, time.Now(), time.Now())
+	assert.NoError(t, err)
+
 	cmd.Execute(nil)
 	fi3, _ := os.Stat(cacheArchiverArchive)
 	assert.NotEqual(t, fi.ModTime(), fi3.ModTime(), "archive should get updated")
@@ -123,7 +125,7 @@ func TestCacheArchiverRemoteServerTimedOut(t *testing.T) {
 	assert.Panics(t, func() {
 		cmd.Execute(nil)
 	})
-	assert.Contains(t, buf.String(), "net/http: request canceled (Client.Timeout")
+	assert.Contains(t, buf.String(), "Client.Timeout")
 }
 
 func TestCacheArchiverRemoteServerFailOnInvalidServer(t *testing.T) {

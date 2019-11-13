@@ -20,7 +20,7 @@ import (
 	api "k8s.io/api/core/v1"
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
+	docker_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/timeperiod"
 )
@@ -32,8 +32,6 @@ const (
 	PullPolicyAlways       = "always"
 	PullPolicyNever        = "never"
 	PullPolicyIfNotPresent = "if-not-present"
-
-	defaultHelperImage = "gitlab/gitlab-runner-helper"
 )
 
 // Get returns one of the predefined values or returns an error if the value can't match the predefined
@@ -131,6 +129,24 @@ type AnkaConfig struct {
 	Priority		   *int     `toml:"priority,omitzero" json:"priority" long:"priority" env:"PRIORITY" description:"(optional) Override the task's default priority"`
 	GroupId 		   *string  `toml:"group_id,omitempty" json:"group_id" long:"group-id" env:"GROUP_ID" description:"(optional) Run on a specific node group "`
 	KeepAliveOnError   bool     `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"(optional) Keep the VM alive in case of error for debugging purposes "`
+type CustomConfig struct {
+	ConfigExec        string   `toml:"config_exec,omitempty" json:"config_exec" long:"config-exec" env:"CUSTOM_CONFIG_EXEC" description:"Executable that allows to inject configuration values to the executor"`
+	ConfigArgs        []string `toml:"config_args,omitempty" json:"config_args" long:"config-args" description:"Arguments for the config executable"`
+	ConfigExecTimeout *int     `toml:"config_exec_timeout,omitempty" json:"config_exec_timeout" long:"config-exec-timeout" env:"CUSTOM_CONFIG_EXEC_TIMEOUT" description:"Timeout for the config executable (in seconds)"`
+
+	PrepareExec        string   `toml:"prepare_exec,omitempty" json:"prepare_exec" long:"prepare-exec" env:"CUSTOM_PREPARE_EXEC" description:"Executable that prepares executor"`
+	PrepareArgs        []string `toml:"prepare_args,omitempty" json:"prepare_args" long:"prepare-args" description:"Arguments for the prepare executable"`
+	PrepareExecTimeout *int     `toml:"prepare_exec_timeout,omitempty" json:"prepare_exec_timeout" long:"prepare-exec-timeout" env:"CUSTOM_PREPARE_EXEC_TIMEOUT" description:"Timeout for the prepare executable (in seconds)"`
+
+	RunExec string   `toml:"run_exec" json:"run_exec" long:"run-exec" env:"CUSTOM_RUN_EXEC" description:"Executable that runs the job script in executor"`
+	RunArgs []string `toml:"run_args,omitempty" json:"run_args" long:"run-args" description:"Arguments for the run executable"`
+
+	CleanupExec        string   `toml:"cleanup_exec,omitempty" json:"cleanup_exec" long:"cleanup-exec" env:"CUSTOM_CLEANUP_EXEC" description:"Executable that cleanups after executor run"`
+	CleanupArgs        []string `toml:"cleanup_args,omitempty" json:"cleanup_args" long:"cleanup-args" description:"Arguments for the cleanup executable"`
+	CleanupExecTimeout *int     `toml:"cleanup_exec_timeout,omitempty" json:"cleanup_exec_timeout" long:"cleanup-exec-timeout" env:"CUSTOM_CLEANUP_EXEC_TIMEOUT" description:"Timeout for the cleanup executable (in seconds)"`
+
+	GracefulKillTimeout *int `toml:"graceful_kill_timeout,omitempty" json:"graceful_kill_timeout" long:"graceful-kill-timeout" env:"CUSTOM_GRACEFUL_KILL_TIMEOUT" description:"Graceful timeout for scripts execution after SIGTERM is sent to the process (in seconds). This limits the time given for scripts to perform the cleanup before exiting"`
+	ForceKillTimeout    *int `toml:"force_kill_timeout,omitempty" json:"force_kill_timeout" long:"force-kill-timeout" env:"CUSTOM_FORCE_KILL_TIMEOUT" description:"Force timeout for scripts execution (in seconds). Counted from the force kill call; if process will be not terminated, Runner will abandon process termination and log an error"`
 }
 
 type KubernetesPullPolicy string
@@ -151,42 +167,43 @@ func (p KubernetesPullPolicy) Get() (KubernetesPullPolicy, error) {
 }
 
 type KubernetesConfig struct {
-	Host                           string               `toml:"host" json:"host" long:"host" env:"KUBERNETES_HOST" description:"Optional Kubernetes master host URL (auto-discovery attempted if not specified)"`
-	CertFile                       string               `toml:"cert_file,omitempty" json:"cert_file" long:"cert-file" env:"KUBERNETES_CERT_FILE" description:"Optional Kubernetes master auth certificate"`
-	KeyFile                        string               `toml:"key_file,omitempty" json:"key_file" long:"key-file" env:"KUBERNETES_KEY_FILE" description:"Optional Kubernetes master auth private key"`
-	CAFile                         string               `toml:"ca_file,omitempty" json:"ca_file" long:"ca-file" env:"KUBERNETES_CA_FILE" description:"Optional Kubernetes master auth ca certificate"`
-	BearerTokenOverwriteAllowed    bool                 `toml:"bearer_token_overwrite_allowed" json:"bearer_token_overwrite_allowed" long:"bearer_token_overwrite_allowed" env:"KUBERNETES_BEARER_TOKEN_OVERWRITE_ALLOWED" description:"Bool to authorize builds to specify their own bearer token for creation."`
-	BearerToken                    string               `toml:"bearer_token,omitempty" json:"bearer_token" long:"bearer_token" env:"KUBERNETES_BEARER_TOKEN" description:"Optional Kubernetes service account token used to start build pods."`
-	Image                          string               `toml:"image" json:"image" long:"image" env:"KUBERNETES_IMAGE" description:"Default docker image to use for builds when none is specified"`
-	Namespace                      string               `toml:"namespace" json:"namespace" long:"namespace" env:"KUBERNETES_NAMESPACE" description:"Namespace to run Kubernetes jobs in"`
-	NamespaceOverwriteAllowed      string               `toml:"namespace_overwrite_allowed" json:"namespace_overwrite_allowed" long:"namespace_overwrite_allowed" env:"KUBERNETES_NAMESPACE_OVERWRITE_ALLOWED" description:"Regex to validate 'KUBERNETES_NAMESPACE_OVERWRITE' value"`
-	Privileged                     bool                 `toml:"privileged,omitzero" json:"privileged" long:"privileged" env:"KUBERNETES_PRIVILEGED" description:"Run all containers with the privileged flag enabled"`
-	CPULimit                       string               `toml:"cpu_limit,omitempty" json:"cpu_limit" long:"cpu-limit" env:"KUBERNETES_CPU_LIMIT" description:"The CPU allocation given to build containers"`
-	MemoryLimit                    string               `toml:"memory_limit,omitempty" json:"memory_limit" long:"memory-limit" env:"KUBERNETES_MEMORY_LIMIT" description:"The amount of memory allocated to build containers"`
-	ServiceCPULimit                string               `toml:"service_cpu_limit,omitempty" json:"service_cpu_limit" long:"service-cpu-limit" env:"KUBERNETES_SERVICE_CPU_LIMIT" description:"The CPU allocation given to build service containers"`
-	ServiceMemoryLimit             string               `toml:"service_memory_limit,omitempty" json:"service_memory_limit" long:"service-memory-limit" env:"KUBERNETES_SERVICE_MEMORY_LIMIT" description:"The amount of memory allocated to build service containers"`
-	HelperCPULimit                 string               `toml:"helper_cpu_limit,omitempty" json:"helper_cpu_limit" long:"helper-cpu-limit" env:"KUBERNETES_HELPER_CPU_LIMIT" description:"The CPU allocation given to build helper containers"`
-	HelperMemoryLimit              string               `toml:"helper_memory_limit,omitempty" json:"helper_memory_limit" long:"helper-memory-limit" env:"KUBERNETES_HELPER_MEMORY_LIMIT" description:"The amount of memory allocated to build helper containers"`
-	CPURequest                     string               `toml:"cpu_request,omitempty" json:"cpu_request" long:"cpu-request" env:"KUBERNETES_CPU_REQUEST" description:"The CPU allocation requested for build containers"`
-	MemoryRequest                  string               `toml:"memory_request,omitempty" json:"memory_request" long:"memory-request" env:"KUBERNETES_MEMORY_REQUEST" description:"The amount of memory requested from build containers"`
-	ServiceCPURequest              string               `toml:"service_cpu_request,omitempty" json:"service_cpu_request" long:"service-cpu-request" env:"KUBERNETES_SERVICE_CPU_REQUEST" description:"The CPU allocation requested for build service containers"`
-	ServiceMemoryRequest           string               `toml:"service_memory_request,omitempty" json:"service_memory_request" long:"service-memory-request" env:"KUBERNETES_SERVICE_MEMORY_REQUEST" description:"The amount of memory requested for build service containers"`
-	HelperCPURequest               string               `toml:"helper_cpu_request,omitempty" json:"helper_cpu_request" long:"helper-cpu-request" env:"KUBERNETES_HELPER_CPU_REQUEST" description:"The CPU allocation requested for build helper containers"`
-	HelperMemoryRequest            string               `toml:"helper_memory_request,omitempty" json:"helper_memory_request" long:"helper-memory-request" env:"KUBERNETES_HELPER_MEMORY_REQUEST" description:"The amount of memory requested for build helper containers"`
-	PullPolicy                     KubernetesPullPolicy `toml:"pull_policy,omitempty" json:"pull_policy" long:"pull-policy" env:"KUBERNETES_PULL_POLICY" description:"Policy for if/when to pull a container image (never, if-not-present, always). The cluster default will be used if not set"`
-	NodeSelector                   map[string]string    `toml:"node_selector,omitempty" json:"node_selector" long:"node-selector" env:"KUBERNETES_NODE_SELECTOR" description:"A toml table/json object of key=value. Value is expected to be a string. When set this will create pods on k8s nodes that match all the key=value pairs."`
-	NodeTolerations                map[string]string    `toml:"node_tolerations,omitempty" json:"node_tolerations" long:"node-tolerations" env:"KUBERNETES_NODE_TOLERATIONS" description:"A toml table/json object of key=value:effect. Value and effect are expected to be strings. When set, pods will tolerate the given taints. Only one toleration is supported through environment variable configuration."`
-	ImagePullSecrets               []string             `toml:"image_pull_secrets,omitempty" json:"image_pull_secrets" long:"image-pull-secrets" env:"KUBERNETES_IMAGE_PULL_SECRETS" description:"A list of image pull secrets that are used for pulling docker image"`
-	HelperImage                    string               `toml:"helper_image,omitempty" json:"helper_image" long:"helper-image" env:"KUBERNETES_HELPER_IMAGE" description:"[ADVANCED] Override the default helper image used to clone repos and upload artifacts"`
-	TerminationGracePeriodSeconds  int64                `toml:"terminationGracePeriodSeconds,omitzero" json:"terminationGracePeriodSeconds" long:"terminationGracePeriodSeconds" env:"KUBERNETES_TERMINATIONGRACEPERIODSECONDS" description:"Duration after the processes running in the pod are sent a termination signal and the time when the processes are forcibly halted with a kill signal."`
-	PollInterval                   int                  `toml:"poll_interval,omitzero" json:"poll_interval" long:"poll-interval" env:"KUBERNETES_POLL_INTERVAL" description:"How frequently, in seconds, the runner will poll the Kubernetes pod it has just created to check its status"`
-	PollTimeout                    int                  `toml:"poll_timeout,omitzero" json:"poll_timeout" long:"poll-timeout" env:"KUBERNETES_POLL_TIMEOUT" description:"The total amount of time, in seconds, that needs to pass before the runner will timeout attempting to connect to the pod it has just created (useful for queueing more builds that the cluster can handle at a time)"`
-	PodLabels                      map[string]string    `toml:"pod_labels,omitempty" json:"pod_labels" long:"pod-labels" description:"A toml table/json object of key-value. Value is expected to be a string. When set, this will create pods with the given pod labels. Environment variables will be substituted for values here."`
-	ServiceAccount                 string               `toml:"service_account,omitempty" json:"service_account" long:"service-account" env:"KUBERNETES_SERVICE_ACCOUNT" description:"Executor pods will use this Service Account to talk to kubernetes API"`
-	ServiceAccountOverwriteAllowed string               `toml:"service_account_overwrite_allowed" json:"service_account_overwrite_allowed" long:"service_account_overwrite_allowed" env:"KUBERNETES_SERVICE_ACCOUNT_OVERWRITE_ALLOWED" description:"Regex to validate 'KUBERNETES_SERVICE_ACCOUNT' value"`
-	PodAnnotations                 map[string]string    `toml:"pod_annotations,omitempty" json:"pod_annotations" long:"pod-annotations" description:"A toml table/json object of key-value. Value is expected to be a string. When set, this will create pods with the given annotations. Can be overwritten in build with KUBERNETES_POD_ANNOTATIONS_* varialbes"`
-	PodAnnotationsOverwriteAllowed string               `toml:"pod_annotations_overwrite_allowed" json:"pod_annotations_overwrite_allowed" long:"pod_annotations_overwrite_allowed" env:"KUBERNETES_POD_ANNOTATIONS_OVERWRITE_ALLOWED" description:"Regex to validate 'KUBERNETES_POD_ANNOTATIONS_*' values"`
-	Volumes                        KubernetesVolumes    `toml:"volumes"`
+	Host                           string                       `toml:"host" json:"host" long:"host" env:"KUBERNETES_HOST" description:"Optional Kubernetes master host URL (auto-discovery attempted if not specified)"`
+	CertFile                       string                       `toml:"cert_file,omitempty" json:"cert_file" long:"cert-file" env:"KUBERNETES_CERT_FILE" description:"Optional Kubernetes master auth certificate"`
+	KeyFile                        string                       `toml:"key_file,omitempty" json:"key_file" long:"key-file" env:"KUBERNETES_KEY_FILE" description:"Optional Kubernetes master auth private key"`
+	CAFile                         string                       `toml:"ca_file,omitempty" json:"ca_file" long:"ca-file" env:"KUBERNETES_CA_FILE" description:"Optional Kubernetes master auth ca certificate"`
+	BearerTokenOverwriteAllowed    bool                         `toml:"bearer_token_overwrite_allowed" json:"bearer_token_overwrite_allowed" long:"bearer_token_overwrite_allowed" env:"KUBERNETES_BEARER_TOKEN_OVERWRITE_ALLOWED" description:"Bool to authorize builds to specify their own bearer token for creation."`
+	BearerToken                    string                       `toml:"bearer_token,omitempty" json:"bearer_token" long:"bearer_token" env:"KUBERNETES_BEARER_TOKEN" description:"Optional Kubernetes service account token used to start build pods."`
+	Image                          string                       `toml:"image" json:"image" long:"image" env:"KUBERNETES_IMAGE" description:"Default docker image to use for builds when none is specified"`
+	Namespace                      string                       `toml:"namespace" json:"namespace" long:"namespace" env:"KUBERNETES_NAMESPACE" description:"Namespace to run Kubernetes jobs in"`
+	NamespaceOverwriteAllowed      string                       `toml:"namespace_overwrite_allowed" json:"namespace_overwrite_allowed" long:"namespace_overwrite_allowed" env:"KUBERNETES_NAMESPACE_OVERWRITE_ALLOWED" description:"Regex to validate 'KUBERNETES_NAMESPACE_OVERWRITE' value"`
+	Privileged                     bool                         `toml:"privileged,omitzero" json:"privileged" long:"privileged" env:"KUBERNETES_PRIVILEGED" description:"Run all containers with the privileged flag enabled"`
+	CPULimit                       string                       `toml:"cpu_limit,omitempty" json:"cpu_limit" long:"cpu-limit" env:"KUBERNETES_CPU_LIMIT" description:"The CPU allocation given to build containers"`
+	MemoryLimit                    string                       `toml:"memory_limit,omitempty" json:"memory_limit" long:"memory-limit" env:"KUBERNETES_MEMORY_LIMIT" description:"The amount of memory allocated to build containers"`
+	ServiceCPULimit                string                       `toml:"service_cpu_limit,omitempty" json:"service_cpu_limit" long:"service-cpu-limit" env:"KUBERNETES_SERVICE_CPU_LIMIT" description:"The CPU allocation given to build service containers"`
+	ServiceMemoryLimit             string                       `toml:"service_memory_limit,omitempty" json:"service_memory_limit" long:"service-memory-limit" env:"KUBERNETES_SERVICE_MEMORY_LIMIT" description:"The amount of memory allocated to build service containers"`
+	HelperCPULimit                 string                       `toml:"helper_cpu_limit,omitempty" json:"helper_cpu_limit" long:"helper-cpu-limit" env:"KUBERNETES_HELPER_CPU_LIMIT" description:"The CPU allocation given to build helper containers"`
+	HelperMemoryLimit              string                       `toml:"helper_memory_limit,omitempty" json:"helper_memory_limit" long:"helper-memory-limit" env:"KUBERNETES_HELPER_MEMORY_LIMIT" description:"The amount of memory allocated to build helper containers"`
+	CPURequest                     string                       `toml:"cpu_request,omitempty" json:"cpu_request" long:"cpu-request" env:"KUBERNETES_CPU_REQUEST" description:"The CPU allocation requested for build containers"`
+	MemoryRequest                  string                       `toml:"memory_request,omitempty" json:"memory_request" long:"memory-request" env:"KUBERNETES_MEMORY_REQUEST" description:"The amount of memory requested from build containers"`
+	ServiceCPURequest              string                       `toml:"service_cpu_request,omitempty" json:"service_cpu_request" long:"service-cpu-request" env:"KUBERNETES_SERVICE_CPU_REQUEST" description:"The CPU allocation requested for build service containers"`
+	ServiceMemoryRequest           string                       `toml:"service_memory_request,omitempty" json:"service_memory_request" long:"service-memory-request" env:"KUBERNETES_SERVICE_MEMORY_REQUEST" description:"The amount of memory requested for build service containers"`
+	HelperCPURequest               string                       `toml:"helper_cpu_request,omitempty" json:"helper_cpu_request" long:"helper-cpu-request" env:"KUBERNETES_HELPER_CPU_REQUEST" description:"The CPU allocation requested for build helper containers"`
+	HelperMemoryRequest            string                       `toml:"helper_memory_request,omitempty" json:"helper_memory_request" long:"helper-memory-request" env:"KUBERNETES_HELPER_MEMORY_REQUEST" description:"The amount of memory requested for build helper containers"`
+	PullPolicy                     KubernetesPullPolicy         `toml:"pull_policy,omitempty" json:"pull_policy" long:"pull-policy" env:"KUBERNETES_PULL_POLICY" description:"Policy for if/when to pull a container image (never, if-not-present, always). The cluster default will be used if not set"`
+	NodeSelector                   map[string]string            `toml:"node_selector,omitempty" json:"node_selector" long:"node-selector" env:"KUBERNETES_NODE_SELECTOR" description:"A toml table/json object of key=value. Value is expected to be a string. When set this will create pods on k8s nodes that match all the key=value pairs."`
+	NodeTolerations                map[string]string            `toml:"node_tolerations,omitempty" json:"node_tolerations" long:"node-tolerations" env:"KUBERNETES_NODE_TOLERATIONS" description:"A toml table/json object of key=value:effect. Value and effect are expected to be strings. When set, pods will tolerate the given taints. Only one toleration is supported through environment variable configuration."`
+	ImagePullSecrets               []string                     `toml:"image_pull_secrets,omitempty" json:"image_pull_secrets" long:"image-pull-secrets" env:"KUBERNETES_IMAGE_PULL_SECRETS" description:"A list of image pull secrets that are used for pulling docker image"`
+	HelperImage                    string                       `toml:"helper_image,omitempty" json:"helper_image" long:"helper-image" env:"KUBERNETES_HELPER_IMAGE" description:"[ADVANCED] Override the default helper image used to clone repos and upload artifacts"`
+	TerminationGracePeriodSeconds  int64                        `toml:"terminationGracePeriodSeconds,omitzero" json:"terminationGracePeriodSeconds" long:"terminationGracePeriodSeconds" env:"KUBERNETES_TERMINATIONGRACEPERIODSECONDS" description:"Duration after the processes running in the pod are sent a termination signal and the time when the processes are forcibly halted with a kill signal."`
+	PollInterval                   int                          `toml:"poll_interval,omitzero" json:"poll_interval" long:"poll-interval" env:"KUBERNETES_POLL_INTERVAL" description:"How frequently, in seconds, the runner will poll the Kubernetes pod it has just created to check its status"`
+	PollTimeout                    int                          `toml:"poll_timeout,omitzero" json:"poll_timeout" long:"poll-timeout" env:"KUBERNETES_POLL_TIMEOUT" description:"The total amount of time, in seconds, that needs to pass before the runner will timeout attempting to connect to the pod it has just created (useful for queueing more builds that the cluster can handle at a time)"`
+	PodLabels                      map[string]string            `toml:"pod_labels,omitempty" json:"pod_labels" long:"pod-labels" description:"A toml table/json object of key-value. Value is expected to be a string. When set, this will create pods with the given pod labels. Environment variables will be substituted for values here."`
+	ServiceAccount                 string                       `toml:"service_account,omitempty" json:"service_account" long:"service-account" env:"KUBERNETES_SERVICE_ACCOUNT" description:"Executor pods will use this Service Account to talk to kubernetes API"`
+	ServiceAccountOverwriteAllowed string                       `toml:"service_account_overwrite_allowed" json:"service_account_overwrite_allowed" long:"service_account_overwrite_allowed" env:"KUBERNETES_SERVICE_ACCOUNT_OVERWRITE_ALLOWED" description:"Regex to validate 'KUBERNETES_SERVICE_ACCOUNT' value"`
+	PodAnnotations                 map[string]string            `toml:"pod_annotations,omitempty" json:"pod_annotations" long:"pod-annotations" description:"A toml table/json object of key-value. Value is expected to be a string. When set, this will create pods with the given annotations. Can be overwritten in build with KUBERNETES_POD_ANNOTATION_* variables"`
+	PodAnnotationsOverwriteAllowed string                       `toml:"pod_annotations_overwrite_allowed" json:"pod_annotations_overwrite_allowed" long:"pod_annotations_overwrite_allowed" env:"KUBERNETES_POD_ANNOTATIONS_OVERWRITE_ALLOWED" description:"Regex to validate 'KUBERNETES_POD_ANNOTATIONS_*' values"`
+	PodSecurityContext             KubernetesPodSecurityContext `toml:"pod_security_context,omitempty" namespace:"pod-security-context" description:"A security context attached to each build pod"`
+	Volumes                        KubernetesVolumes            `toml:"volumes"`
 }
 
 type KubernetesVolumes struct {
@@ -230,6 +247,14 @@ type KubernetesEmptyDir struct {
 	Medium    string `toml:"medium,omitempty" description:"Set to 'Memory' to have a tmpfs"`
 }
 
+type KubernetesPodSecurityContext struct {
+	FSGroup            *int64  `toml:"fs_group,omitempty" long:"fs-group" env:"KUBERNETES_POD_SECURITY_CONTEXT_FS_GROUP" description:"A special supplemental group that applies to all containers in a pod"`
+	RunAsGroup         *int64  `toml:"run_as_group,omitempty" long:"run-as-group" env:"KUBERNETES_POD_SECURITY_CONTEXT_RUN_AS_GROUP" description:"The GID to run the entrypoint of the container process"`
+	RunAsNonRoot       *bool   `toml:"run_as_non_root,omitempty" long:"run-as-non-root" env:"KUBERNETES_POD_SECURITY_CONTEXT_RUN_AS_NON_ROOT" description:"Indicates that the container must run as a non-root user"`
+	RunAsUser          *int64  `toml:"run_as_user,omitempty" long:"run-as-user" env:"KUBERNETES_POD_SECURITY_CONTEXT_RUN_AS_USER" description:"The UID to run the entrypoint of the container process"`
+	SupplementalGroups []int64 `toml:"supplemental_groups,omitempty" long:"supplemental-groups" description:"A list of groups applied to the first process run in each container, in addition to the container's primary GID"`
+}
+
 type RunnerCredentials struct {
 	URL         string `toml:"url" json:"url" short:"u" long:"url" env:"CI_SERVER_URL" required:"true" description:"Runner URL"`
 	Token       string `toml:"token" json:"token" short:"t" long:"token" env:"CI_SERVER_TOKEN" required:"true" description:"Runner token"`
@@ -265,16 +290,6 @@ type CacheConfig struct {
 
 	S3  *CacheS3Config  `toml:"s3,omitempty" json:"s3" namespace:"s3"`
 	GCS *CacheGCSConfig `toml:"gcs,omitempty" json:"gcs" namespace:"gcs"`
-
-	// TODO: Remove in 12.0
-	S3CachePath    string `toml:"-" long:"s3-cache-path" env:"S3_CACHE_PATH" description:"Name of the path to prepend to the cache URL. DEPRECATED"` // DEPRECATED
-	CacheShared    bool   `toml:"-" long:"cache-shared" description:"Enable cache sharing between runners. DEPRECATED"`                              // DEPRECATED
-	ServerAddress  string `toml:"ServerAddress,omitempty" description:"A host:port to the used S3-compatible server DEPRECATED"`                     // DEPRECATED
-	AccessKey      string `toml:"AccessKey,omitempty" description:"S3 Access Key DEPRECATED"`                                                        // DEPRECATED
-	SecretKey      string `toml:"SecretKey,omitempty" description:"S3 Secret Key DEPRECATED"`                                                        // DEPRECATED
-	BucketName     string `toml:"BucketName,omitempty" description:"Name of the bucket where cache will be stored DEPRECATED"`                       // DEPRECATED
-	BucketLocation string `toml:"BucketLocation,omitempty" description:"Name of S3 region DEPRECATED"`                                               // DEPRECATED
-	Insecure       bool   `toml:"Insecure,omitempty" description:"Use insecure mode (without https) DEPRECATED"`                                     // DEPRECATED
 }
 
 type RunnerSettings struct {
@@ -301,6 +316,7 @@ type RunnerSettings struct {
 	Machine        *DockerMachine    `toml:"machine,omitempty" json:"machine" group:"docker machine provider" namespace:"machine"`
 	Kubernetes     *KubernetesConfig `toml:"kubernetes,omitempty" json:"kubernetes" group:"kubernetes executor" namespace:"kubernetes"`
 	Anka *AnkaConfig                 `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
+	Custom         *CustomConfig     `toml:"custom,omitempty" json:"custom" group:"custom executor" namespace:"custom"`
 }
 
 type RunnerConfig struct {
@@ -322,9 +338,6 @@ type SessionServer struct {
 type Config struct {
 	ListenAddress string        `toml:"listen_address,omitempty" json:"listen_address"`
 	SessionServer SessionServer `toml:"session_server,omitempty" json:"session_server"`
-
-	// TODO: Remove in 12.0
-	MetricsServerAddress string `toml:"metrics_server,omitempty" json:"metrics_server"` // DEPRECATED
 
 	Concurrent    int             `toml:"concurrent" json:"concurrent"`
 	CheckInterval int             `toml:"check_interval" json:"check_interval" description:"Define active checking interval of jobs"`
@@ -374,95 +387,11 @@ func (c *CacheS3Config) ShouldUseIAMCredentials() bool {
 }
 
 func (c *CacheConfig) GetPath() string {
-	if c.Path != "" {
-		return c.Path
-	}
-
-	// TODO: Remove in 12.0
-	if c.S3CachePath != "" {
-		logrus.Warning("'--cache-s3-cache-path' command line option and `$S3_CACHE_PATH` environment variables are deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-path' or '$CACHE_PATH' instead")
-	}
-
-	return c.S3CachePath
+	return c.Path
 }
 
 func (c *CacheConfig) GetShared() bool {
-	if c.Shared {
-		return c.Shared
-	}
-
-	// TODO: Remove in 12.0
-	if c.CacheShared {
-		logrus.Warning("'--cache-cache-shared' command line is deprecated and will be removed in GitLab Runner 12.0. Please use '--cache-shared' instead")
-	}
-
-	return c.CacheShared
-}
-
-// DEPRECATED
-// TODO: Remove in 12.0
-func (c *CacheConfig) GetServerAddress() string {
-	return getDeprecatedStringSetting(
-		c.ServerAddress,
-		"[runners.cache] ServerAddress",
-		"S3_SERVER_ADDRESS",
-		"[runners.cache.s3] ServerAddress",
-		"CACHE_S3_SERVER_ADDRESS")
-}
-
-// DEPRECATED
-// TODO: Remove in 12.0
-func (c *CacheConfig) GetAccessKey() string {
-	return getDeprecatedStringSetting(
-		c.AccessKey,
-		"[runners.cache] AccessKey",
-		"S3_ACCESS_KEY",
-		"[runners.cache.s3] AccessKey",
-		"CACHE_S3_ACCESS_KEY")
-}
-
-// DEPRECATED
-// TODO: Remove in 12.0
-func (c *CacheConfig) GetSecretKey() string {
-	return getDeprecatedStringSetting(
-		c.SecretKey,
-		"[runners.cache] SecretKey",
-		"S3_SECRET_KEY",
-		"[runners.cache.s3] SecretKey",
-		"CACHE_S3_SECRET_KEY")
-}
-
-// DEPRECATED
-// TODO: Remove in 12.0
-func (c *CacheConfig) GetBucketName() string {
-	return getDeprecatedStringSetting(
-		c.BucketName,
-		"[runners.cache] BucketName",
-		"S3_BUCKET_NAME",
-		"[runners.cache.s3] BucketName",
-		"CACHE_S3_BUCKET_NAME")
-}
-
-// DEPRECATED
-// TODO: Remove in 12.0
-func (c *CacheConfig) GetBucketLocation() string {
-	return getDeprecatedStringSetting(
-		c.BucketLocation,
-		"[runners.cache] BucketLocation",
-		"S3_BUCKET_LOCATION",
-		"[runners.cache.s3] BucketLocation",
-		"CACHE_S3_BUCKET_LOCATION")
-}
-
-// DEPRECATED
-// TODO: Remove in 12.0
-func (c *CacheConfig) GetInsecure() bool {
-	return getDeprecatedBoolSetting(
-		c.Insecure,
-		"[runners.cache] Insecure",
-		"S3_CACHE_INSECURE",
-		"[runners.cache.s3] Insecure",
-		"CACHE_S3_INSECURE")
+	return c.Shared
 }
 
 func (c *SessionServer) GetSessionTimeout() time.Duration {
@@ -517,19 +446,6 @@ func (c *DockerConfig) GetOomKillDisable() *bool {
 	return &c.OomKillDisable
 }
 
-func (c *KubernetesConfig) GetHelperImage() string {
-	if len(c.HelperImage) > 0 {
-		return c.HelperImage
-	}
-
-	rev := REVISION
-	if rev == "HEAD" {
-		rev = "latest"
-	}
-
-	return fmt.Sprintf("%s:x86_64-%s", defaultHelperImage, rev)
-}
-
 func (c *KubernetesConfig) GetPollAttempts() int {
 	if c.PollTimeout <= 0 {
 		c.PollTimeout = KubernetesPollTimeout
@@ -570,6 +486,26 @@ func (c *KubernetesConfig) GetNodeTolerations() []api.Toleration {
 	}
 
 	return tolerations
+}
+
+func (c *KubernetesConfig) GetPodSecurityContext() *api.PodSecurityContext {
+	podSecurityContext := c.PodSecurityContext
+
+	if podSecurityContext.FSGroup == nil &&
+		podSecurityContext.RunAsGroup == nil &&
+		podSecurityContext.RunAsNonRoot == nil &&
+		podSecurityContext.RunAsUser == nil &&
+		len(podSecurityContext.SupplementalGroups) == 0 {
+		return nil
+	}
+
+	return &api.PodSecurityContext{
+		FSGroup:            podSecurityContext.FSGroup,
+		RunAsGroup:         podSecurityContext.RunAsGroup,
+		RunAsNonRoot:       podSecurityContext.RunAsNonRoot,
+		RunAsUser:          podSecurityContext.RunAsUser,
+		SupplementalGroups: podSecurityContext.SupplementalGroups,
+	}
 }
 
 func (c *DockerMachine) GetIdleCount() int {
@@ -656,7 +592,9 @@ func (c *RunnerConfig) GetRequestConcurrency() int {
 }
 
 func (c *RunnerConfig) GetVariables() JobVariables {
-	var variables JobVariables
+	variables := JobVariables{
+		{Key: "CI_RUNNER_SHORT_TOKEN", Value: c.ShortDescription(), Public: true, Internal: true, File: false},
+	}
 
 	for _, environment := range c.Environment {
 		if variable, err := ParseVariable(environment); err == nil {
@@ -746,7 +684,10 @@ func (c *Config) SaveConfig(configFile string) error {
 	}
 
 	// create directory to store configuration
-	os.MkdirAll(filepath.Dir(configFile), 0700)
+	err := os.MkdirAll(filepath.Dir(configFile), 0700)
+	if err != nil {
+		return err
+	}
 
 	// write config file
 	if err := ioutil.WriteFile(configFile, newConfig.Bytes(), 0600); err != nil {
@@ -762,17 +703,4 @@ func (c *Config) GetCheckInterval() time.Duration {
 		return time.Duration(c.CheckInterval) * time.Second
 	}
 	return CheckInterval
-}
-
-func (c *Config) ListenOrServerMetricAddress() string {
-	if c.ListenAddress != "" {
-		return c.ListenAddress
-	}
-
-	// TODO: Remove in 12.0
-	if c.MetricsServerAddress != "" {
-		logrus.Warnln("'metrics_server' configuration entry is deprecated and will be removed in one of future releases; please use 'listen_address' instead")
-	}
-
-	return c.MetricsServerAddress
 }

@@ -7,6 +7,7 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors"
+	"gitlab.com/gitlab-org/gitlab-runner/executors/docker/internal/volumes/parser"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
 )
 
@@ -85,6 +86,7 @@ func init() {
 	options := executors.ExecutorOptions{
 		DefaultCustomBuildsDirEnabled: true,
 		DefaultBuildsDir:              "builds",
+		DefaultCacheDir:               "cache",
 		SharedBuildsDir:               false,
 		Shell: common.ShellScriptInfo{
 			Shell:         "bash",
@@ -92,6 +94,9 @@ func init() {
 			RunnerCommand: "gitlab-runner",
 		},
 		ShowHostname: true,
+		Metadata: map[string]string{
+			metadataOSType: osTypeLinux,
+		},
 	}
 
 	creator := func() common.Executor {
@@ -100,6 +105,7 @@ func init() {
 				AbstractExecutor: executors.AbstractExecutor{
 					ExecutorOptions: options,
 				},
+				volumeParser: parser.NewLinuxParser(),
 			},
 		}
 		e.SetCurrentStage(common.ExecutorStageCreated)

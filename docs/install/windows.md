@@ -22,33 +22,32 @@ want to install a version prior to GitLab Runner 10, [visit the old docs](old.md
    You can download a binary for every available version as described in
    [Bleeding Edge - download any other tagged
    release](bleeding-edge.md#download-any-other-tagged-release).
-1. Run an [elevated command prompt][prompt]:
-   1. Press <kbd>Windows</kbd> key or click **Start** button.
-   1. Type `PowerShell`.
-   1. Right-click `Windows PowerShell`, and then select `Run as administrator`.
+1. Run an [elevated command prompt](https://docs.microsoft.com/en-us/powershell/scripting/getting-started/starting-windows-powershell?view=powershell-6#with-administrative-privileges-run-as-administrator):
 1. [Register the Runner](../register/index.md).
 1. Install the Runner as a service and start it. You can either run the service
    using the Built-in System Account (recommended) or using a user account.
 
-    **Run service using Built-in System Account**
+   **Run service using Built-in System Account** (under directory created in step 1. from above, ex.: `C:\GitLab-Runner`)
 
-    ```powershell
-    gitlab-runner install
-    gitlab-runner start
-    ```
+   ```powershell
+   cd C:\GitLab-Runner
+   ./gitlab-runner.exe install
+   ./gitlab-runner.exe start
+   ```
 
-    **Run service using user account**
+   **Run service using user account** (under directory created in step 1. from above, ex.: `C:\GitLab-Runner`)
 
-    You have to enter a valid password for the current user account, because
-    it's required to start the service by Windows:
+   You have to enter a valid password for the current user account, because
+   it's required to start the service by Windows:
 
-    ```powershell
-    gitlab-runner install --user ENTER-YOUR-USERNAME --password ENTER-YOUR-PASSWORD
-    gitlab-runner start
-    ```
+   ```powershell
+   cd C:\GitLab-Runner
+   ./gitlab-runner.exe install --user ENTER-YOUR-USERNAME --password ENTER-YOUR-PASSWORD
+   ./gitlab-runner.exe start
+   ```
 
-    See the [troubleshooting section](#troubleshooting) if you encounter any
-    errors during the Runner installation.
+   See the [troubleshooting section](#troubleshooting) if you encounter any
+   errors during the Runner installation.
 
 1. (Optional) Update Runners `concurrent` value in `C:\GitLab-Runner\config.toml`
    to allow multiple concurrent jobs as detailed in [advanced configuration details](../configuration/advanced-configuration.md).
@@ -60,12 +59,12 @@ Logs are stored in Windows Event Log.
 
 ## Update
 
-1. Stop the service (you need [elevated command prompt][prompt] as before):
+1. Stop the service (you need an [elevated command prompt](https://docs.microsoft.com/en-us/powershell/scripting/getting-started/starting-windows-powershell?view=powershell-6#with-administrative-privileges-run-as-administrator) as before):
 
-    ```powershell
-    cd C:\GitLab-Runner
-    gitlab-runner stop
-    ```
+   ```powershell
+   cd C:\GitLab-Runner
+   ./gitlab-runner.exe stop
+   ```
 
 1. Download the binary for [x86][] or [amd64][] and replace runner's executable.
    You can download a binary for every available version as described in
@@ -73,18 +72,18 @@ Logs are stored in Windows Event Log.
 
 1. Start the service:
 
-    ```powershell
-    gitlab-runner start
-    ```
+   ```powershell
+   ./gitlab-runner.exe start
+   ```
 
 ## Uninstall
 
-From [elevated command prompt][prompt]:
+From an [elevated command prompt](https://docs.microsoft.com/en-us/powershell/scripting/getting-started/starting-windows-powershell?view=powershell-6#with-administrative-privileges-run-as-administrator):
 
 ```powershell
 cd C:\GitLab-Runner
-gitlab-runner stop
-gitlab-runner uninstall
+./gitlab-runner.exe stop
+./gitlab-runner.exe uninstall
 cd ..
 rmdir /s GitLab-Runner
 ```
@@ -97,19 +96,18 @@ some of the most common problems with GitLab Runner.
 If you encounter an error like _The account name is invalid_ try to add `.\` before the username:
 
 ```powershell
-gitlab-runner install --user ".\ENTER-YOUR-USERNAME" --password "ENTER-YOUR-PASSWORD"
+./gitlab-runner.exe install --user ".\ENTER-YOUR-USERNAME" --password "ENTER-YOUR-PASSWORD"
 ```
 
 If you encounter a _The service did not start due to a logon failure_ error
-while starting the service, please [look in the FAQ](../faq/README.md#the-service-did-not-start-due-to-a-logon-failure-error-when-starting-service-on-windows) to check how to resolve the problem.
+while starting the service, please [look in the FAQ](../faq/README.md#the-service-did-not-start-due-to-a-logon-failure-error-when-starting-service) to check how to resolve the problem.
 
 If you don't have a Windows Password, Runner's service won't start but you can
 use the Built-in System Account.
 
 If you have issues with the Built-in System Account, please read
-[How to Configure the Service to Start Up with the Built-in System Account](https://support.microsoft.com/en-us/kb/327545#6)
+[How to Configure the Service to Start Up with the Built-in System Account](https://support.microsoft.com/en-us/help/327545/how-to-troubleshoot-service-startup-permissions-in-windows-server-2003#6)
 on Microsoft's support website.
 
 [x86]: https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-windows-386.exe
 [amd64]: https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-windows-amd64.exe
-[prompt]: https://docs.microsoft.com/en-us/powershell/scripting/setup/starting-windows-powershell#at-the-command-prompt

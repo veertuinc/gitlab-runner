@@ -22,6 +22,7 @@ from `master` branch. Use at your own risk.
 - <https://s3.amazonaws.com/gitlab-runner-downloads/master/binaries/gitlab-runner-freebsd-arm>
 
 You can then run the Runner with:
+
 ```bash
 chmod +x gitlab-runner-linux-amd64
 ./gitlab-runner-linux-amd64 run
@@ -56,7 +57,7 @@ rpm -i gitlab-runner_386.rpm
 ## Download any other tagged release
 
 Simply replace `master` with either `tag` (for example, `11.4.2`) or `latest` (the latest
-stable). For a list of tags see <https://gitlab.com/gitlab-org/gitlab-runner/tags>.
+stable). For a list of tags see <https://gitlab.com/gitlab-org/gitlab-runner/-/tags>.
 For example:
 
 - <https://s3.amazonaws.com/gitlab-runner-downloads/master/binaries/gitlab-runner-linux-386>

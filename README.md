@@ -3,10 +3,11 @@
 This is **NOT** the repository of the official GitLab Runner.
 
 # Anka cloud support
-
 You can use this fork in order to integrate your Anka cloud with gitlab.  
 
 For more information about Anka go to <a href="https://veertu.com" target="_blank">veertu.com</a>.  
+For a list of compatible versions between GitLab and GitLab Runner, consult
+the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
 
 # How To Use This Package
 

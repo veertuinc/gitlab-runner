@@ -6,7 +6,7 @@ when running your jobs.
 ## Usage of Shell executor
 
 **Generally it's unsafe to run tests with `shell` executors.** The jobs are run
-with user's permissions (gitlab-runner's) and can steal code from other
+with user's permissions (GitLab Runner's) and can steal code from other
 projects that are run on this server. Use only it for running the trusted builds.
 
 ## Usage of Docker executor
@@ -58,7 +58,7 @@ for more information.
 ## Systems with Docker installed
 
 >**Note:**
-This applies to installations below 0.5.0 or one's that were upgraded to newer version.
+This applies to installations below 0.5.0 or ones that were upgraded to newer version.
 
 When installing package on Linux systems with Docker installed, `gitlab-runner`
 will create user that will have permission to access `Docker` daemon. This makes
@@ -81,4 +81,4 @@ it blocks access to all peripherals and shared folders.
 
 Runners use a token to identify to the GitLab Server. If you clone a runner then
 the cloned runner could be picking up the same jobs for that token. This is a possible
-attack vector to "steal" runner jobs. 
+attack vector to "steal" runner jobs.

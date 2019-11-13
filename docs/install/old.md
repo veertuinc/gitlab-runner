@@ -5,8 +5,8 @@ last_updated: 2017-10-09
 # Old GitLab Runner URLs
 
 NOTE: **Note:**
-Take a look at the [compatibility chart](../index.md#compatibility-chart) for
-a list of compatible versions.
+Take a look at the [compatibility section](../index.md#compatibility-with-gitlab-versions) to check the Runner's compatibility
+with your version of GitLab.
 
 In GitLab Runner 10, the name of the executable was renamed from
 `gitlab-ci-multi-runner` to `gitlab-runner`. With that change, GitLab Runner
@@ -28,4 +28,4 @@ curl -L https://packages.gitlab.com/install/repositories/runner/gitlab-ci-multi-
 ## Downloading the binaries manually
 
 For manual installations, the old GitLab Runner binaries can be found under
-https://gitlab-ci-multi-runner-downloads.s3.amazonaws.com/latest/index.html.
+<https://gitlab-ci-multi-runner-downloads.s3.amazonaws.com/latest/index.html>.

@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ayufan/golang-kardianos-service"
+	service "github.com/ayufan/golang-kardianos-service"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -23,7 +23,7 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/certificate"
 	prometheus_helper "gitlab.com/gitlab-org/gitlab-runner/helpers/prometheus"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/sentry"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/service"
+	service_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/service"
 	"gitlab.com/gitlab-org/gitlab-runner/log"
 	"gitlab.com/gitlab-org/gitlab-runner/network"
 	"gitlab.com/gitlab-org/gitlab-runner/session"
@@ -121,21 +121,54 @@ func (mr *RunCommand) feedRunners(runners chan *common.RunnerConfig) {
 	}
 }
 
+func (mr *RunCommand) requeueRunner(runner *common.RunnerConfig, runners chan *common.RunnerConfig) {
+	select {
+	case runners <- runner:
+		mr.log().WithField("runner", runner.ShortDescription()).Debugln("Requeued the runner")
+
+	default:
+		mr.log().WithField("runner", runner.ShortDescription()).Debugln("Failed to requeue the runner: ")
+	}
+}
+
 // requestJob will check if the runner can send another concurrent request to
 // GitLab, if not the return value is nil.
-func (mr *RunCommand) requestJob(runner *common.RunnerConfig, sessionInfo *common.SessionInfo) *common.JobResponse {
+func (mr *RunCommand) requestJob(runner *common.RunnerConfig, sessionInfo *common.SessionInfo) (common.JobTrace, *common.JobResponse, error) {
 	if !mr.buildsHelper.acquireRequest(runner) {
 		mr.log().WithField("runner", runner.ShortDescription()).
 			Debugln("Failed to request job: runner requestConcurrency meet")
-
-		return nil
+		return nil, nil, nil
 	}
 	defer mr.buildsHelper.releaseRequest(runner)
 
 	jobData, healthy := mr.network.RequestJob(*runner, sessionInfo)
 	mr.makeHealthy(runner.UniqueID(), healthy)
 
-	return jobData
+	if jobData == nil {
+		return nil, nil, nil
+	}
+
+	// Make sure to always close output
+	jobCredentials := &common.JobCredentials{
+		ID:    jobData.ID,
+		Token: jobData.Token,
+	}
+
+	trace, err := mr.network.ProcessJob(*runner, jobCredentials)
+	if err != nil {
+		jobInfo := common.UpdateJobInfo{
+			ID:            jobCredentials.ID,
+			State:         common.Failed,
+			FailureReason: common.RunnerSystemFailure,
+		}
+
+		// send failure once
+		mr.network.UpdateJob(*runner, jobCredentials, jobInfo)
+		return nil, nil, err
+	}
+
+	trace.SetFailuresCollector(mr.failuresCollector)
+	return trace, jobData, nil
 }
 
 func (mr *RunCommand) processRunner(id int, runner *common.RunnerConfig, runners chan *common.RunnerConfig) (err error) {
@@ -144,31 +177,29 @@ func (mr *RunCommand) processRunner(id int, runner *common.RunnerConfig, runners
 		return
 	}
 
-	executorData, releaseFn, err := mr.acquireRunnerResources(provider, runner)
+	executorData, err := provider.Acquire(runner)
 	if err != nil {
+		return fmt.Errorf("failed to update executor: %v", err)
+	}
+	defer provider.Release(runner, executorData)
+
+	if !mr.buildsHelper.acquireBuild(runner) {
+		logrus.WithField("runner", runner.ShortDescription()).
+			Debug("Failed to request job, runner limit met")
 		return
 	}
-	defer releaseFn()
+	defer mr.buildsHelper.releaseBuild(runner)
 
-	var features common.FeaturesInfo
-	provider.GetFeatures(&features)
-	buildSession, sessionInfo, err := mr.createSession(features)
+	buildSession, sessionInfo, err := mr.createSession(provider)
 	if err != nil {
 		return
 	}
 
 	// Receive a new build
-	jobData := mr.requestJob(runner, sessionInfo)
-	if jobData == nil {
+	trace, jobData, err := mr.requestJob(runner, sessionInfo)
+	if err != nil || jobData == nil {
 		return
 	}
-
-	// Make sure to always close output
-	jobCredentials := &common.JobCredentials{
-		ID:    jobData.ID,
-		Token: jobData.Token,
-	}
-	trace := mr.network.ProcessJob(*runner, jobCredentials)
 	defer func() {
 		if err != nil {
 			fmt.Fprintln(trace, err.Error())
@@ -177,8 +208,6 @@ func (mr *RunCommand) processRunner(id int, runner *common.RunnerConfig, runners
 			trace.Fail(nil, common.NoneFailure)
 		}
 	}()
-
-	trace.SetFailuresCollector(mr.failuresCollector)
 
 	// Create a new build
 	build, err := common.NewBuild(*jobData, runner, mr.abortBuilds, executorData)
@@ -193,38 +222,19 @@ func (mr *RunCommand) processRunner(id int, runner *common.RunnerConfig, runners
 
 	// Process the same runner by different worker again
 	// to speed up taking the builds
-	select {
-	case runners <- runner:
-		mr.log().WithField("runner", runner.ShortDescription()).Debugln("Requeued the runner")
-
-	default:
-		mr.log().WithField("runner", runner.ShortDescription()).Debugln("Failed to requeue the runner: ")
-	}
+	mr.requeueRunner(runner, runners)
 
 	// Process a build
 	return build.Run(mr.config, trace)
 }
 
-func (mr *RunCommand) acquireRunnerResources(provider common.ExecutorProvider, runner *common.RunnerConfig) (common.ExecutorData, func(), error) {
-	executorData, err := provider.Acquire(runner)
-	if err != nil {
-		return nil, func() {}, fmt.Errorf("failed to update executor: %v", err)
+func (mr *RunCommand) createSession(provider common.ExecutorProvider) (*session.Session, *common.SessionInfo, error) {
+	var features common.FeaturesInfo
+
+	if err := provider.GetFeatures(&features); err != nil {
+		return nil, nil, err
 	}
 
-	if !mr.buildsHelper.acquireBuild(runner) {
-		provider.Release(runner, executorData)
-		return nil, nil, errors.New("failed to request job, runner limit met")
-	}
-
-	releaseFn := func() {
-		mr.buildsHelper.releaseBuild(runner)
-		provider.Release(runner, executorData)
-	}
-
-	return executorData, releaseFn, nil
-}
-
-func (mr *RunCommand) createSession(features common.FeaturesInfo) (*session.Session, *common.SessionInfo, error) {
 	if mr.sessionServer == nil || !features.Session {
 		return nil, nil, nil
 	}
@@ -254,7 +264,7 @@ func (mr *RunCommand) processRunners(id int, stopWorker chan bool, runners chan 
 					"runner":   runner.ShortDescription(),
 					"executor": runner.Executor,
 				}).WithError(err).
-					Error("Failed to process runner")
+					Warn("Failed to process runner")
 			}
 
 			// force GC cycle after processing build
@@ -381,7 +391,7 @@ func (mr *RunCommand) Start(s service.Service) error {
 	}
 
 	// Start should not block. Do the actual work async.
-	go mr.Run()
+	go mr.RunWithLock()
 
 	return nil
 }
@@ -553,6 +563,19 @@ func (mr *RunCommand) setupSessionServer() {
 		Info("Session server listening")
 }
 
+func (mr *RunCommand) RunWithLock() {
+	log := mr.log().WithFields(logrus.Fields{
+		"file": mr.ConfigFile,
+		"pid":  os.Getpid(),
+	})
+	log.Info("Locking configuration file")
+
+	err := mr.inLock(mr.Run)
+	if err != nil {
+		log.WithError(err).Fatal("Could not handle configuration file locking")
+	}
+}
+
 func (mr *RunCommand) Run() {
 	mr.setupMetricsAndDebugServer()
 	mr.setupSessionServer()
@@ -587,7 +610,7 @@ func (mr *RunCommand) Run() {
 		mr.currentWorkers--
 	}
 	mr.log().Println("All workers stopped. Can exit now")
-	mr.runFinished <- true
+	close(mr.runFinished)
 }
 
 func (mr *RunCommand) interruptRun() {
