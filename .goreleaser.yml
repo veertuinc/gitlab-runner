@@ -1,20 +1,24 @@
 builds:
-  - binary: gitlab-runner-darwin-386
+  - id: darwin-386 
+    binary: gitlab-runner-darwin-386
     goos:
       - darwin
     goarch:
       - "386"
-  - binary: gitlab-runner-darwin-amd64
+  - id: darwin-amd64
+    binary: gitlab-runner-darwin-amd64
     goos:
       - darwin
     goarch:
       - amd64
-  - binary: gitlab-runner-linux-386
+  - id: linux-386
+    binary: gitlab-runner-linux-386
     goos:
       - linux
     goarch:
       - "386"
-  - binary: gitlab-runner-linux-amd64
+  - id: linux-amd64
+    binary: gitlab-runner-linux-amd64
     goos:
       - linux
     goarch:
