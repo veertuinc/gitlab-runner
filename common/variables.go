@@ -3,8 +3,9 @@ package common
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
+
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/shell"
 )
 
 type JobVariable struct {
@@ -14,6 +15,7 @@ type JobVariable struct {
 	Internal bool   `json:"-"`
 	File     bool   `json:"file"`
 	Masked   bool   `json:"masked"`
+	Raw      bool   `json:"raw"`
 }
 
 type JobVariables []JobVariable
@@ -54,12 +56,16 @@ func (b JobVariables) Get(key string) string {
 }
 
 func (b JobVariables) ExpandValue(value string) string {
-	return os.Expand(value, b.Get)
+	return shell.LegacyExpand(value, b.Get)
 }
 
-func (b JobVariables) Expand() (variables JobVariables) {
+func (b JobVariables) Expand() JobVariables {
+	var variables JobVariables
 	for _, variable := range b {
-		variable.Value = b.ExpandValue(variable.Value)
+		if !variable.Raw {
+			variable.Value = b.ExpandValue(variable.Value)
+		}
+
 		variables = append(variables, variable)
 	}
 	return variables

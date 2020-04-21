@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"strings"
@@ -78,12 +79,13 @@ func (s *Client) Connect() error {
 
 	methods, err := s.getSSHAuthMethods()
 	if err != nil {
-		return err
+		return fmt.Errorf("getSSHAuthMethods error: %w", err)
 	}
 
 	config := &ssh.ClientConfig{
-		User: s.User,
-		Auth: methods,
+		User:            s.User,
+		Auth:            methods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
 	connectRetries := s.ConnectRetries
@@ -99,8 +101,9 @@ func (s *Client) Connect() error {
 			s.client = client
 			return nil
 		}
+
 		time.Sleep(sshRetryInterval * time.Second)
-		finalError = err
+		finalError = fmt.Errorf("ssh Dial() error: %w", err)
 	}
 
 	return finalError
@@ -108,7 +111,7 @@ func (s *Client) Connect() error {
 
 func (s *Client) Exec(cmd string) error {
 	if s.client == nil {
-		return errors.New("Not connected")
+		return errors.New("not connected")
 	}
 
 	session, err := s.client.NewSession()
@@ -133,7 +136,7 @@ func (s *Command) fullCommand() string {
 
 func (s *Client) Run(ctx context.Context, cmd Command) error {
 	if s.client == nil {
-		return errors.New("Not connected")
+		return errors.New("not connected")
 	}
 
 	session, err := s.client.NewSession()

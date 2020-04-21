@@ -1,4 +1,4 @@
-package docker_helpers
+package docker
 
 import (
 	"bufio"
@@ -272,9 +272,9 @@ func (m *machineCommand) canConnect(name string) bool {
 	return false
 }
 
-func (m *machineCommand) Credentials(name string) (dc DockerCredentials, err error) {
+func (m *machineCommand) Credentials(name string) (dc Credentials, err error) {
 	if !m.CanConnect(name, true) {
-		err = errors.New("Can't connect")
+		err = errors.New("can't connect")
 		return
 	}
 

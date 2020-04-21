@@ -1,5 +1,6 @@
 *.iml
 config.toml
+config.toml.lock
 .project
 out
 builds/
@@ -10,12 +11,14 @@ dockerfiles/alpine/checksums
 dockerfiles/build/binaries/gitlab-runner-helper.*
 dockerfiles/ubuntu/gitlab-runner_amd64.deb
 dockerfiles/ubuntu/checksums
+.DS_Store
 .idea/
 .editorconfig
 tests/ubuntu/.vagrant
 artifacts
 tmp/gitlab-test
 /.gopath/
+/.tmp/
 
 testsdefinitions.txt
 /.testoutput/
@@ -30,6 +33,7 @@ ci/.test-failures.servercore1809.txt.updated
 # Ignore Visual Studio Code internals
 /.vscode
 /debug
+debug.test
 
 # Ignore the generated binary
 /gitlab-runner*

@@ -11,9 +11,9 @@ import (
 type UnregisterCommand struct {
 	configOptions
 	common.RunnerCredentials
-	network    common.Network
-	Name       string `toml:"name" json:"name" short:"n" long:"name" description:"Name of the runner you wish to unregister"`
-	AllRunners bool   `toml:"all_runners" json:"all-runners" long:"all-runners" description:"Unregister all runners"`
+	network common.Network
+	Name    string `toml:"name" json:"name" short:"n" long:"name" description:"Name of the runner you wish to unregister"`
+	// AllRunners bool   `toml:"all_runners" json:"all-runners" long:"all-runners" description:"Unregister all runners"`
 }
 
 func (c *UnregisterCommand) unregisterAllRunners() (runners []*common.RunnerConfig) {
@@ -29,12 +29,15 @@ func (c *UnregisterCommand) unregisterAllRunners() (runners []*common.RunnerConf
 }
 
 func (c *UnregisterCommand) unregisterSingleRunner() (runners []*common.RunnerConfig) {
+
 	if len(c.Name) > 0 { // Unregister when given a name
 		runnerConfig, err := c.RunnerByName(c.Name)
 		if err != nil {
 			logrus.Fatalln(err)
 		}
 		c.RunnerCredentials = runnerConfig.RunnerCredentials
+	} else {
+		logrus.Fatalln("No Runner name specified... Please include the runner name using --name")
 	}
 
 	// Unregister given Token and URL of the runner
@@ -61,11 +64,11 @@ func (c *UnregisterCommand) Execute(context *cli.Context) {
 	}
 
 	var runners []*common.RunnerConfig
-	if c.AllRunners {
-		runners = c.unregisterAllRunners()
-	} else {
-		runners = c.unregisterSingleRunner()
-	}
+	// if c.AllRunners {
+	// 	runners = c.unregisterAllRunners()
+	// } else {
+	runners = c.unregisterSingleRunner()
+	// }
 
 	// check if anything changed
 	if len(c.config.Runners) == len(runners) {

@@ -8,7 +8,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-var NAME = "gitlab-runner"
+var NAME = "anka-gitlab-runner"
 var VERSION = "development version"
 var REVISION = "HEAD"
 var BRANCH = "HEAD"
@@ -81,7 +81,7 @@ func (v *AppVersionInfo) NewMetricsCollector() *prometheus.GaugeVec {
 
 	buildInfo := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "gitlab_runner_version_info",
+			Name: "anka_gitlab_runner_version_info",
 			Help: "A metric with a constant '1' value labeled by different build stats fields.",
 		},
 		labelNames,

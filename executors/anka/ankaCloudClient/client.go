@@ -1,12 +1,17 @@
 package ankaCloudClient
 
 import (
+	"bytes"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"encoding/json"
-	"bytes"
+	"io/ioutil"
 	"net/http"
+	"net/url"
+
+	"gitlab.com/gitlab-org/gitlab-runner/common"
 )
 
 const JsonContentType = "application/json"
@@ -14,9 +19,11 @@ const JsonContentType = "application/json"
 const vmResourcePath = "/api/v1/vm"
 const vmRegistryResourcePath = "/api/v1/registry/vm"
 
-
 type AnkaClient struct {
 	controllerAddress string
+	rootCaPath        *string
+	certPath          *string
+	keyPath           *string
 }
 
 func (ankaClient *AnkaClient) GetVms() (error, *ListVmResponse) {
@@ -69,6 +76,7 @@ func (ankaClient *AnkaClient) TerminateVm(instanceId string) (error, *StandardRe
 }
 
 func (ankaClient *AnkaClient) doRequest(method string, path string, body interface{}, responseBody interface{}) error {
+
 	var buffer *bytes.Buffer
 	var err error
 	if body != nil {
@@ -82,13 +90,48 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 	}
 	relativePath, _ := url.ParseRequestURI(path)
 	urlObj, err := url.ParseRequestURI(ankaClient.controllerAddress)
+	if err != nil {
+		return err
+	}
 	urlObj = urlObj.ResolveReference(relativePath)
 	if err != nil {
 		return err
 	}
 	urlString := urlObj.String()
 	fmt.Println(urlString)
+
 	client := &http.Client{}
+
+	caCertPool := x509.NewCertPool()
+
+	if ankaClient.rootCaPath != nil {
+		caCert, err := ioutil.ReadFile(*ankaClient.rootCaPath)
+		if err != nil {
+			return err
+		}
+		caCertPool.AppendCertsFromPEM(caCert)
+	}
+
+	if ankaClient.certPath != nil {
+		if ankaClient.keyPath != nil {
+			cert, err := tls.LoadX509KeyPair(*ankaClient.certPath, *ankaClient.keyPath)
+			if err != nil {
+				return err
+			}
+			client = &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						RootCAs:      caCertPool,
+						Certificates: []tls.Certificate{cert},
+					},
+				},
+			}
+
+		} else {
+			return errors.New("incomplete key pair... ensure both the cert and key are included")
+		}
+	}
+
 	var req *http.Request
 	if buffer != nil {
 		req, err = http.NewRequest(method, urlString, buffer)
@@ -98,16 +141,18 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 	if err != nil {
 		return err
 	}
+
 	req.Header.Set("Content-Type", JsonContentType)
 	response, err := client.Do(req)
 	if err != nil {
 		return err
 	}
-	if response.StatusCode != http.StatusOK {
-		return errors.New(fmt.Sprintf("%v %v", response.StatusCode, response.Body))
-	}
 
 	err = json.NewDecoder(response.Body).Decode(responseBody)
+	if response.StatusCode != http.StatusOK {
+		return errors.New(fmt.Sprintf("%v %+v", response.Status, responseBody)) // TODO: Only output message
+	}
+
 	fmt.Println("Response ", responseBody)
 	if err != nil {
 		return err
@@ -116,8 +161,11 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 
 }
 
-func MakeNewAnkaClient(ankaCloudControllerUrl string) *AnkaClient{
+func MakeNewAnkaClient(ankaConfig *common.AnkaConfig) *AnkaClient {
 	return &AnkaClient{
-		controllerAddress: ankaCloudControllerUrl,
+		controllerAddress: ankaConfig.ControllerAddress,
+		rootCaPath:        ankaConfig.RootCaPath,
+		certPath:          ankaConfig.CertPath,
+		keyPath:           ankaConfig.KeyPath,
 	}
 }

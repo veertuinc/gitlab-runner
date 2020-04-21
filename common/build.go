@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path"
@@ -15,8 +16,10 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/dns"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/tls"
+	"gitlab.com/gitlab-org/gitlab-runner/referees"
 	"gitlab.com/gitlab-org/gitlab-runner/session"
 	"gitlab.com/gitlab-org/gitlab-runner/session/proxy"
 	"gitlab.com/gitlab-org/gitlab-runner/session/terminal"
@@ -70,6 +73,35 @@ const (
 	BuildStageUploadOnFailureArtifacts BuildStage = "upload_artifacts_on_failure"
 )
 
+var BuildStages = []BuildStage{
+	BuildStagePrepare,
+	BuildStageGetSources,
+	BuildStageRestoreCache,
+	BuildStageDownloadArtifacts,
+	BuildStageUserScript,
+	BuildStageAfterScript,
+	BuildStageArchiveCache,
+	BuildStageUploadOnSuccessArtifacts,
+	BuildStageUploadOnFailureArtifacts,
+}
+
+const (
+	ExecutorJobSectionAttempts = "EXECUTOR_JOB_SECTION_ATTEMPTS"
+)
+
+type invalidAttemptError struct {
+	key string
+}
+
+func (i *invalidAttemptError) Error() string {
+	return fmt.Sprintf("number of attempts out of the range [1, 10] for variable: %s", i.key)
+}
+
+func (i *invalidAttemptError) Is(err error) bool {
+	_, ok := err.(*invalidAttemptError)
+	return ok
+}
+
 type Build struct {
 	JobResponse `yaml:",inline"`
 
@@ -98,6 +130,9 @@ type Build struct {
 	allVariables          JobVariables
 
 	createdAt time.Time
+
+	Referees         []referees.Referee
+	ArtifactUploader func(config JobCredentials, reader io.Reader, options ArtifactsOptions) UploadState
 }
 
 func (b *Build) Log() *logrus.Entry {
@@ -105,8 +140,14 @@ func (b *Build) Log() *logrus.Entry {
 }
 
 func (b *Build) ProjectUniqueName() string {
-	return fmt.Sprintf("runner-%s-project-%d-concurrent-%d",
-		b.Runner.ShortDescription(), b.JobInfo.ProjectID, b.ProjectRunnerID)
+	projectUniqueName := fmt.Sprintf(
+		"runner-%s-project-%d-concurrent-%d",
+		b.Runner.ShortDescription(),
+		b.JobInfo.ProjectID,
+		b.ProjectRunnerID,
+	)
+
+	return dns.MakeRFC1123Compatible(projectUniqueName)
 }
 
 func (b *Build) ProjectSlug() (string, error) {
@@ -209,7 +250,7 @@ func (b *Build) executeStage(ctx context.Context, buildStage BuildStage, executo
 
 	shell := executor.Shell()
 	if shell == nil {
-		return errors.New("No shell defined")
+		return errors.New("no shell defined")
 	}
 
 	script, err := GenerateShellScript(buildStage, *shell)
@@ -238,9 +279,33 @@ func (b *Build) executeStage(ctx context.Context, buildStage BuildStage, executo
 	section := helpers.BuildSection{
 		Name:        string(buildStage),
 		SkipMetrics: !b.JobResponse.Features.TraceSections,
-		Run:         func() error { return executor.Run(cmd) },
+		Run: func() error {
+			b.logger.Println(fmt.Sprintf("%s%s%s", helpers.ANSI_BOLD_CYAN, getStageDescription(buildStage), helpers.ANSI_RESET))
+			return executor.Run(cmd)
+		},
 	}
 	return section.Execute(&b.logger)
+}
+
+func getStageDescription(stage BuildStage) string {
+	descriptions := map[BuildStage]string{
+		BuildStagePrepare:                  "Preparing environment",
+		BuildStageGetSources:               "Getting source from Git repository",
+		BuildStageRestoreCache:             "Restoring cache",
+		BuildStageDownloadArtifacts:        "Downloading artifacts",
+		BuildStageUserScript:               "Running before_script and script",
+		BuildStageAfterScript:              "Running after_script",
+		BuildStageArchiveCache:             "Saving cache",
+		BuildStageUploadOnFailureArtifacts: "Uploading artifacts for failed job",
+		BuildStageUploadOnSuccessArtifacts: "Uploading artifacts for successful job",
+	}
+
+	description, ok := descriptions[stage]
+	if !ok {
+		return fmt.Sprintf("Executing %q stage of the job script", stage)
+	}
+
+	return description
 }
 
 func (b *Build) executeUploadArtifacts(ctx context.Context, state error, executor Executor) (err error) {
@@ -252,6 +317,10 @@ func (b *Build) executeUploadArtifacts(ctx context.Context, state error, executo
 }
 
 func (b *Build) executeScript(ctx context.Context, executor Executor) error {
+	// track job start and create referees
+	startTime := time.Now()
+	b.createReferees(executor)
+
 	// Prepare stage
 	err := b.executeStage(ctx, BuildStagePrepare, executor)
 
@@ -281,7 +350,11 @@ func (b *Build) executeScript(ctx context.Context, executor Executor) error {
 		err = b.executeStage(ctx, BuildStageArchiveCache, executor)
 	}
 
-	uploadError := b.executeUploadArtifacts(ctx, err, executor)
+	artifactUploadError := b.executeUploadArtifacts(ctx, err, executor)
+
+	// track job end and execute referees
+	endTime := time.Now()
+	b.executeUploadReferees(ctx, startTime, endTime)
 
 	// Use job's error as most important
 	if err != nil {
@@ -289,12 +362,49 @@ func (b *Build) executeScript(ctx context.Context, executor Executor) error {
 	}
 
 	// Otherwise, use uploadError
-	return uploadError
+	return artifactUploadError
+}
+
+func (b *Build) createReferees(executor Executor) {
+	b.Referees = referees.CreateReferees(executor, b.Runner.Referees, b.Log())
+}
+
+func (b *Build) executeUploadReferees(ctx context.Context, startTime time.Time, endTime time.Time) {
+	if b.Referees == nil || b.ArtifactUploader == nil {
+		b.Log().Debug("Skipping referees execution")
+		return
+	}
+
+	jobCredentials := JobCredentials{
+		ID:    b.JobResponse.ID,
+		Token: b.JobResponse.Token,
+		URL:   b.Runner.RunnerCredentials.URL,
+	}
+
+	// execute and upload the results of each referee
+	for _, referee := range b.Referees {
+		if referee == nil {
+			continue
+		}
+
+		reader, err := referee.Execute(ctx, startTime, endTime)
+		// keep moving even if a subset of the referees have failed
+		if err != nil {
+			continue
+		}
+
+		// referee ran successfully, upload its results to GitLab as an artifact
+		b.ArtifactUploader(jobCredentials, reader, ArtifactsOptions{
+			BaseName: referee.ArtifactBaseName(),
+			Type:     referee.ArtifactType(),
+			Format:   ArtifactFormat(referee.ArtifactFormat()),
+		})
+	}
 }
 
 func (b *Build) attemptExecuteStage(ctx context.Context, buildStage BuildStage, executor Executor, attempts int) (err error) {
 	if attempts < 1 || attempts > 10 {
-		return fmt.Errorf("Number of attempts out of the range [1, 10] for stage: %s", buildStage)
+		return fmt.Errorf("number of attempts out of the range [1, 10] for stage: %s", buildStage)
 	}
 	for attempt := 0; attempt < attempts; attempt++ {
 		if err = b.executeStage(ctx, buildStage, executor); err == nil {
@@ -391,7 +501,11 @@ func (b *Build) waitForBuildFinish(buildFinish <-chan error, timeout time.Durati
 }
 
 func (b *Build) retryCreateExecutor(options ExecutorPrepareOptions, provider ExecutorProvider, logger BuildLogger) (executor Executor, err error) {
-	for tries := 0; tries < PreparationRetries; tries++ {
+	Retries := PreparationRetries
+	if options.Config.RunnerSettings.PreparationRetries > 0 {
+		Retries = options.Config.RunnerSettings.PreparationRetries
+	}
+	for tries := 0; tries <= Retries; tries++ {
 		executor = provider.Create()
 		if executor == nil {
 			err = errors.New("failed to create executor")
@@ -411,10 +525,12 @@ func (b *Build) retryCreateExecutor(options ExecutorPrepareOptions, provider Exe
 		} else if options.Context.Err() != nil {
 			return nil, b.handleError(options.Context.Err())
 		}
-
-		logger.SoftErrorln("Preparation failed:", err)
-		logger.Infoln("Will be retried in", PreparationRetryInterval, "...")
-		time.Sleep(PreparationRetryInterval)
+		if (tries + 1) <= Retries {
+			logger.SoftErrorln("Preparation failed:", err)
+			logger.Infoln("-------------------")
+			logger.Infoln("Will be retried in", PreparationRetryInterval, "...")
+			time.Sleep(PreparationRetryInterval)
+		}
 	}
 	return
 }
@@ -429,8 +545,7 @@ func (b *Build) waitForTerminal(ctx context.Context, timeout time.Duration) erro
 	b.logger.Infoln(
 		fmt.Sprintf(
 			"Terminal is connected, will time out in %s...",
-			// TODO: switch to timeout.Round(time.Second) after upgrading to Go 1.9+
-			roundDuration(timeout, time.Second),
+			timeout.Round(time.Second),
 		),
 	)
 
@@ -443,16 +558,15 @@ func (b *Build) waitForTerminal(ctx context.Context, timeout time.Duration) erro
 		return errors.New("build cancelled, killing session")
 	case <-time.After(timeout):
 		err := fmt.Errorf(
-			"Terminal session timed out (maximum time allowed - %s)",
-			// TODO: switch to timeout.Round(time.Second) after upgrading to Go 1.9+
-			roundDuration(timeout, time.Second),
+			"terminal session timed out (maximum time allowed - %s)",
+			timeout.Round(time.Second),
 		)
 		b.logger.Infoln(err.Error())
 		b.Session.TimeoutCh <- err
 		return err
 	case err := <-b.Session.DisconnectCh:
 		b.logger.Infoln("Terminal disconnected")
-		return fmt.Errorf("terminal disconnected: %v", err)
+		return fmt.Errorf("terminal disconnected: %w", err)
 	case signal := <-b.SystemInterrupt:
 		b.logger.Infoln("Terminal disconnected")
 		err := b.Session.Kill()
@@ -547,7 +661,7 @@ func (b *Build) Run(globalConfig *Config, trace JobTrace) (err error) {
 		Context: ctx,
 	}
 
-	provider := GetExecutor(b.Runner.Executor)
+	provider := GetExecutorProvider(b.Runner.Executor)
 	if provider == nil {
 		return errors.New("executor not found")
 	}
@@ -558,6 +672,7 @@ func (b *Build) Run(globalConfig *Config, trace JobTrace) (err error) {
 		Name:        string(BuildStagePrepareExecutor),
 		SkipMetrics: !b.JobResponse.Features.TraceSections,
 		Run: func() error {
+			b.logger.Println(fmt.Sprintf("%sPreparing the %q executor%s", helpers.ANSI_BOLD_CYAN, b.Runner.Executor, helpers.ANSI_RESET))
 			executor, err = b.retryCreateExecutor(options, provider, b.logger)
 			return err
 		},
@@ -655,10 +770,6 @@ func (b *Build) GetCITLSVariables() JobVariables {
 	return b.GetTLSVariables(tls.VariableCAFile, tls.VariableCertFile, tls.VariableKeyFile)
 }
 
-func (b *Build) GetGitTLSVariables() JobVariables {
-	return b.GetTLSVariables("GIT_SSL_CAINFO", "GIT_SSL_CERT", "GIT_SSL_KEY")
-}
-
 func (b *Build) IsSharedEnv() bool {
 	return b.ExecutorFeatures.Shared
 }
@@ -674,6 +785,9 @@ func (b *Build) GetAllVariables() JobVariables {
 
 	variables := make(JobVariables, 0)
 	variables = append(variables, b.GetDefaultFeatureFlagsVariables()...)
+	if b.Image.Name != "" {
+		variables = append(variables, JobVariable{Key: "CI_JOB_IMAGE", Value: b.Image.Name, Public: true, Internal: true, File: false})
+	}
 	if b.Runner != nil {
 		variables = append(variables, b.Runner.GetVariables()...)
 	}
@@ -830,6 +944,23 @@ func (b *Build) GetCacheRequestTimeout() int {
 	return timeout
 }
 
+func (b *Build) GetExecutorJobSectionAttempts() (int, error) {
+	attempts, err := strconv.Atoi(b.GetAllVariables().Get(ExecutorJobSectionAttempts))
+	if err != nil {
+		return DefaultExecutorStageAttempts, nil
+	}
+
+	if validAttempts(attempts) {
+		return 0, &invalidAttemptError{key: ExecutorJobSectionAttempts}
+	}
+
+	return attempts, nil
+}
+
+func validAttempts(attempts int) bool {
+	return attempts < 1 || attempts > 10
+}
+
 func (b *Build) Duration() time.Duration {
 	return time.Since(b.createdAt)
 }
@@ -838,7 +969,7 @@ func NewBuild(jobData JobResponse, runnerConfig *RunnerConfig, systemInterrupt c
 	// Attempt to perform a deep copy of the RunnerConfig
 	runnerConfigCopy, err := runnerConfig.DeepCopy()
 	if err != nil {
-		return nil, fmt.Errorf("deep copy of runner config failed: %v", err)
+		return nil, fmt.Errorf("deep copy of runner config failed: %w", err)
 	}
 
 	return &Build{

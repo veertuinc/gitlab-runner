@@ -42,7 +42,6 @@ func (s *Trace) IsStdout() bool {
 	return true
 }
 
-func (s *Trace) IsJobSuccesFull() bool {
-	
+func (s *Trace) IsJobSuccessful() bool {
 	return true
 }

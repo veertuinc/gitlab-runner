@@ -103,6 +103,7 @@ func (n *GitLabClient) getClient(credentials requestCredentials) (c *client, err
 	if n.clients == nil {
 		n.clients = make(map[string]*client)
 	}
+
 	key := fmt.Sprintf("%s_%s_%s_%s", credentials.GetURL(), credentials.GetToken(), credentials.GetTLSCAFile(), credentials.GetTLSCertFile())
 	c = n.clients[key]
 	if c == nil {
@@ -117,6 +118,7 @@ func (n *GitLabClient) getClient(credentials requestCredentials) (c *client, err
 }
 
 func (n *GitLabClient) getLastUpdate(credentials requestCredentials) (lu string) {
+
 	cli, err := n.getClient(credentials)
 	if err != nil {
 		return ""
@@ -135,11 +137,11 @@ func (n *GitLabClient) getRunnerVersion(config common.RunnerConfig) common.Versi
 		Shell:        config.Shell,
 	}
 
-	if executor := common.GetExecutor(config.Executor); executor != nil {
-		executor.GetFeatures(&info.Features)
+	if executorProvider := common.GetExecutorProvider(config.Executor); executorProvider != nil {
+		executorProvider.GetFeatures(&info.Features)
 
 		if info.Shell == "" {
-			info.Shell = executor.GetDefaultShell()
+			info.Shell = executorProvider.GetDefaultShell()
 		}
 	}
 
@@ -152,6 +154,7 @@ func (n *GitLabClient) getRunnerVersion(config common.RunnerConfig) common.Versi
 
 func (n *GitLabClient) doRaw(credentials requestCredentials, method, uri string, request io.Reader, requestType string, headers http.Header) (res *http.Response, err error) {
 	c, err := n.getClient(credentials)
+
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +174,7 @@ func (n *GitLabClient) doJSON(credentials requestCredentials, method, uri string
 func (n *GitLabClient) getResponseTLSData(credentials requestCredentials, response *http.Response) (ResponseTLSData, error) {
 	c, err := n.getClient(credentials)
 	if err != nil {
-		return ResponseTLSData{}, fmt.Errorf("couldn't get client: %v", err)
+		return ResponseTLSData{}, fmt.Errorf("couldn't get client: %w", err)
 	}
 
 	return c.getResponseTLSData(response.TLS)
@@ -181,8 +184,8 @@ func (n *GitLabClient) RegisterRunner(runner common.RunnerCredentials, parameter
 	// TODO: pass executor
 	request := common.RegisterRunnerRequest{
 		RegisterRunnerParameters: parameters,
-		Token: runner.Token,
-		Info:  n.getRunnerVersion(common.RunnerConfig{}),
+		Token:                    runner.Token,
+		Info:                     n.getRunnerVersion(common.RunnerConfig{}),
 	}
 
 	var response common.RegisterRunnerResponse
@@ -353,13 +356,13 @@ func (n *GitLabClient) UpdateJob(config common.RunnerConfig, jobCredentials *com
 	}
 }
 
-func (n *GitLabClient) PatchTrace(config common.RunnerConfig, jobCredentials *common.JobCredentials, content []byte, startOffset int) (int, common.UpdateState) {
+func (n *GitLabClient) PatchTrace(config common.RunnerConfig, jobCredentials *common.JobCredentials, content []byte, startOffset int) common.PatchTraceResult {
 	id := jobCredentials.ID
 
 	baseLog := config.Log().WithField("job", id)
 	if len(content) == 0 {
 		baseLog.Debugln("Appending trace to coordinator...", "skipped due to empty patch")
-		return startOffset, common.UpdateSucceeded
+		return common.NewPatchTraceResult(startOffset, common.UpdateSucceeded, 0)
 	}
 
 	endOffset := startOffset + len(content)
@@ -375,7 +378,7 @@ func (n *GitLabClient) PatchTrace(config common.RunnerConfig, jobCredentials *co
 	response, err := n.doRaw(&config.RunnerCredentials, "PATCH", uri, request, "text/plain", headers)
 	if err != nil {
 		config.Log().Errorln("Appending trace to coordinator...", "error", err.Error())
-		return startOffset, common.UpdateFailed
+		return common.NewPatchTraceResult(startOffset, common.UpdateFailed, 0)
 	}
 
 	n.requestsStatusesMap.Append(config.RunnerCredentials.ShortDescription(), APIEndpointPatchTrace, response.StatusCode)
@@ -383,34 +386,59 @@ func (n *GitLabClient) PatchTrace(config common.RunnerConfig, jobCredentials *co
 	defer response.Body.Close()
 	defer io.Copy(ioutil.Discard, response.Body)
 
-	tracePatchResponse := NewTracePatchResponse(response)
+	tracePatchResponse := NewTracePatchResponse(response, baseLog)
 	log := baseLog.WithFields(logrus.Fields{
-		"sent-log":   contentRange,
-		"job-log":    tracePatchResponse.RemoteRange,
-		"job-status": tracePatchResponse.RemoteState,
-		"code":       response.StatusCode,
-		"status":     response.Status,
+		"sent-log":        contentRange,
+		"job-log":         tracePatchResponse.RemoteRange,
+		"job-status":      tracePatchResponse.RemoteState,
+		"code":            response.StatusCode,
+		"status":          response.Status,
+		"update-interval": tracePatchResponse.RemoteTraceUpdateInterval,
 	})
+
+	result := common.PatchTraceResult{
+		SentOffset:        startOffset,
+		NewUpdateInterval: tracePatchResponse.RemoteTraceUpdateInterval,
+	}
 
 	switch {
 	case tracePatchResponse.IsAborted():
 		log.Warningln("Appending trace to coordinator...", "aborted")
-		return startOffset, common.UpdateAbort
+		result.State = common.UpdateAbort
+
+		return result
+
 	case response.StatusCode == http.StatusAccepted:
 		log.Debugln("Appending trace to coordinator...", "ok")
-		return endOffset, common.UpdateSucceeded
+		result.SentOffset = endOffset
+		result.State = common.UpdateSucceeded
+
+		return result
+
 	case response.StatusCode == http.StatusNotFound:
 		log.Warningln("Appending trace to coordinator...", "not-found")
-		return startOffset, common.UpdateNotFound
+		result.State = common.UpdateNotFound
+
+		return result
+
 	case response.StatusCode == http.StatusRequestedRangeNotSatisfiable:
 		log.Warningln("Appending trace to coordinator...", "range mismatch")
-		return tracePatchResponse.NewOffset(), common.UpdateRangeMismatch
+		result.SentOffset = tracePatchResponse.NewOffset()
+		result.State = common.UpdateRangeMismatch
+
+		return result
+
 	case response.StatusCode == clientError:
 		log.Errorln("Appending trace to coordinator...", "error")
-		return startOffset, common.UpdateAbort
+		result.State = common.UpdateAbort
+
+		return result
+
 	default:
 		log.Warningln("Appending trace to coordinator...", "failed")
-		return startOffset, common.UpdateFailed
+		result.State = common.UpdateFailed
+
+		return result
 	}
 }
 
@@ -492,6 +520,9 @@ func (n *GitLabClient) UploadRawArtifacts(config common.JobCredentials, reader i
 	case http.StatusRequestEntityTooLarge:
 		log.WithField("status", res.Status).Errorln("Uploading artifacts to coordinator...", "too large archive")
 		return common.UploadTooLarge
+	case http.StatusServiceUnavailable:
+		log.WithField("status", res.Status).Errorln("Uploading artifacts to coordinator...", "service unavailable")
+		return common.UploadServiceUnavailable
 	default:
 		log.WithField("status", res.Status).Warningln("Uploading artifacts to coordinator...", "failed")
 		return common.UploadFailed

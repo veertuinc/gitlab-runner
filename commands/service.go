@@ -5,18 +5,18 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/ayufan/golang-kardianos-service"
+	service "github.com/ayufan/golang-kardianos-service"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/service"
+	service_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/service"
 )
 
 const (
-	defaultServiceName = "gitlab-runner"
-	defaultDescription = "GitLab Runner"
+	defaultServiceName = "anka-gitlab-runner"
+	defaultDescription = "Anka GitLab Runner"
 )
 
 type NullService struct {
@@ -38,6 +38,7 @@ func runServiceInstall(s service.Service, c *cli.Context) error {
 	if configFile := c.String("config"); configFile != "" {
 		// try to load existing config
 		config := common.NewConfig()
+
 		err := config.LoadConfig(configFile)
 		if err != nil {
 			return err
@@ -147,6 +148,12 @@ func RunServiceControl(c *cli.Context) {
 
 	if err != nil {
 		logrus.Fatal(err)
+	}
+
+	if c.Command.Name == "uninstall" || c.Command.Name == "install" {
+		logrus.Println("success")
+	} else {
+		logrus.Println("executed")
 	}
 }
 

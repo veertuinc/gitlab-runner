@@ -10,12 +10,11 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/fslocker"
 	"gitlab.com/gitlab-org/gitlab-runner/network"
 )
 
 func getDefaultConfigFile() string {
-	return filepath.Join(getDefaultConfigDirectory(), "config.toml")
+	return filepath.Join(getDefaultConfigDirectory(), "anka-config.toml")
 }
 
 func getDefaultCertificateDirectory() string {
@@ -40,10 +39,6 @@ func (c *configOptions) loadConfig() error {
 	}
 	c.config = config
 	return nil
-}
-
-func (c *configOptions) inLock(fn func()) error {
-	return fslocker.InLock(c.ConfigFile, fn)
 }
 
 func (c *configOptions) RunnerByName(name string) (*common.RunnerConfig, error) {

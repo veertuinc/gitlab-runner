@@ -64,16 +64,16 @@ release, hence the name release candidate.
 
 These types of merge requests for the upcoming release need special consideration:
 
-* **Large features**: a large feature is one that is highlighted in the kick-off
+- **Large features**: a large feature is one that is highlighted in the kick-off
   and the release blogpost; typically this will have its own channel in Slack
   and a dedicated team with front-end, back-end, and UX.
-* **Small features**: any other feature request.
+- **Small features**: any other feature request.
 
 It is strongly recommended that **large features** be with a maintainer **by the
 1st**. This means that:
 
-* There is a merge request (even if it's WIP).
-* The person (or people, if it needs a frontend and backend maintainer) who will
+- There is a merge request (even if it's WIP).
+- The person (or people, if it needs a frontend and backend maintainer) who will
   ultimately be responsible for merging this have been pinged on the MR.
 
 It's OK if merge request isn't completely done, but this allows the maintainer
@@ -141,12 +141,12 @@ be a rare case: most features can be allowed to slip a release.
 Once the stable branch is frozen, the only MRs that can be cherry-picked into
 the stable branch are:
 
-* Fixes for [regressions](#regressions) where the affected version `xx.x` in `regression:xx.x` is the current release. See [Managing bugs](#managing-bugs) section.
-* Fixes for security issues.
-* Fixes or improvements to automated QA scenarios.
-* [Documentation improvements](https://docs.gitlab.com/ee/development/documentation/workflow.html) for feature changes made in the same release, though initial docs for these features should have already been merged by the freeze, as required.
-* New or updated translations (as long as they do not touch application code).
-* Changes that are behind a feature flag and have the ~"feature flag" label.
+- Fixes for [regressions](#regressions) where the affected version `xx.x` in `regression:xx.x` is the current release. See [Managing bugs](#managing-bugs) section.
+- Fixes for security issues.
+- Fixes or improvements to automated QA scenarios.
+- [Documentation improvements](https://docs.gitlab.com/ee/development/documentation/workflow.html) for feature changes made in the same release, though initial docs for these features should have already been merged by the freeze, as required.
+- New or updated translations (as long as they do not touch application code).
+- Changes that are behind a feature flag and have the ~"feature flag" label.
 
 During the feature freeze all merge requests that are meant to go into the
 upcoming release should have the correct milestone assigned _and_ the
@@ -206,15 +206,17 @@ Regressions should be considered high priority issues that should be solved as s
 ### Managing bugs
 
 **Prioritization:** We give higher priority to regressions on features that worked in the last recent monthly release and the current release candidates.
-The two scenarios below can [bypass the exception request in the release process](https://gitlab.com/gitlab-org/release/docs/blob/master/general/exception-request/process.md#after-the-7th), where the affected regression version matches the current monthly release version.
-* A regression which worked in the **Last monthly release**
-   * **Example:** In 11.0 we released a new `feature X` that is verified as working. Then in release 11.1 the feature no longer works, this is regression for 11.1. The issue should have the `regression:11.1` label.
-   * *Note:* When we say `the last recent monthly release`, this can refer to either the version currently running on GitLab.com, or the most recent version available in the package repositories.
-* A regression which worked in the **Current release candidates**
-   * **Example:** In 11.1-RC3 we shipped a new feature which has been verified as working. Then in 11.1-RC5 the feature no longer works, this is regression for 11.1. The issue should have the `regression:11.1` label.
-   * *Note:* Because GitLab.com runs release candidates of new releases, a regression can be reported in a release before its 'official' release date on the 22nd of the month.
+The two scenarios below can [bypass the exception request in the release process](https://gitlab.com/gitlab-org/release/docs/blob/master/general/exception-request/process.md#after-the-7th), where the affected regression version matches the current monthly release version:
+
+- A regression which worked in the **Last monthly release**
+  - **Example:** In 11.0 we released a new `feature X` that is verified as working. Then in release 11.1 the feature no longer works, this is regression for 11.1. The issue should have the `regression:11.1` label.
+  - *Note:* When we say `the last recent monthly release`, this can refer to either the version currently running on GitLab.com, or the most recent version available in the package repositories.
+- A regression which worked in the **Current release candidates**
+  - **Example:** In 11.1-RC3 we shipped a new feature which has been verified as working. Then in 11.1-RC5 the feature no longer works, this is regression for 11.1. The issue should have the `regression:11.1` label.
+  - *Note:* Because GitLab.com runs release candidates of new releases, a regression can be reported in a release before its 'official' release date on the 22nd of the month.
 
 When a bug is found:
+
 1. Create an issue describing the problem in the most detailed way possible.
 1. If possible, provide links to real examples and how to reproduce the problem.
 1. Label the issue properly, using the [team label](https://docs.gitlab.com/ee/development/contributing/issue_workflow.html#team-labels),
@@ -256,7 +258,7 @@ them - they will be planned for one of the upcoming releases.
 
 ## Releasing GitLab Runner
 
-All the thecnincal details of how the Runner is released can be found in
+All the technical details of how the Runner is released can be found in
 the [Release
 Checklist](https://gitlab.com/gitlab-org/ci-cd/runner-release-helper/tree/master/templates/issues)
 which is split into multiple templates.
@@ -266,53 +268,58 @@ which is split into multiple templates.
 ### Improperly formatted issue
 
 ```
-Thanks for the issue report. Please reformat your issue to conform to the
-[contributing guidelines](https://docs.gitlab.com/ee/development/contributing/issue_workflow.html#issue-tracker-guidelines).
+Thank you for the issue report. Please reformat your issue to conform to the
+[contribution guidelines](https://docs.gitlab.com/ee/development/contributing/issue_workflow.html#issue-tracker-guidelines).
 ```
 
 ### Issue report for old version
 
 ```
-Thanks for the issue report but we only support issues for the latest stable version of GitLab.
-I'm closing this issue but if you still experience this problem in the latest stable version,
-please open a new issue (but also reference the old issue(s)).
+Thank you for the issue report. We only support issues for the latest stable version of GitLab.
+I'm closing this issue, however if you still experience this problem in the latest stable version,
+please open a new issue (and please reference the old issue(s)).
 Make sure to also include the necessary debugging information conforming to the issue tracker
-guidelines found in our [contributing guidelines](https://docs.gitlab.com/ee/development/contributing/issue_workflow.html#issue-tracker-guidelines).
+guidelines found in our [contribution guidelines](https://docs.gitlab.com/ee/development/contributing/issue_workflow.html#issue-tracker-guidelines).
 ```
 
 ### Support requests and configuration questions
 
 ```
-Thanks for your interest in GitLab. We don't use the issue tracker for support
+Thank you for your interest in GitLab. We don't use the issue tracker for support
 requests and configuration questions. Please check our
-[getting help](https://about.gitlab.com/getting-help/) page to see all of the available
+[Support](https://about.gitlab.com/support/) page to see all of the available
 support options. Also, have a look at the [contribution guidelines](https://docs.gitlab.com/ee/development/contributing/index.html)
 for more information.
+
+You can read more about this policy in our
+[README.md](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/README.md#closing-issues)
 ```
 
 ### Code format
 
 ```
-Please use \`\`\` to format console output, logs, and code as it's very hard to read otherwise.
+Please enclose console output, logs, and code in backticks (`` ` ``), as it's
+very hard to read otherwise. For more information, read our
+[guide on code and codeblocks in markdown](https://docs.gitlab.com/ee/development/documentation/styleguide.html#code-blocks)
 ```
 
 ### Issue fixed in newer version
 
 ```
-Thanks for the issue report. This issue has already been fixed in newer versions of GitLab.
+Thank you for the issue report. This issue has already been fixed in newer versions of GitLab.
 Due to the size of this project and our limited resources we are only able to support the
-latest stable release as outlined in our [contributing guidelines](https://docs.gitlab.com/ee/development/contributing/issue_workflow.html).
+latest stable release as outlined in our [contribution guidelines](https://docs.gitlab.com/ee/development/contributing/issue_workflow.html).
 In order to get this bug fix and enjoy many new features please
 [upgrade](https://gitlab.com/gitlab-org/gitlab-ce/tree/master/doc/update).
-If you still experience issues at that time please open a new issue following our issue
-tracker guidelines found in the [contributing guidelines](https://docs.gitlab.com/ee/development/contributing/issue_workflow.html#issue-tracker-guidelines).
+If you still experience issues at that time, please open a new issue following our issue
+tracker guidelines found in the [contribution guidelines](https://docs.gitlab.com/ee/development/contributing/issue_workflow.html#issue-tracker-guidelines).
 ```
 
 ### Improperly formatted merge request
 
 ```
 Thanks for your interest in improving the GitLab codebase!
-Please update your merge request according to the [contributing guidelines](https://gitlab.com/gitlab-org/gitlab-ce/blob/master/doc/development/contributing/merge_request_workflow.md#merge-request-guidelines).
+Please update your merge request according to the [contribution guidelines](https://gitlab.com/gitlab-org/gitlab-ce/blob/master/doc/development/contributing/merge_request_workflow.md#merge-request-guidelines).
 ```
 
 ### Accepting merge requests
@@ -330,7 +337,7 @@ might not make it into GitLab.
 
 ```
 We can only accept a merge request if all the tests are green. I've just
-restarted the build. When the tests are still not passing after this restart and
+restarted the build. If the tests are still not green after this restart and
 you're sure that is does not have anything to do with your code changes, please
 rebase with master to see if that solves the issue.
 ```

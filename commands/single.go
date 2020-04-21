@@ -87,6 +87,7 @@ func (r *RunSingleCommand) processBuild(data common.ExecutorData, abortSignal ch
 	}
 
 	config := common.NewConfig()
+
 	newBuild, err := common.NewBuild(*jobData, &r.RunnerConfig, abortSignal, data)
 	if err != nil {
 		return
@@ -133,7 +134,7 @@ func (r *RunSingleCommand) Execute(c *cli.Context) {
 		logrus.Fatalln("Missing Executor")
 	}
 
-	executorProvider := common.GetExecutor(r.Executor)
+	executorProvider := common.GetExecutorProvider(r.Executor)
 	if executorProvider == nil {
 		logrus.Fatalln("Unknown executor:", r.Executor)
 	}

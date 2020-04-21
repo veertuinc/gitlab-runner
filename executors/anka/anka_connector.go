@@ -1,52 +1,54 @@
 package anka
 
 import (
-	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"errors"
-	"gitlab.com/gitlab-org/gitlab-runner/executors/anka/ankaCloudClient"
-	"time"
 	"fmt"
-)
+	"time"
 
+	"gitlab.com/gitlab-org/gitlab-runner/common"
+	"gitlab.com/gitlab-org/gitlab-runner/executors/anka/ankaCloudClient"
+)
 
 // AnkaConnector is a helper for connecting gitlab runner to anka
 type AnkaConnector struct {
-	client *ankaCloudClient.AnkaClient
-	netTimeToWait 	 time.Duration
+	client           *ankaCloudClient.AnkaClient
+	netTimeToWait    time.Duration
 	startingTimeWait time.Duration
-	sshPort     int
+	sshPort          int
 }
 
 func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig) (connectInfo *AnkaVmConnectInfo, funcErr error) {
-	startVmRequset := ankaCloudClient.StartVMRequest {
-		VmID: ankaConfig.ImageId,
-		Tag: ankaConfig.Tag,
-		NodeID: ankaConfig.NodeID,
+
+	startVmRequest := ankaCloudClient.StartVMRequest{
+		VmID:     ankaConfig.TemplateUUID,
+		Tag:      ankaConfig.Tag,
+		NodeID:   ankaConfig.NodeID,
 		Priority: ankaConfig.Priority,
-		GroupId: ankaConfig.GroupId,		
+		GroupId:  ankaConfig.GroupId,
 	}
 	defer func() {
-        if r := recover(); r != nil {
+		if r := recover(); r != nil {
 			fmt.Println("Recovered in StartInstance", r)
 			funcErr = errors.New("enexpected error")
 			if connectInfo.InstanceId != "" {
 				connector.TerminateInstance(connectInfo.InstanceId)
 			}
 
-        }
-    }()
+		}
+	}()
 
-
-	err, createResponse := connector.client.StartVm(&startVmRequset)
+	err, createResponse := connector.client.StartVm(&startVmRequest)
 	if err != nil {
 		return nil, err
 	}
+
 	if createResponse.Status != "OK" {
 		return nil, errors.New(createResponse.Message)
 	}
 	if len(createResponse.Body) != 1 {
-		return nil, errors.New("No vm id returened from controller") // should never happen
+		return nil, errors.New("No vm id returned from controller") // should never happen
 	}
+
 	instanceId := createResponse.Body[0]
 	connectInfo = &AnkaVmConnectInfo{
 		InstanceId: instanceId,
@@ -64,7 +66,6 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig) (co
 	now = time.Now()
 	waitForNetworUntil := now.Add(connector.netTimeToWait)
 	err, vm = connector.waitForVMToHaveNetwork(instanceId, waitForNetworUntil)
-	
 	if err != nil {
 		connector.client.TerminateVm(instanceId)
 		return nil, err
@@ -94,7 +95,10 @@ func (connector *AnkaConnector) getVM(instanceId string) (error, *ankaCloudClien
 
 func (connector *AnkaConnector) waitForVMToStart(instanceId string, timeOut time.Time) (error, *ankaCloudClient.VMStatus) {
 	for {
-		err, vm := connector.getVM(instanceId); if err != nil { return err, nil }
+		err, vm := connector.getVM(instanceId)
+		if err != nil {
+			return err, nil
+		}
 		loopTime := time.Now()
 		switch vm.State {
 
@@ -121,7 +125,7 @@ func (connector *AnkaConnector) waitForVMToStart(instanceId string, timeOut time
 
 		case ankaCloudClient.StateError:
 			return errors.New(vm.Message), nil
-		
+
 		}
 	}
 	return nil, nil
@@ -146,7 +150,7 @@ func (connector *AnkaConnector) waitForVMToHaveNetwork(instanceId string, timeOu
 		}
 	}
 	return nil, vm
-	}
+}
 
 func (connector *AnkaConnector) checkForNetwork(vm *ankaCloudClient.VMStatus) bool {
 	if vm.State == ankaCloudClient.StateStarted {
@@ -168,9 +172,8 @@ func (connector *AnkaConnector) getSSHPort(vm *ankaCloudClient.VMStatus) int {
 	return -1
 }
 
-
 func (connector *AnkaConnector) getSSHHost(vm *ankaCloudClient.VMStatus) string {
-	return vm.VMInfo.HostIp	
+	return vm.VMInfo.HostIp
 }
 
 func (connector *AnkaConnector) TerminateInstance(instanceId string) error {
@@ -184,19 +187,18 @@ func (connector *AnkaConnector) TerminateInstance(instanceId string) error {
 	return nil
 }
 
-
-func MakeNewAnkaCloudConnector(ankaControllerAddress string) *AnkaConnector {
-	client := ankaCloudClient.MakeNewAnkaClient(ankaControllerAddress)
+func MakeNewAnkaCloudConnector(ankaConfig *common.AnkaConfig) *AnkaConnector {
+	client := ankaCloudClient.MakeNewAnkaClient(ankaConfig)
 	return &AnkaConnector{
-		client: client,
-		netTimeToWait: 5 * time.Minute,
+		client:           client,
+		netTimeToWait:    5 * time.Minute,
 		startingTimeWait: 90 * time.Minute,
-		sshPort: 22,
+		sshPort:          22,
 	}
 }
 
 type AnkaVmConnectInfo struct {
 	InstanceId string
-	Host	string
-	Port	int
+	Host       string
+	Port       int
 }

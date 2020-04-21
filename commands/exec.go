@@ -7,17 +7,18 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
-	"gitlab.com/ayufan/golang-cli-helpers"
+	clihelpers "gitlab.com/ayufan/golang-cli-helpers"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/gitlab_ci_yaml_parser"
+
 	// Force to load all executors, executes init() on them
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/custom"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/docker"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/parallels"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/shell"
+	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/custom"
+	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/docker"
+	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/parallels"
+	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/shell"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/ssh"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/virtualbox"
+	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/virtualbox"
 )
 
 type ExecCommand struct {
@@ -118,11 +119,11 @@ func (c *ExecCommand) Execute(context *cli.Context) {
 
 	go waitForInterrupts(nil, abortSignal, doneSignal, nil)
 
-	// Add self-volume to docker
-	if c.RunnerSettings.Docker == nil {
-		c.RunnerSettings.Docker = &common.DockerConfig{}
-	}
-	c.RunnerSettings.Docker.Volumes = append(c.RunnerSettings.Docker.Volumes, wd+":"+wd+":ro")
+	// // Add self-volume to docker
+	// if c.RunnerSettings.Docker == nil {
+	// 	c.RunnerSettings.Docker = &common.DockerConfig{}
+	// }
+	// c.RunnerSettings.Docker.Volumes = append(c.RunnerSettings.Docker.Volumes, wd+":"+wd+":ro")
 
 	// Create build
 	build, err := c.createBuild(wd, abortSignal)
@@ -151,10 +152,10 @@ func init() {
 		Usage: "execute a build locally",
 	}
 
-	for _, executor := range common.GetExecutors() {
+	for _, executorName := range common.GetExecutorNames() {
 		subCmd := cli.Command{
-			Name:   executor,
-			Usage:  "use " + executor + " executor",
+			Name:   executorName,
+			Usage:  "use " + executorName + " executor",
 			Action: cmd.Execute,
 			Flags:  flags,
 		}
