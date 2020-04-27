@@ -76,7 +76,12 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig) (co
 		return nil, errors.New("No ssh port forwarding configured on vm")
 	}
 	connectInfo.Port = sshPort
+
 	sshHost := connector.getSSHHost(vm)
+	if sshHost == "" {
+		connector.client.TerminateVm(instanceId)
+		return nil, errors.New("Unable to determine SSH Host!")
+	}
 	connectInfo.Host = sshHost
 	return connectInfo, funcErr
 

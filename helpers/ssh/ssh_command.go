@@ -96,6 +96,8 @@ func (s *Client) Connect() error {
 	var finalError error
 
 	for i := 0; i < connectRetries; i++ {
+
+		time.Sleep(60)
 		client, err := ssh.Dial("tcp", s.Host+":"+s.Port, config)
 		if err == nil {
 			s.client = client
