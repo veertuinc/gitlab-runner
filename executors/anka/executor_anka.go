@@ -63,7 +63,6 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 
 	connectInfo, err := s.connector.StartInstance(s.Config.Anka)
 	if err != nil {
-		s.Println(err)
 		return err
 	}
 

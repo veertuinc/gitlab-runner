@@ -126,7 +126,6 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 					},
 				},
 			}
-
 		} else {
 			return errors.New("incomplete key pair... ensure both the cert and key are included")
 		}
