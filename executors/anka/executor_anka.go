@@ -89,11 +89,11 @@ func (s *executor) verifyNode() error {
 	defer s.sshClient.Cleanup()
 	err := s.startSSHClient()
 	if err != nil {
-		return errors.New(fmt.Sprint("s.startSSHClient: %+v", err))
+		return err
 	}
 	err = s.sshClient.Run(s.Context, ssh.Command{Command: []string{"exit"}})
 	if err != nil {
-		return errors.New(fmt.Sprint("s.sshClient.Run(s.Context, ssh.Command{Command: []string{\"exit\"}}): %+v", err))
+		return err
 	}
 	return nil
 }
