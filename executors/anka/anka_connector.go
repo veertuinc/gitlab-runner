@@ -26,6 +26,7 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig) (co
 		Priority: ankaConfig.Priority,
 		GroupId:  ankaConfig.GroupId,
 	}
+
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered in StartInstance", r)
@@ -33,7 +34,6 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig) (co
 			if connectInfo.InstanceId != "" {
 				connector.TerminateInstance(connectInfo.InstanceId)
 			}
-
 		}
 	}()
 
@@ -151,7 +151,7 @@ func (connector *AnkaConnector) waitForVMToHaveNetwork(instanceId string, timeOu
 		time.Sleep(2 * time.Second)
 		loopTime := time.Now()
 		if loopTime.After(timeOut) {
-			return errors.New("VM could not get network"), nil
+			return errors.New("timeout checking the VM for networking... please review the VM Instance manually to determine why networking didn't start"), nil
 		}
 	}
 	return nil, vm

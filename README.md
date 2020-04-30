@@ -5,7 +5,7 @@
 For a list of compatible versions between GitLab and GitLab Runner, consult
 the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
 
-This is a stripped down and modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner/tree/12-10-stable) (version 12.10-stable).
+> This is a stripped down and modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner/tree/12-10-stable) (version 12.10-stable).
 
 # Development Setup and Details
 
@@ -25,6 +25,8 @@ make build_simple
 # Build all binaries for all releases
 make build_all
 ```
+
+Testing your changes manually with `anka-gitlab-runner --debug --log-level debug`
 
 > When adding new options/flags, add them to `testRegisterCommandRun`
 

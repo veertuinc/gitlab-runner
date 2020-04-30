@@ -67,14 +67,14 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	}
 
 	s.vmConnectInfo = connectInfo
-	s.Println(fmt.Sprintf("Verifying connectivity to the VM: %+v . . .", s.vmConnectInfo))
+	s.Println(fmt.Sprintf("Verifying connectivity to the VM - Host: %v Port: %v Instance UUID: %v ", s.vmConnectInfo.Host, s.vmConnectInfo.Port, s.vmConnectInfo.InstanceId))
 	err = s.verifyNode()
 	if err != nil {
 		s.Errorln("SSH Error to VM:", err, s.vmConnectInfo)
 		return err
 	}
 
-	s.Println(fmt.Sprintf("%sAnka VM %s is ready for work on %s:%v%s", helpers.ANSI_BOLD_GREEN, connectInfo.InstanceId, connectInfo.Host, connectInfo.Port, helpers.ANSI_RESET))
+	s.Println(fmt.Sprintf(" %sAnka VM %s is ready for work on %s:%v%s", helpers.ANSI_BOLD_GREEN, connectInfo.InstanceId, connectInfo.Host, connectInfo.Port, helpers.ANSI_RESET))
 
 	err = s.startSSHClient()
 	if err != nil {
@@ -89,11 +89,11 @@ func (s *executor) verifyNode() error {
 	defer s.sshClient.Cleanup()
 	err := s.startSSHClient()
 	if err != nil {
-		return err
+		return errors.New(fmt.Sprint("s.startSSHClient: %+v", err))
 	}
 	err = s.sshClient.Run(s.Context, ssh.Command{Command: []string{"exit"}})
 	if err != nil {
-		return err
+		return errors.New(fmt.Sprint("s.sshClient.Run(s.Context, ssh.Command{Command: []string{\"exit\"}}): %+v", err))
 	}
 	return nil
 }
@@ -119,6 +119,11 @@ func (s *executor) startSSHClient() error {
 }
 
 func (s *executor) Run(cmd common.ExecutorCommand) error {
+	fmt.Println(ssh.Command{
+		Environment: s.BuildShell.Environment,
+		Command:     s.BuildShell.GetCommandWithArguments(),
+		Stdin:       cmd.Script,
+	})
 	err := s.sshClient.Run(cmd.Context, ssh.Command{
 		Environment: s.BuildShell.Environment,
 		Command:     s.BuildShell.GetCommandWithArguments(),

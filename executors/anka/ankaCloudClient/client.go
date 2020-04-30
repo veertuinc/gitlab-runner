@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
+	"time"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 )
@@ -100,7 +102,11 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 	urlString := urlObj.String()
 	fmt.Println(urlString)
 
-	client := &http.Client{}
+	timeout := time.Duration(5 * time.Second)
+
+	client := &http.Client{
+		Timeout: timeout,
+	}
 
 	caCertPool := x509.NewCertPool()
 
@@ -119,6 +125,7 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 				return err
 			}
 			client = &http.Client{
+				Timeout: timeout,
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{
 						RootCAs:      caCertPool,
@@ -141,18 +148,46 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 		return err
 	}
 
+	requestDump, err := httputil.DumpRequest(req, true)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Printf("REQUEST TO CONTROLLER: \n %v\n", string(requestDump))
+
 	req.Header.Set("Content-Type", JsonContentType)
-	response, err := client.Do(req)
+
+	retryLimit := 6
+	for tries := 0; tries <= retryLimit; tries++ {
+		fmt.Printf("Retry: %v\n", tries)
+		response, err := client.Do(req)
+		if response == nil || response.Body == nil || response.Status == "" { // If the controller connection fails or is overwhelmed, it will return null or empty values. We need to handle this so the job doesn't fail and orphan VMs.
+			if tries == retryLimit {
+				err = errors.New("unable to connect to controller... please check its status and cleanup any zombied/orphaned VMs on your Anka Nodes")
+				break
+			} else {
+				fmt.Printf("something caused the controller to return nill... retrying until we get a valid retry...")
+				time.Sleep(time.Duration(10*tries) * time.Second)
+				continue
+			}
+		}
+		if err != nil {
+			fmt.Printf("%v\n", err)
+			break
+		}
+		err = json.NewDecoder(response.Body).Decode(responseBody)
+		if response.StatusCode != http.StatusOK {
+			fmt.Printf("%v\n", err)
+			break
+		}
+		break
+	}
 	if err != nil {
 		return err
 	}
 
-	err = json.NewDecoder(response.Body).Decode(responseBody)
-	if response.StatusCode != http.StatusOK {
-		return errors.New(fmt.Sprintf("%v %+v", response.Status, responseBody)) // TODO: Only output message
-	}
+	s, _ := json.MarshalIndent(responseBody, "", "\t")
+	fmt.Printf("RESPONSE FROM CONTROLLER: %v\n", string(s))
 
-	fmt.Println("Response ", responseBody)
 	if err != nil {
 		return err
 	}
