@@ -93,5 +93,7 @@ Changes we made from the offical gitlab-runner repo:
       - const PreparationRetries -> var so tests can change it
   - `VERSION`
       - Added {gitlab runner version}/{anka executor version}
+  - `ci/version`
+      - Modified echo so the version doesn't contain useless stuff
 
 > `executor/ssh.go` must stay as an available executor for tests to pass.
