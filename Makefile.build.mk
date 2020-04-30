@@ -2,7 +2,7 @@ export RUNNER_BINARY ?= out/binaries/$(NAME)
 
 build_all: $(GOX)
 	# Building $(NAME) in version $(VERSION) for $(BUILD_PLATFORMS)
-	gox $(BUILD_PLATFORMS) \
+	gox --parallel=6 $(BUILD_PLATFORMS) \
 		-ldflags "$(GO_LDFLAGS)" \
 		-output="out/binaries/$(NAME)-{{.OS}}-{{.Arch}}" \
 		$(PKG)
