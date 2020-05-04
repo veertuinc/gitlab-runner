@@ -50,6 +50,7 @@ require (
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	github.com/stretchr/objx v0.2.0 // indirect
 	github.com/stretchr/testify v1.4.0
+	github.com/tdewolff/parse/v2 v2.4.2 // indirect
 	github.com/tevino/abool v0.0.0-20160628101133-3c25f2fe7cd0
 	github.com/urfave/cli v1.20.0
 	github.com/vektra/mockery v0.0.0-20181123154057-e78b021dcbb5

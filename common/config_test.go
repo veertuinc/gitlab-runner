@@ -147,11 +147,13 @@ func TestConfigParse(t *testing.T) {
 					root_ca_path = "/Users/user1/anka-ca-crt.pem"
 					cert_path = "/Users/user1/gitlab-crt.pem"
 					key_path = "/Users/user1/gitlab-key.pem"
-					keep_alive_on_error = false`,
+					keep_alive_on_error = false
+					skip_tls_verification = false`,
 			validateConfig: func(t *testing.T, config *Config) {
 				require.Equal(t, 1, len(config.Runners))
 				assert.Equal(t, "localhost-shared", config.Runners[0].Name)
 				assert.Equal(t, 1, config.Runners[0].PreparationRetries)
+				assert.Equal(t, false, config.Runners[0].Anka.SkipTLSVerification)
 				assert.Equal(t, "anka", config.Runners[0].SSH.User)
 			},
 		},

@@ -89,7 +89,7 @@ Changes we made from the offical gitlab-runner repo:
   - `common/build_test.go`
       - Fixed `TestRetryPrepare` and `TestPrepareFailure` for PrepareRetries being 0 by default + failure fix
   - `common/const.go`
-      - PreparationRetries = 0 to disable retries by default
+      - PreparationRetries = 2
       - const PreparationRetries -> var so tests can change it
   - `VERSION`
       - Added {gitlab runner version}/{anka executor version}

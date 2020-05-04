@@ -22,10 +22,11 @@ const vmResourcePath = "/api/v1/vm"
 const vmRegistryResourcePath = "/api/v1/registry/vm"
 
 type AnkaClient struct {
-	controllerAddress string
-	rootCaPath        *string
-	certPath          *string
-	keyPath           *string
+	controllerAddress   string
+	rootCaPath          *string
+	certPath            *string
+	keyPath             *string
+	skipTLSVerification bool
 }
 
 func (ankaClient *AnkaClient) GetVms() (error, *ListVmResponse) {
@@ -108,16 +109,20 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 		Timeout: timeout,
 	}
 
-	caCertPool := x509.NewCertPool()
-
+	caCertPool, _ := x509.SystemCertPool()
+	if caCertPool == nil {
+		caCertPool = x509.NewCertPool()
+	}
 	if ankaClient.rootCaPath != nil {
 		caCert, err := ioutil.ReadFile(*ankaClient.rootCaPath)
 		if err != nil {
 			return err
 		}
-		caCertPool.AppendCertsFromPEM(caCert)
+		ok := caCertPool.AppendCertsFromPEM(caCert)
+		if !ok {
+			return fmt.Errorf("Could not add %v to Root Certificates", caCert)
+		}
 	}
-
 	if ankaClient.certPath != nil {
 		if ankaClient.keyPath != nil {
 			cert, err := tls.LoadX509KeyPair(*ankaClient.certPath, *ankaClient.keyPath)
@@ -128,8 +133,9 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 				Timeout: timeout,
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{
-						RootCAs:      caCertPool,
-						Certificates: []tls.Certificate{cert},
+						RootCAs:            caCertPool,
+						Certificates:       []tls.Certificate{cert},
+						InsecureSkipVerify: ankaClient.skipTLSVerification,
 					},
 				},
 			}
@@ -158,8 +164,9 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 
 	retryLimit := 6
 	for tries := 0; tries <= retryLimit; tries++ {
+		var response *http.Response
 		fmt.Printf("Retry: %v\n", tries)
-		response, err := client.Do(req)
+		response, err = client.Do(req)
 		if response == nil || response.Body == nil || response.Status == "" { // If the controller connection fails or is overwhelmed, it will return null or empty values. We need to handle this so the job doesn't fail and orphan VMs.
 			if tries == retryLimit {
 				err = errors.New("unable to connect to controller... please check its status and cleanup any zombied/orphaned VMs on your Anka Nodes")
@@ -197,9 +204,10 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 
 func MakeNewAnkaClient(ankaConfig *common.AnkaConfig) *AnkaClient {
 	return &AnkaClient{
-		controllerAddress: ankaConfig.ControllerAddress,
-		rootCaPath:        ankaConfig.RootCaPath,
-		certPath:          ankaConfig.CertPath,
-		keyPath:           ankaConfig.KeyPath,
+		controllerAddress:   ankaConfig.ControllerAddress,
+		rootCaPath:          ankaConfig.RootCaPath,
+		certPath:            ankaConfig.CertPath,
+		keyPath:             ankaConfig.KeyPath,
+		skipTLSVerification: ankaConfig.SkipTLSVerification,
 	}
 }

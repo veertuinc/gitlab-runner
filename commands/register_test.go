@@ -124,6 +124,7 @@ func testRegisterCommandRun(t *testing.T, network common.Network, args ...string
 	regRootCAPath := "/Users/testuser/anka-ca-crt.pem"
 	regCertPath := "/Users/testuser/gitlab-crt.pem"
 	regKeyPath := "/Users/testuser/gitlab-key.pem"
+	regSkipTLSVerification := true
 
 	args = append([]string{
 		"binary", "register",
@@ -141,6 +142,7 @@ func testRegisterCommandRun(t *testing.T, network common.Network, args ...string
 		"--anka-root-ca-path", regRootCAPath,
 		"--anka-cert-path", regCertPath,
 		"--anka-key-path", regKeyPath,
+		fmt.Sprintf("--anka-skip-tls-verification=%v", regSkipTLSVerification),
 	}, args...)
 
 	comandErr := app.Run(args)
@@ -162,7 +164,7 @@ func testRegisterCommandRun(t *testing.T, network common.Network, args ...string
 	assert.Equal(t, regRootCAPath, *cmd.Anka.RootCaPath)
 	assert.Equal(t, regCertPath, *cmd.Anka.CertPath)
 	assert.Equal(t, regKeyPath, *cmd.Anka.KeyPath)
-
+	assert.Equal(t, regSkipTLSVerification, cmd.Anka.SkipTLSVerification)
 	return string(fileContent), "", err
 }
 
@@ -204,7 +206,6 @@ func TestAccessLevelSetting(t *testing.T) {
 			arguments := []string{
 				"--access-level", string(testCase.accessLevel),
 			}
-
 			_, output, err := testRegisterCommandRun(t, network, arguments...)
 
 			if testCase.failureExpected {
@@ -296,7 +297,8 @@ var (
     root_ca_path = "/Users/testUser/anka-ca-crt.pem"
     cert_path = "/Users/testUser/gitlab-crt.pem"
     key_path = "/Users/testUser/gitlab-key.pem"
-    keep_alive_on_error = false`
+		keep_alive_on_error = false
+		skip_tls_verification = false`
 
 	configTemplateMergeToBaseConfiguration = &common.RunnerConfig{
 		RunnerCredentials: common.RunnerCredentials{

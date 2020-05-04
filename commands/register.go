@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/imdario/mergo"
@@ -251,6 +252,18 @@ func (s *RegisterCommand) askAnka() {
 	if tildeCheck.MatchString(keyPath) == true {
 		logrus.Panicln("paths cannot contain tilde (~)")
 	}
+	var err error
+	tlsBool := false
+	tlsVerification := s.ask("anka-skip-tls-verification", "[Certificate Authentication] Skip TLS Verification? (optional)", true)
+	if tlsVerification == "true" || tlsVerification == "false" {
+		tlsBool, err = strconv.ParseBool(tlsVerification)
+		if err != nil {
+			logrus.Panicln(err)
+		}
+	} else {
+		logrus.Panicln("you must provide a boolean (true or false)")
+	}
+	s.Anka.SkipTLSVerification = tlsBool
 }
 
 func (s *RegisterCommand) askSSHServer() {

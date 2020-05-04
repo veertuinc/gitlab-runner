@@ -502,7 +502,7 @@ func (b *Build) waitForBuildFinish(buildFinish <-chan error, timeout time.Durati
 
 func (b *Build) retryCreateExecutor(options ExecutorPrepareOptions, provider ExecutorProvider, logger BuildLogger) (executor Executor, err error) {
 	Retries := PreparationRetries
-	if options.Config.RunnerSettings.PreparationRetries > 0 {
+	if options.Config.RunnerSettings.PreparationRetries > PreparationRetries {
 		Retries = options.Config.RunnerSettings.PreparationRetries
 	}
 	for tries := 0; tries <= Retries; tries++ {
@@ -528,7 +528,7 @@ func (b *Build) retryCreateExecutor(options ExecutorPrepareOptions, provider Exe
 		if (tries + 1) <= Retries {
 			logger.SoftErrorln("Preparation failed:", err)
 			logger.Infoln("-------------------")
-			logger.Infoln("Will be retried in", PreparationRetryInterval, "...")
+			logger.Infoln("Will be retried in", PreparationRetryInterval, " seconds...")
 			time.Sleep(PreparationRetryInterval)
 		}
 	}

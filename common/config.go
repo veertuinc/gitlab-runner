@@ -124,7 +124,9 @@ type AnkaConfig struct {
 	RootCaPath        *string `toml:"root_ca_path,omitempty" json:"root_ca_path" long:"root-ca-path" env:"ROOT_CA_PATH" description:"Specify the path to your Controller's Root CA certificate"`
 	CertPath          *string `toml:"cert_path,omitempty" json:"cert_path" long:"cert-path" env:"CERT_PATH" description:"Specify the path to the GitLab Certificate (used for connecting to the Controller) (requires you also specify the key)"`
 	KeyPath           *string `toml:"key_path,omitempty" json:"key_path" long:"key-path" env:"KEY_PATH" description:"Specify the path to your GitLab Certificate Key (used for connecting to the Controller)"`
-	KeepAliveOnError  bool    `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"Keep the VM alive for debugging job failures"`
+	// Be sure to use *bool or else setting --anka-skip-tls-verification true will ignore anything after it when you're doing register --non-interactive
+	SkipTLSVerification bool `toml:"skip_tls_verification,omitzero" json:"skip_tls_verification" long:"skip-tls-verification" env:"SKIP_TLS_VERIFICATION" description:"Skip TLS Verification when connecting to your Controller"`
+	KeepAliveOnError    bool `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"Keep the VM alive for debugging job failures"`
 }
 
 // type CustomConfig struct {
