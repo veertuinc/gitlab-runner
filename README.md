@@ -22,11 +22,11 @@ make simple-test
 # Build a single binary for testing
 make build_simple
 
-# Build all binaries for all releases
+# Build all binaries for linux and darwin
 make build_all
 ```
 
-Testing your changes manually with `anka-gitlab-runner --debug --log-level debug`
+Test your changes manually with `anka-gitlab-runner --debug --log-level debug`
 
 > When adding new options/flags, add them to `testRegisterCommandRun`
 
@@ -95,5 +95,7 @@ Changes we made from the offical gitlab-runner repo:
       - Added {gitlab runner version}/{anka executor version}
   - `ci/version`
       - Modified echo so the version doesn't contain useless stuff
+  - `create-docker.bash`
+      - Script for building, tagging, and pushing to veertu/ dockerhub
 
 > `executor/ssh.go` must stay as an available executor for tests to pass.

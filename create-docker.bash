@@ -12,9 +12,21 @@ for arch in amd64 386; do
   FROM="$arch/ubuntu:18.04"
   [[ $arch == 386 ]] && FROM="i$arch/ubuntu:18.04"
 cat > out/binaries/register_and_run.sh <<BLOCK
-  update-ca-certificates
-  anka-gitlab-runner register --non-interactive \$@
-  /usr/local/bin/anka-gitlab-runner run
+#!/bin/bash
+set -eo pipefail
+export ARR=("\$@")
+unregister() {
+  for i in "\${!ARR[@]}"; do
+    [[ "\${ARR[\$i]}" == "--name" ]] && NAME_INDEX=\$i
+  done
+  RUNNER_NAME="\${ARR[\${NAME_INDEX}+1]}"
+  echo "UNREGISTERING \$RUNNER_NAME"
+  anka-gitlab-runner unregister -n "\$RUNNER_NAME"
+}
+trap unregister EXIT
+update-ca-certificates
+anka-gitlab-runner register --non-interactive "\$@"
+/usr/local/bin/anka-gitlab-runner run
 BLOCK
 cat > out/binaries/Dockerfile <<BLOCK
   FROM $FROM
