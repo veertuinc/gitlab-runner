@@ -53,7 +53,7 @@ require (
 	github.com/tdewolff/parse/v2 v2.4.2 // indirect
 	github.com/tevino/abool v0.0.0-20160628101133-3c25f2fe7cd0
 	github.com/urfave/cli v1.20.0
-	github.com/vektra/mockery v1.1.1
+	github.com/vektra/mockery v1.1.2
 	gitlab.com/ayufan/golang-cli-helpers v0.0.0-20171103152739-a7cf72d604cd
 	golang.org/x/crypto v0.0.0-20200221231518-2aa609cf4a9d
 	golang.org/x/lint v0.0.0-20191125180803-fdd1cda4f05f // indirect

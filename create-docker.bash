@@ -1,9 +1,10 @@
 #!/bin/bash
 set -eo pipefail
 ROOT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-echo "Building binaries..."
+VERSION=$(cat $ROOT_DIR/VERSION | cut -d/ -f2)
 cd $ROOT_DIR
 # Build binaries
+echo "Building binaries..."
 make build_all
 # Create dockerfile
 for arch in amd64 386; do
@@ -43,7 +44,6 @@ cat > out/binaries/Dockerfile <<BLOCK
 BLOCK
   # Build dockerfile
   cd out/binaries/
-  VERSION=$(cat $ROOT_DIR/VERSION | cut -d/ -f2)
   [[ $arch == 386 ]] && arch="i$arch"
   docker build -t veertu/anka-gitlab-runner-$arch:latest -t veertu/anka-gitlab-runner-$arch:v$VERSION .
   # Push to dockerhub

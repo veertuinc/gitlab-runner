@@ -229,6 +229,8 @@ github.com/vektra/mockery v0.0.0-20181123154057-e78b021dcbb5 h1:Xim2mBRFdXzXmKRO
 github.com/vektra/mockery v0.0.0-20181123154057-e78b021dcbb5/go.mod h1:ppEjwdhyy7Y31EnHRDm1JkChoC7LXIJ7Ex0VYLWtZtQ=
 github.com/vektra/mockery v1.1.1 h1:tSw+5rMJKNTHWu12FfS8k5sU4Z8+7WsslcQdibtRgHI=
 github.com/vektra/mockery v1.1.1/go.mod h1:VcfZjKaFOPO+MpN4ZvwPjs4c48lkq1o3Ym8yHZJu0jU=
+github.com/vektra/mockery v1.1.2 h1:uc0Yn67rJpjt8U/mAZimdCKn9AeA97BOkjpmtBSlfP4=
+github.com/vektra/mockery v1.1.2/go.mod h1:VcfZjKaFOPO+MpN4ZvwPjs4c48lkq1o3Ym8yHZJu0jU=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 gitlab.com/ayufan/golang-cli-helpers v0.0.0-20171103152739-a7cf72d604cd h1:AWwhYCrmFN0BKkPB7tNCeDJdV3ehZirzug4xiCe4OPY=
 gitlab.com/ayufan/golang-cli-helpers v0.0.0-20171103152739-a7cf72d604cd/go.mod h1:rMC8UwmKfpoQjGUjXJCKylz54ljoMvP60UFp9Qiu4MY=
