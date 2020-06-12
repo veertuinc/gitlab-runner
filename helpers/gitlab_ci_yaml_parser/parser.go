@@ -236,6 +236,32 @@ func (c *GitLabCiYamlParser) prepareImage(job *common.JobResponse) (err error) {
 		return
 	}
 
+	// Anka
+
+	job.AnkaTemplate = common.AnkaTemplate{}
+
+	if ankaTemplateUUID, ok := c.jobConfig.GetString("anka_template"); ok {
+		job.AnkaTemplate.UUID = ankaTemplateUUID
+		return
+	}
+
+	if ankaTemplateDefinition, ok := c.jobConfig.GetSubOptions("anka_template"); ok {
+		job.AnkaTemplate.UUID, _ = ankaTemplateDefinition.GetString("uuid")
+		job.AnkaTemplate.Tag, _ = ankaTemplateDefinition.GetString("tag")
+		return
+	}
+
+	if ankaTemplateUUID, ok := c.config.GetString("anka_template"); ok {
+		job.AnkaTemplate.UUID = ankaTemplateUUID
+		return
+	}
+
+	if ankaTemplateDefinition, ok := c.config.GetSubOptions("anka_template"); ok {
+		job.AnkaTemplate.UUID, _ = ankaTemplateDefinition.GetString("uuid")
+		job.AnkaTemplate.Tag, _ = ankaTemplateDefinition.GetString("tag")
+		return
+	}
+
 	return
 }
 

@@ -68,6 +68,29 @@ job2:
   - service:2
 `
 
+var testFileAnka1 = `
+anka_template: globalUUID
+
+job1:
+  stage: test
+  script:
+  - line 1
+  - line 2
+  anka_template: job1UUID
+
+job2:
+  script: test
+
+job3:
+  stage: a
+
+job4:
+  script: job4
+  anka_template:
+    uuid: job4UUID
+    tag: job4Tag
+`
+
 func prepareTestFile(t *testing.T, fileContent string) string {
 	file, err := ioutil.TempFile("", "gitlab-ci-yml")
 	require.NoError(t, err)
@@ -165,4 +188,26 @@ func TestFileParsing(t *testing.T) {
 	assert.Empty(t, jobResponse.Services[1].Alias)
 	assert.Empty(t, jobResponse.Services[1].Command)
 	assert.Empty(t, jobResponse.Services[1].Entrypoint)
+
+	// ANKA file1 - job1
+	jobResponse = getJobResponse(t, testFileAnka1, "job1", false)
+	require.Len(t, jobResponse.Steps, 2)
+	assert.Contains(t, jobResponse.Steps[0].Script, "line 1")
+	assert.Contains(t, jobResponse.Steps[0].Script, "line 2")
+	assert.Equal(t, "test", jobResponse.JobInfo.Stage)
+	assert.Equal(t, "job1UUID", jobResponse.AnkaTemplate.UUID)
+
+	// ANKA file1 - job2
+	jobResponse = getJobResponse(t, testFileAnka1, "job2", false)
+	require.Len(t, jobResponse.Steps, 2)
+	assert.Contains(t, jobResponse.Steps[0].Script, "test")
+	assert.Equal(t, "globalUUID", jobResponse.AnkaTemplate.UUID)
+
+	// ANKA file1 - job3
+	jobResponse = getJobResponse(t, testFileAnka1, "job3", true)
+
+	// ANKA file1 - job4
+	jobResponse = getJobResponse(t, testFileAnka1, "job4", false)
+	assert.Equal(t, "job4UUID", jobResponse.AnkaTemplate.UUID)
+	assert.Equal(t, "job4Tag", jobResponse.AnkaTemplate.Tag)
 }

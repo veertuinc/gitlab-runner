@@ -14,10 +14,11 @@ brew install xz
 go get gitlab.com/gitlab-org/gitlab-runner
 make deps
 export PATH="$PATH:$HOME/go/bin" # To load in gox
-make helper-docker
 
-# Run all tests
-make simple-test
+# Below steps require docker
+
+# Generate helpers and run tests
+make test
 
 # Build a single binary for testing
 make build_simple
@@ -97,5 +98,7 @@ Changes we made from the offical gitlab-runner repo:
       - Modified echo so the version doesn't contain useless stuff
   - `create-docker.bash`
       - Script for building, tagging, and pushing to veertu/ dockerhub
+  - `helpers/gitlab_ci_yaml_parser/`
+      - Updated parser.go (and test.go) to handle `anka_template` the same way it does for `image`
 
 > `executor/ssh.go` must stay as an available executor for tests to pass.

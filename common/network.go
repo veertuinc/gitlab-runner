@@ -185,6 +185,11 @@ type Step struct {
 
 type Steps []Step
 
+type AnkaTemplate struct {
+	UUID string `json:"uuid"`
+	Tag  string `json:"tag"`
+}
+
 type Image struct {
 	Name       string   `json:"name"`
 	Alias      string   `json:"alias,omitempty"`
@@ -295,6 +300,7 @@ type JobResponse struct {
 	Variables     JobVariables   `json:"variables"`
 	Steps         Steps          `json:"steps"`
 	Image         Image          `json:"image"`
+	AnkaTemplate  AnkaTemplate   `json:"anka_template"`
 	Services      Services       `json:"services"`
 	Artifacts     Artifacts      `json:"artifacts"`
 	Cache         Caches         `json:"cache"`
