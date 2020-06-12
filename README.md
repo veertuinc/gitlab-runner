@@ -14,7 +14,7 @@ brew install xz
 go get gitlab.com/gitlab-org/gitlab-runner
 make deps
 export PATH="$PATH:$HOME/go/bin" # To load in gox
-make helper-docker
+make development_setup
 
 # Run all tests
 make simple-test
@@ -98,4 +98,4 @@ Changes we made from the offical gitlab-runner repo:
   - `create-docker.bash`
       - Script for building, tagging, and pushing to veertu/ dockerhub
 
-> `executor/ssh.go` must stay as an available executor for tests to pass.
+> **`executor/ssh.go` must stay as an available executor**

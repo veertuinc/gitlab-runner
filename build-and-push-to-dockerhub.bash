@@ -46,7 +46,9 @@ BLOCK
   cd out/binaries/
   [[ $arch == 386 ]] && arch="i$arch"
   docker build -t veertu/anka-gitlab-runner-$arch:latest -t veertu/anka-gitlab-runner-$arch:v$VERSION .
-  # Push to dockerhub
-  docker push veertu/anka-gitlab-runner-$arch:latest
-  docker push veertu/anka-gitlab-runner-$arch:v$VERSION
+  if [[ $1 == "--push" ]]; then
+    # Push to dockerhub
+    docker push veertu/anka-gitlab-runner-$arch:latest
+    docker push veertu/anka-gitlab-runner-$arch:v$VERSION
+  fi
 done
