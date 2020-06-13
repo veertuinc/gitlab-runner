@@ -14,6 +14,7 @@ brew install xz
 go get gitlab.com/gitlab-org/gitlab-runner
 make deps
 export PATH="$PATH:$HOME/go/bin" # To load in gox
+make development_setup
 
 # Below steps require docker
 
