@@ -100,5 +100,11 @@ Changes we made from the offical gitlab-runner repo:
       - Script for building, tagging, and pushing to veertu/ dockerhub
   - `helpers/gitlab_ci_yaml_parser/`
       - Updated parser.go (and test.go) to handle `anka_template` the same way it does for `image`
+      - `network/gitlab_test.go`
+          - Added test for new UUID and Tag
+      - `ccommon/network.go`
+          - Added struct
+      - `build_test.go`
+          - Added CI_JOB tests for template UUID and tag
 
-> `executor/ssh.go` must stay as an available executor for tests to pass.
+> **`executor/ssh.go` must stay as an available executor**

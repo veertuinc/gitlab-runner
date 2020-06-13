@@ -406,9 +406,8 @@ type SessionServer struct {
 }
 
 type Config struct {
-	ListenAddress string        `toml:"listen_address,omitempty" json:"listen_address"`
-	SessionServer SessionServer `toml:"session_server,omitempty" json:"session_server"`
-
+	ListenAddress string          `toml:"listen_address,omitempty" json:"listen_address"`
+	SessionServer SessionServer   `toml:"session_server,omitempty" json:"session_server"`
 	Concurrent    int             `toml:"concurrent" json:"concurrent"`
 	CheckInterval int             `toml:"check_interval" json:"check_interval" description:"Define active checking interval of jobs"`
 	LogLevel      *string         `toml:"log_level" json:"log_level" description:"Define log level (one of: panic, fatal, error, warning, info, debug)"`
