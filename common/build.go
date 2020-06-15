@@ -788,14 +788,6 @@ func (b *Build) GetAllVariables() JobVariables {
 	if b.Image.Name != "" {
 		variables = append(variables, JobVariable{Key: "CI_JOB_IMAGE", Value: b.Image.Name, Public: true, Internal: true, File: false})
 	}
-	fmt.Printf("+++++++++ %v\n", b.AnkaTemplate.UUID)
-
-	if b.AnkaTemplate.UUID != "" {
-		variables = append(variables, JobVariable{Key: "CI_JOB_ANKA_TEMPLATE_UUID", Value: b.AnkaTemplate.UUID, Public: true, Internal: true, File: false})
-	}
-	if b.AnkaTemplate.Tag != "" {
-		variables = append(variables, JobVariable{Key: "CI_JOB_ANKA_TEMPLATE_TAG", Value: b.AnkaTemplate.Tag, Public: true, Internal: true, File: false})
-	}
 	if b.Runner != nil {
 		variables = append(variables, b.Runner.GetVariables()...)
 	}

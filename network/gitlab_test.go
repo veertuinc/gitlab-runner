@@ -348,11 +348,6 @@ func getRequestJobResponse() (res map[string]interface{}) {
 	image["entrypoint"] = []string{"/bin/sh"}
 	res["image"] = image
 
-	anka_template := make(map[string]interface{})
-	anka_template["uuid"] = "ankaTemplate123"
-	anka_template["tag"] = "ankaTag123:456"
-	res["anka_template"] = anka_template
-
 	services := make([]map[string]interface{}, 2)
 	services[0] = make(map[string]interface{})
 	services[0]["name"] = "postgresql:9.5"
@@ -490,8 +485,6 @@ func TestRequestJob(t *testing.T) {
 	assert.Equal(t, "ruby:2.6", res.Image.Name)
 	assert.Equal(t, []string{"/bin/sh"}, res.Image.Entrypoint)
 	require.Len(t, res.Services, 2)
-	assert.Equal(t, "ankaTemplate123", res.AnkaTemplate.UUID)
-	assert.Equal(t, "ankaTag123:456", res.AnkaTemplate.Tag)
 	assert.Equal(t, "postgresql:9.5", res.Services[0].Name)
 	assert.Equal(t, []string{"/bin/sh"}, res.Services[0].Entrypoint)
 	assert.Equal(t, []string{"sleep", "30"}, res.Services[0].Command)

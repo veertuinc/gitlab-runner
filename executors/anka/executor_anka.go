@@ -49,16 +49,18 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		return errors.New("Missing template_uuid from configuration")
 	}
 
+	ankaTemplateUUIDENV := s.Build.Variables.Get("ANKA_TEMPLATE_UUID")
+	if ankaTemplateUUIDENV != "" { // OVERRIDE of default Template
+		s.Config.Anka.TemplateUUID = ankaTemplateUUIDENV
+	}
+
+	ankaTagNameENV := s.Build.Variables.Get("ANKA_TAG_NAME")
+	if ankaTagNameENV != "" { // OVERRIDE of default Tag
+		s.Config.Anka.Tag = &ankaTagNameENV
+	}
+
 	s.Println("Opening a connection to the Anka Cloud Controller:", s.Config.Anka.ControllerAddress)
 	s.connector = MakeNewAnkaCloudConnector(s.Config.Anka)
-
-	// Use gitlab-ci.yml anka_template UUID and Tag if the user passes them in, overriding the defaults for the runner
-	if s.Build.AnkaTemplate.UUID != "" {
-		s.Config.Anka.TemplateUUID = s.Build.AnkaTemplate.UUID
-	}
-	if s.Build.AnkaTemplate.Tag != "" {
-		s.Config.Anka.Tag = &s.Build.AnkaTemplate.Tag
-	}
 
 	s.Println(fmt.Sprintf("%s%s%s", helpers.ANSI_BOLD_CYAN, "Starting Anka VM using:", helpers.ANSI_RESET))
 	s.Println("  - Template UUID:", s.Config.Anka.TemplateUUID)

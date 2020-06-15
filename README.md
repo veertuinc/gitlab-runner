@@ -1,15 +1,53 @@
-# Anka Gitlab Runner
+# Anka GitLab Runner
 
-[Offical Usage Guide](http://ankadocs.veertu.com/docs/anka-build-cloud/ci-plugins/gitlab/)
+### [Offical Anka GitLab Runner Usage Guide](http://ankadocs.veertu.com/docs/anka-build-cloud/ci-plugins/gitlab/)
 
-For a list of compatible versions between GitLab and GitLab Runner, consult
-the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
+For a list of compatible versions between GitLab and GitLab Runner, see the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
 
 > This is a stripped down and modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner/tree/12-10-stable) (version 12.10-stable).
 
-# Development Setup and Details
+## Anka GitLab Runner Registration Example
 
+[Official GitLab Runner Documentation](https://docs.gitlab.com/runner/)
+
+```bash
+./anka-gitlab-runner-darwin-amd64 register --non-interactive \
+--url "http://anka.gitlab:8093" \
+--registration-token 48EZAzxiF92TsqAVmkph \
+--ssh-host host.docker.internal \
+--ssh-user anka \
+--ssh-password admin \
+--name "localhost shared runner" \
+--anka-controller-address "https://anka.controller:8090/" \
+--anka-template-uuid d09f2a1a-e621-463d-8dfd-8ce9ba9f4160 \
+--anka-tag base:port-forward-22:brew-git:gitlab \
+--executor anka \
+--anka-root-ca-path /Users/hostUser/anka-ca-crt.pem \
+--anka-cert-path /Users/hostUser/anka-gitlab-crt.pem \
+--anka-key-path /Users/hostUser/anka-gitlab-key.pem \
+--clone-url "http://anka.gitlab:8093" \
+--tag-list "localhost-shared,localhost,iOS"
 ```
+
+## Example `gitlab-ci.yml`
+
+```yaml
+test:
+  tags:
+    - localhost-shared
+  stage: test
+  variables:
+    # Only use these variables to override the defaults you set when you register the runner.
+    ANKA_TEMPLATE_UUID: "c0847bc9-5d2d-4dbc-ba6a-240f7ff08032"
+    ANKA_TAG_NAME: "base"
+  script:
+    - hostname
+    - echo "Echo from inside of the VM!"
+```
+
+## Development Setup and Details
+
+```bash
 brew install xz
 go get gitlab.com/gitlab-org/gitlab-runner
 make deps
@@ -26,9 +64,32 @@ make build_simple
 make build_all
 ```
 
-Test your changes manually with `anka-gitlab-runner --debug --log-level debug`
+Test your changes manually with `anka-gitlab-runner --debug --log-level debug`:
+
+```bash
+export GITLAB_SHARED_REG_TOKEN=$(docker exec -i anka.gitlab bash -c "gitlab-rails runner -e production \"puts Gitlab::CurrentSettings.current_application_settings.runners_registration_token\"")
+
+rm -f ./out/binaries/anka-gitlab-runner; make build_simple && \
+./out/binaries/anka-gitlab-runner stop && \
+$(./out/binaries/anka-gitlab-runner unregister -n "localhost shared runner" || true) && \
+./out/binaries/anka-gitlab-runner register --non-interactive \
+--url "http://anka.gitlab:8093/" \
+--registration-token $GITLAB_SHARED_REG_TOKEN \
+--ssh-user anka \
+--ssh-password admin \
+--name "localhost shared runner" \
+--anka-controller-address "http://anka.controller:8090/" \
+--anka-template-uuid c0847bc9-5d2d-4dbc-ba6a-240f7ff08032 \
+--anka-tag base:port-forward-22:brew-git:gitlab \
+--executor anka \
+--clone-url "http://anka.gitlab:8093" \
+--tag-list "localhost-shared,localhost,iOS" && \
+./out/binaries/anka-gitlab-runner stop && ./out/binaries/anka-gitlab-runner --debug --log-level debug run
+```
 
 > When adding new options/flags, add them to `testRegisterCommandRun`
+
+### Change Log
 
 Changes we made from the offical gitlab-runner repo:
 
@@ -99,3 +160,6 @@ Changes we made from the offical gitlab-runner repo:
       - Script for building, tagging, and pushing to veertu/ dockerhub
 
 > **`executor/ssh.go` must stay as an available executor**
+
+## TO-DO
+- Handle user cancellation. Sometimes it leaves instances in a "Terminated" state and keeps waiting for the IP to be returned from the controller API.

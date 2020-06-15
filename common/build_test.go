@@ -139,91 +139,46 @@ func runSuccessfulMockBuild(t *testing.T, prepareFn func(options ExecutorPrepare
 
 func TestJobImageExposed(t *testing.T) {
 	tests := map[string]struct {
-		image                           string
-		ankaTemplateUUID                string
-		ankaTemplateTag                 string
-		vars                            []JobVariable
-		expectVarExists                 bool
-		expectAnkaTemplateUUIDVarExists bool
-		expectAnkaTemplateTagVarExists  bool
-		expectImageName                 string
-		expectAnkaTemplateUUID          string
-		expectAnkaTemplateTag           string
+		image           string
+		vars            []JobVariable
+		expectVarExists bool
+		expectImageName string
 	}{
 		"normal image exposed": {
-			image:                           "alpine:3.11",
-			ankaTemplateUUID:                "ankaTemplate1",
-			ankaTemplateTag:                 "ankaTag1:2",
-			expectVarExists:                 true,
-			expectAnkaTemplateUUIDVarExists: true,
-			expectAnkaTemplateTagVarExists:  true,
-			expectImageName:                 "alpine:3.11",
-			expectAnkaTemplateUUID:          "ankaTemplate1",
-			expectAnkaTemplateTag:           "ankaTag1:2",
+			image:           "alpine:3.11",
+			expectVarExists: true,
+			expectImageName: "alpine:3.11",
 		},
 		"image with variable expansion": {
-			image:            "${IMAGE}:3.11",
-			ankaTemplateUUID: "${ANKA_TEMPLATE_UUID}1",
-			ankaTemplateTag:  "ankaTag1:2",
-			vars: []JobVariable{
-				{Key: "IMAGE", Value: "alpine", Public: true},
-				{Key: "ANKA_TEMPLATE_UUID", Value: "ankaTemplate", Public: true},
-			},
-			expectVarExists:                 true,
-			expectAnkaTemplateUUIDVarExists: true,
-			expectAnkaTemplateTagVarExists:  true,
-			expectImageName:                 "alpine:3.11",
-			expectAnkaTemplateUUID:          "ankaTemplate1",
-			expectAnkaTemplateTag:           "ankaTag1:2",
+			image:           "${IMAGE}:3.11",
+			vars:            []JobVariable{{Key: "IMAGE", Value: "alpine", Public: true}},
+			expectVarExists: true,
+			expectImageName: "alpine:3.11",
 		},
 		"no image specified": {
-			image:                           "",
-			ankaTemplateUUID:                "",
-			ankaTemplateTag:                 "",
-			expectVarExists:                 false,
-			expectAnkaTemplateUUIDVarExists: false,
-			expectAnkaTemplateTagVarExists:  false,
+			image:           "",
+			expectVarExists: false,
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			build := runSuccessfulMockBuild(t, func(options ExecutorPrepareOptions) error {
-				options.Build.AnkaTemplate.UUID = tt.ankaTemplateUUID
-				options.Build.AnkaTemplate.Tag = tt.ankaTemplateTag
 				options.Build.Image.Name = tt.image
 				options.Build.Variables = append(options.Build.Variables, tt.vars...)
 				return options.Build.StartBuild("/root/dir", "/cache/dir", false, false)
 			})
 			actualVarExists := false
-			actualAnkaTemplateUUIDVarExists := false
-			actualAnkaTemplateTagVarExists := false
-			fmt.Printf("============= %v\n", build.GetAllVariables())
 			for _, v := range build.GetAllVariables() {
 				if v.Key == "CI_JOB_IMAGE" {
 					actualVarExists = true
-				}
-				if v.Key == "CI_JOB_ANKA_TEMPLATE_UUID" {
-					actualAnkaTemplateUUIDVarExists = true
-				}
-				if v.Key == "CI_JOB_ANKA_TEMPLATE_UUID" {
-					actualAnkaTemplateTagVarExists = true
+					break
 				}
 			}
 			assert.Equal(t, tt.expectVarExists, actualVarExists, "CI_JOB_IMAGE exported?")
-			assert.Equal(t, tt.expectAnkaTemplateUUIDVarExists, actualAnkaTemplateUUIDVarExists, "CI_JOB_ANKA_TEMPLATE_UUID exported?")
-			assert.Equal(t, tt.expectAnkaTemplateTagVarExists, actualAnkaTemplateTagVarExists, "CI_JOB_ANKA_TEMPLATE_TAG exported?")
 			if tt.expectVarExists {
 				actualJobImage := build.GetAllVariables().Get("CI_JOB_IMAGE")
 				assert.Equal(t, tt.expectImageName, actualJobImage)
-			}
-			if tt.expectAnkaTemplateUUIDVarExists {
-				actualJobAnkaTemplateUUID := build.GetAllVariables().Get("CI_JOB_ANKA_TEMPLATE_UUID")
-				assert.Equal(t, tt.expectAnkaTemplateUUID, actualJobAnkaTemplateUUID)
-			}
-			if tt.expectAnkaTemplateTagVarExists {
-				actualJobAnkaTemplateTag := build.GetAllVariables().Get("CI_JOB_ANKA_TEMPLATE_TAG")
-				assert.Equal(t, tt.expectAnkaTemplateTag, actualJobAnkaTemplateTag)
 			}
 		})
 	}
