@@ -19,7 +19,7 @@ make development_setup
 # Below steps require docker
 
 # Generate helpers and run tests
-make test
+make simple-test
 
 # Build a single binary for testing
 make build_simple
