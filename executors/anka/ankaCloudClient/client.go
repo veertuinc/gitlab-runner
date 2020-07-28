@@ -105,10 +105,6 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 
 	timeout := time.Duration(5 * time.Second)
 
-	client := &http.Client{
-		Timeout: timeout,
-	}
-
 	caCertPool, _ := x509.SystemCertPool()
 	if caCertPool == nil {
 		caCertPool = x509.NewCertPool()
@@ -123,26 +119,32 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 			return fmt.Errorf("Could not add %v to Root Certificates", caCert)
 		}
 	}
+
+	tlsConfig := &tls.Config{
+		RootCAs:            caCertPool,
+		InsecureSkipVerify: ankaClient.skipTLSVerification,
+	}
+
+	client := &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
+
 	if ankaClient.certPath != nil {
 		if ankaClient.keyPath != nil {
-			cert, err := tls.LoadX509KeyPair(*ankaClient.certPath, *ankaClient.keyPath)
+			certs, err := tls.LoadX509KeyPair(*ankaClient.certPath, *ankaClient.keyPath)
 			if err != nil {
 				return err
 			}
-			client = &http.Client{
-				Timeout: timeout,
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{
-						RootCAs:            caCertPool,
-						Certificates:       []tls.Certificate{cert},
-						InsecureSkipVerify: ankaClient.skipTLSVerification,
-					},
-				},
-			}
+			tlsConfig.Certificates = []tls.Certificate{certs}
 		} else {
 			return errors.New("incomplete key pair... ensure both the cert and key are included")
 		}
 	}
+
+	fmt.Printf("tlsConfig: %+v \n", tlsConfig)
 
 	var req *http.Request
 	if buffer != nil {
@@ -167,6 +169,10 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 		var response *http.Response
 		fmt.Printf("Retry: %v\n", tries)
 		response, err = client.Do(req)
+		if err != nil {
+			fmt.Printf("client.Do(req) %v\n", err)
+			break
+		}
 		if response == nil || response.Body == nil || response.Status == "" { // If the controller connection fails or is overwhelmed, it will return null or empty values. We need to handle this so the job doesn't fail and orphan VMs.
 			if tries == retryLimit {
 				err = errors.New("unable to connect to controller... please check its status and cleanup any zombied/orphaned VMs on your Anka Nodes")
@@ -181,23 +187,24 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 			fmt.Printf("%v\n", err)
 			break
 		}
+
+		s, _ := json.MarshalIndent(responseBody, "", "\t")
+	
 		err = json.NewDecoder(response.Body).Decode(responseBody)
 		if response.StatusCode != http.StatusOK {
-			fmt.Printf("%v\n", err)
+			fmt.Printf("json Decode: %v\nResponse: %v\n", err, string(s))
 			break
 		}
 		break
-	}
-	if err != nil {
-		return err
 	}
 
 	s, _ := json.MarshalIndent(responseBody, "", "\t")
 	fmt.Printf("RESPONSE FROM CONTROLLER: %v\n", string(s))
 
 	if err != nil {
-		return err
+		return fmt.Errorf("decoding response from controller: %v\nresponse: %v", err, string(s))
 	}
+
 	return nil
 
 }
