@@ -99,8 +99,6 @@ func (connector *AnkaConnector) getVM(instanceId string) (vmStatus *ankaCloudCli
 		}
 	}()
 
-	fmt.Printf("GETVM==========================")
-
 	err, showResponse := connector.client.GetVm(instanceId)
 	if err != nil {
 		return nil, err

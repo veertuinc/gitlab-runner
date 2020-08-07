@@ -128,7 +128,7 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			IdleConnTimeout: 500,
+			IdleConnTimeout: 2 * time.Second,
 			TLSClientConfig: tlsConfig,
 		},
 	}

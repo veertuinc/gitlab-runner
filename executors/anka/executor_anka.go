@@ -71,6 +71,8 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	s.Println("Please be patient...")
 	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
 
+	// TODO Cancelling the job at this point fails to terminate the scheduling instance
+
 	connectInfo, err := s.connector.StartInstance(s.Config.Anka)
 	if err != nil {
 		return err
