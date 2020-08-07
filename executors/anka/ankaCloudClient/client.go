@@ -128,6 +128,7 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 	client := &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
+			IdleConnTimeout: 500,
 			TLSClientConfig: tlsConfig,
 		},
 	}
@@ -144,7 +145,7 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 		}
 	}
 
-	fmt.Printf("tlsConfig: %+v \n", tlsConfig)
+	// fmt.Printf("tlsConfig: %+v \n", tlsConfig)
 
 	var req *http.Request
 	if buffer != nil {
@@ -167,7 +168,7 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 	retryLimit := 6
 	for tries := 0; tries <= retryLimit; tries++ {
 		var response *http.Response
-		fmt.Printf("Retry: %v\n", tries)
+		fmt.Printf("Retries thus far: %v\n", tries)
 		response, err = client.Do(req)
 		if err != nil {
 			fmt.Printf("client.Do(req) %v\n", err)
@@ -189,7 +190,7 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 		}
 
 		s, _ := json.MarshalIndent(responseBody, "", "\t")
-	
+
 		err = json.NewDecoder(response.Body).Decode(responseBody)
 		if response.StatusCode != http.StatusOK {
 			fmt.Printf("json Decode: %v\nResponse: %v\n", err, string(s))

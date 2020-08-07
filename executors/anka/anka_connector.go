@@ -30,7 +30,7 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig) (co
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered in StartInstance", r)
-			funcErr = errors.New("enexpected error")
+			funcErr = fmt.Errorf("%v", r)
 			if connectInfo.InstanceId != "" {
 				connector.TerminateInstance(connectInfo.InstanceId)
 			}
@@ -57,7 +57,7 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig) (co
 	now := time.Now()
 	waitForStartUntil := now.Add(connector.startingTimeWait)
 
-	err, vm := connector.waitForVMToStart(instanceId, waitForStartUntil)
+	vm, err := connector.waitForVMToStart(instanceId, waitForStartUntil)
 	if err != nil {
 		connector.client.TerminateVm(instanceId)
 		return nil, err
@@ -65,7 +65,7 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig) (co
 
 	now = time.Now()
 	waitForNetworUntil := now.Add(connector.netTimeToWait)
-	err, vm = connector.waitForVMToHaveNetwork(instanceId, waitForNetworUntil)
+	vm, err = connector.waitForVMToHaveNetwork(instanceId, waitForNetworUntil)
 	if err != nil {
 		connector.client.TerminateVm(instanceId)
 		return nil, err
@@ -87,38 +87,59 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig) (co
 
 }
 
-func (connector *AnkaConnector) getVM(instanceId string) (error, *ankaCloudClient.VMStatus) {
+func (connector *AnkaConnector) getVM(instanceId string) (vmStatus *ankaCloudClient.VMStatus, funcErr error) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered in getVM", r)
+			funcErr = fmt.Errorf("%v", r)
+			if instanceId != "" {
+				connector.TerminateInstance(instanceId)
+			}
+		}
+	}()
+
+	fmt.Printf("GETVM==========================")
+
 	err, showResponse := connector.client.GetVm(instanceId)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 	if showResponse.Status != "OK" {
-		return errors.New(showResponse.Message), nil
+		return nil, errors.New(showResponse.Message)
 	}
-	return nil, &showResponse.Body
+	return &showResponse.Body, funcErr
 }
 
-func (connector *AnkaConnector) waitForVMToStart(instanceId string, timeOut time.Time) (error, *ankaCloudClient.VMStatus) {
+func (connector *AnkaConnector) waitForVMToStart(instanceId string, timeOut time.Time) (vmStatus *ankaCloudClient.VMStatus, funcErr error) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered in waitForVMToStart", r)
+			funcErr = fmt.Errorf("%v", r)
+			if instanceId != "" {
+				connector.TerminateInstance(instanceId)
+			}
+		}
+	}()
+
 	for {
-		err, vm := connector.getVM(instanceId)
+		vm, err := connector.getVM(instanceId)
 		if err != nil {
-			return err, nil
+			return nil, err
 		}
 		loopTime := time.Now()
 		switch vm.State {
-
 		case ankaCloudClient.StateStarting:
 			fallthrough
 		case ankaCloudClient.StateScheduling:
 			if loopTime.After(timeOut) {
-				return errors.New("VM was unable to start"), nil
+				return nil, errors.New("VM was unable to start")
 			}
 			time.Sleep(2 * time.Second)
 			break
-
 		case ankaCloudClient.StateStarted:
-			return nil, vm
-
+			return vm, nil
 		case ankaCloudClient.StateStopped:
 			fallthrough
 		case ankaCloudClient.StateStopping:
@@ -126,24 +147,32 @@ func (connector *AnkaConnector) waitForVMToStart(instanceId string, timeOut time
 		case ankaCloudClient.StateTerminated:
 			fallthrough
 		case ankaCloudClient.StateTerminating:
-			return errors.New("Unexpected VM State " + string(vm.State)), nil
-
+			return nil, errors.New("Unexpected VM State " + string(vm.State))
 		case ankaCloudClient.StateError:
-			return errors.New(vm.Message), nil
-
+			return nil, errors.New(vm.Message)
 		}
 	}
-	return nil, nil
+	return nil, funcErr
 }
 
-func (connector *AnkaConnector) waitForVMToHaveNetwork(instanceId string, timeOut time.Time) (error, *ankaCloudClient.VMStatus) {
+func (connector *AnkaConnector) waitForVMToHaveNetwork(instanceId string, timeOut time.Time) (vmStatus *ankaCloudClient.VMStatus, funcErr error) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered in waitForVMToHaveNetwork", r)
+			funcErr = fmt.Errorf("%v", r)
+			if instanceId != "" {
+				connector.TerminateInstance(instanceId)
+			}
+		}
+	}()
 
 	var vm *ankaCloudClient.VMStatus
 	for {
 		var err error
-		err, vm = connector.getVM(instanceId)
+		vm, err = connector.getVM(instanceId)
 		if err != nil {
-			return err, nil
+			return nil, err
 		}
 		if connector.checkForNetwork(vm) {
 			break
@@ -151,10 +180,10 @@ func (connector *AnkaConnector) waitForVMToHaveNetwork(instanceId string, timeOu
 		time.Sleep(2 * time.Second)
 		loopTime := time.Now()
 		if loopTime.After(timeOut) {
-			return errors.New("timeout checking the VM for networking... please review the VM Instance manually to determine why networking didn't start"), nil
+			return nil, errors.New("timeout checking the VM for networking... please review the VM Instance manually to determine why networking didn't start")
 		}
 	}
-	return nil, vm
+	return vm, funcErr
 }
 
 func (connector *AnkaConnector) checkForNetwork(vm *ankaCloudClient.VMStatus) bool {
