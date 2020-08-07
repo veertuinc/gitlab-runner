@@ -27,6 +27,30 @@ const (
 	PullPolicyIfNotPresent = "if-not-present"
 )
 
+// InvalidTimePeriodsError represents that the time period specified is not valid.
+type InvalidTimePeriodsError struct {
+	periods []string
+	cause   error
+}
+
+func NewInvalidTimePeriodsError(periods []string, cause error) *InvalidTimePeriodsError {
+	return &InvalidTimePeriodsError{periods: periods, cause: cause}
+}
+
+func (e *InvalidTimePeriodsError) Error() string {
+	return fmt.Sprintf("invalid time periods %v, caused by: %v", e.periods, e.cause)
+}
+
+func (e *InvalidTimePeriodsError) Is(err error) bool {
+	_, ok := err.(*InvalidTimePeriodsError)
+
+	return ok
+}
+
+func (e *InvalidTimePeriodsError) Unwrap() error {
+	return e.cause
+}
+
 // Get returns one of the predefined values or returns an error if the value can't match the predefined
 // func (p DockerPullPolicy) Get() (DockerPullPolicy, error) {
 // 	// Default policy is always
@@ -322,6 +346,7 @@ func (s *Service) ToImageDefinition() Image {
 	}
 }
 
+//nolint:lll
 type RunnerCredentials struct {
 	URL         string `toml:"url" json:"url" short:"u" long:"url" env:"CI_SERVER_URL" required:"true" description:"Runner URL"`
 	Token       string `toml:"token" json:"token" short:"t" long:"token" env:"CI_SERVER_TOKEN" required:"true" description:"Runner token"`
@@ -330,17 +355,20 @@ type RunnerCredentials struct {
 	TLSKeyFile  string `toml:"tls-key-file,omitempty" json:"tls-key-file" long:"tls-key-file" env:"CI_SERVER_TLS_KEY_FILE" description:"File containing private key for TLS client auth when using HTTPS"`
 }
 
+//nolint:lll
 type CacheGCSCredentials struct {
 	AccessID   string `toml:"AccessID,omitempty" long:"access-id" env:"CACHE_GCS_ACCESS_ID" description:"ID of GCP Service Account used to access the storage"`
 	PrivateKey string `toml:"PrivateKey,omitempty" long:"private-key" env:"CACHE_GCS_PRIVATE_KEY" description:"Private key used to sign GCS requests"`
 }
 
+//nolint:lll
 type CacheGCSConfig struct {
 	CacheGCSCredentials
 	CredentialsFile string `toml:"CredentialsFile,omitempty" long:"credentials-file" env:"GOOGLE_APPLICATION_CREDENTIALS" description:"File with GCP credentials, containing AccessID and PrivateKey"`
 	BucketName      string `toml:"BucketName,omitempty" long:"bucket-name" env:"CACHE_GCS_BUCKET_NAME" description:"Name of the bucket where cache will be stored"`
 }
 
+//nolint:lll
 type CacheS3Config struct {
 	ServerAddress  string `toml:"ServerAddress,omitempty" long:"server-address" env:"CACHE_S3_SERVER_ADDRESS" description:"A host:port to the used S3-compatible server"`
 	AccessKey      string `toml:"AccessKey,omitempty" long:"access-key" env:"CACHE_S3_ACCESS_KEY" description:"S3 Access Key"`
@@ -350,6 +378,7 @@ type CacheS3Config struct {
 	Insecure       bool   `toml:"Insecure,omitempty" long:"insecure" env:"CACHE_S3_INSECURE" description:"Use insecure mode (without https)"`
 }
 
+//nolint:lll
 type CacheConfig struct {
 	Type   string `toml:"Type,omitempty" long:"type" env:"CACHE_TYPE" description:"Select caching method"`
 	Path   string `toml:"Path,omitempty" long:"path" env:"CACHE_PATH" description:"Name of the path to prepend to the cache URL"`
@@ -359,6 +388,7 @@ type CacheConfig struct {
 	GCS *CacheGCSConfig `toml:"gcs,omitempty" json:"gcs" namespace:"gcs"`
 }
 
+//nolint:lll
 type RunnerSettings struct {
 	Executor  string `toml:"executor" json:"executor" long:"executor" env:"RUNNER_EXECUTOR" required:"true" description:"Select executor (anka or ssh)"`
 	BuildsDir string `toml:"builds_dir,omitempty" json:"builds_dir" long:"builds-dir" env:"RUNNER_BUILDS_DIR" description:"Directory where builds are stored"`
@@ -389,6 +419,7 @@ type RunnerSettings struct {
 	Anka *AnkaConfig `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
 }
 
+//nolint:lll
 type RunnerConfig struct {
 	Name               string `toml:"name" json:"name" short:"name" long:"description" env:"RUNNER_NAME" description:"Runner name"`
 	Limit              int    `toml:"limit,omitzero" json:"limit" long:"limit" env:"RUNNER_LIMIT" description:"Maximum number of builds processed by this runner"`
@@ -399,12 +430,14 @@ type RunnerConfig struct {
 	RunnerSettings
 }
 
+//nolint:lll
 type SessionServer struct {
 	ListenAddress    string `toml:"listen_address,omitempty" json:"listen_address" description:"Address that the runner will communicate directly with"`
 	AdvertiseAddress string `toml:"advertise_address,omitempty" json:"advertise_address" description:"Address the runner will expose to the world to connect to the session server"`
 	SessionTimeout   int    `toml:"session_timeout,omitempty" json:"session_timeout" description:"How long a terminal session can be active after a build completes, in seconds"`
 }
 
+//nolint:lll
 type Config struct {
 	ListenAddress string          `toml:"listen_address,omitempty" json:"listen_address"`
 	SessionServer SessionServer   `toml:"session_server,omitempty" json:"session_server"`
@@ -419,6 +452,7 @@ type Config struct {
 	Loaded        bool            `toml:"-"`
 }
 
+//nolint:lll
 type CustomBuildDir struct {
 	Enabled bool `toml:"enabled,omitempty" json:"enabled" long:"enabled" env:"CUSTOM_BUILD_DIR_ENABLED" description:"Enable job specific build directories"`
 }
@@ -442,145 +476,6 @@ func (c *SessionServer) GetSessionTimeout() time.Duration {
 
 	return DefaultSessionTimeout
 }
-
-// func (c *DockerConfig) GetNanoCPUs() (int64, error) {
-// 	if c.CPUS == "" {
-// 		return 0, nil
-// 	}
-
-// 	cpu, ok := new(big.Rat).SetString(c.CPUS)
-// 	if !ok {
-// 		return 0, fmt.Errorf("failed to parse %v as a rational number", c.CPUS)
-// 	}
-
-// 	nano, _ := cpu.Mul(cpu, big.NewRat(1e9, 1)).Float64()
-
-// 	return int64(nano), nil
-// }
-
-// func (c *DockerConfig) getMemoryBytes(size string, fieldName string) int64 {
-// 	if size == "" {
-// 		return 0
-// 	}
-
-// 	bytes, err := units.RAMInBytes(size)
-// 	if err != nil {
-// 		logrus.Fatalf("Error parsing docker %s: %s", fieldName, err)
-// 	}
-
-// 	return bytes
-// }
-
-// func (c *DockerConfig) GetMemory() int64 {
-// 	return c.getMemoryBytes(c.Memory, "memory")
-// }
-
-// func (c *DockerConfig) GetMemorySwap() int64 {
-// 	return c.getMemoryBytes(c.MemorySwap, "memory_swap")
-// }
-
-// func (c *DockerConfig) GetMemoryReservation() int64 {
-// 	return c.getMemoryBytes(c.MemoryReservation, "memory_reservation")
-// }
-
-// func (c *DockerConfig) GetOomKillDisable() *bool {
-// 	return &c.OomKillDisable
-// }
-
-// func (c *KubernetesConfig) GetPollAttempts() int {
-// 	if c.PollTimeout <= 0 {
-// 		c.PollTimeout = KubernetesPollTimeout
-// 	}
-
-// 	return c.PollTimeout / c.GetPollInterval()
-// }
-
-// func (c *KubernetesConfig) GetPollInterval() int {
-// 	if c.PollInterval <= 0 {
-// 		c.PollInterval = KubernetesPollInterval
-// 	}
-
-// 	return c.PollInterval
-// }
-
-// func (c *KubernetesConfig) GetNodeTolerations() []api.Toleration {
-// 	var tolerations []api.Toleration
-
-// 	for toleration, effect := range c.NodeTolerations {
-// 		newToleration := api.Toleration{
-// 			Effect: api.TaintEffect(effect),
-// 		}
-
-// 		if strings.Contains(toleration, "=") {
-// 			parts := strings.Split(toleration, "=")
-// 			newToleration.Key = parts[0]
-// 			if len(parts) > 1 {
-// 				newToleration.Value = parts[1]
-// 			}
-// 			newToleration.Operator = api.TolerationOpEqual
-// 		} else {
-// 			newToleration.Key = toleration
-// 			newToleration.Operator = api.TolerationOpExists
-// 		}
-
-// 		tolerations = append(tolerations, newToleration)
-// 	}
-
-// 	return tolerations
-// }
-
-// func (c *KubernetesConfig) GetPodSecurityContext() *api.PodSecurityContext {
-// 	podSecurityContext := c.PodSecurityContext
-
-// 	if podSecurityContext.FSGroup == nil &&
-// 		podSecurityContext.RunAsGroup == nil &&
-// 		podSecurityContext.RunAsNonRoot == nil &&
-// 		podSecurityContext.RunAsUser == nil &&
-// 		len(podSecurityContext.SupplementalGroups) == 0 {
-// 		return nil
-// 	}
-
-// 	return &api.PodSecurityContext{
-// 		FSGroup:            podSecurityContext.FSGroup,
-// 		RunAsGroup:         podSecurityContext.RunAsGroup,
-// 		RunAsNonRoot:       podSecurityContext.RunAsNonRoot,
-// 		RunAsUser:          podSecurityContext.RunAsUser,
-// 		SupplementalGroups: podSecurityContext.SupplementalGroups,
-// 	}
-// }
-
-// func (c *DockerMachine) GetIdleCount() int {
-// 	if c.isOffPeak() {
-// 		return c.OffPeakIdleCount
-// 	}
-
-// 	return c.IdleCount
-// }
-
-// func (c *DockerMachine) GetIdleTime() int {
-// 	if c.isOffPeak() {
-// 		return c.OffPeakIdleTime
-// 	}
-
-// 	return c.IdleTime
-// }
-
-// func (c *DockerMachine) isOffPeak() bool {
-// 	if c.offPeakTimePeriods == nil {
-// 		c.CompileOffPeakPeriods()
-// 	}
-
-// 	return c.offPeakTimePeriods != nil && c.offPeakTimePeriods.InPeriod()
-// }
-
-// func (c *DockerMachine) CompileOffPeakPeriods() (err error) {
-// 	c.offPeakTimePeriods, err = timeperiod.TimePeriods(c.OffPeakPeriods, c.OffPeakTimezone)
-// 	if err != nil {
-// 		err = fmt.Errorf("invalid OffPeakPeriods value: %w", err)
-// 	}
-
-// 	return
-// }
 
 func (c *RunnerCredentials) GetURL() string {
 	return c.URL
@@ -695,15 +590,16 @@ func (c *Config) LoadConfig(configFile string) error {
 		return err
 	}
 
+	// // TODO POTENTIALLY REMOVE THIS?
 	// for _, runner := range c.Runners {
 	// 	if runner.Machine == nil {
 	// 		continue
 	// 	}
-
-	// 	err := runner.Machine.CompileOffPeakPeriods()
+	// 	err := runner.Machine.CompilePeriods()
 	// 	if err != nil {
 	// 		return err
 	// 	}
+	// 	runner.Machine.logDeprecationWarning()
 	// }
 
 	c.ModTime = info.ModTime()

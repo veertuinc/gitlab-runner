@@ -11,7 +11,9 @@ import (
 
 func TestVariablesJSON(t *testing.T) {
 	var x JobVariable
-	data := []byte(`{"key": "FOO", "value": "bar", "public": true, "internal": true, "file": true, "masked": true, "raw": true}`)
+	data := []byte(
+		`{"key": "FOO", "value": "bar", "public": true, "internal": true, "file": true, "masked": true, "raw": true}`,
+	)
 
 	err := json.Unmarshal(data, &x)
 	assert.NoError(t, err)
@@ -102,7 +104,7 @@ func TestSpecialVariablesExpansion(t *testing.T) {
 	expanded := all.Expand()
 	assert.Len(t, expanded, 4)
 	assert.Equal(t, "$", expanded.Get("key"))
-	assert.Equal(t, "/dsa", expanded.Get("key2"))
+	assert.Equal(t, "$/dsa", expanded.Get("key2"))
 	assert.Equal(t, "aabb", expanded.Get("key3"))
 	assert.Equal(t, "aabb", expanded.Get("key4"))
 }

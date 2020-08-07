@@ -23,6 +23,7 @@ type MetricsReferee struct {
 	logger        logrus.FieldLogger
 }
 
+//nolint:lll
 type MetricsRefereeConfig struct {
 	PrometheusAddress string   `toml:"prometheus_address,omitempty" json:"prometheus_address" description:"A host:port to a prometheus metrics server"`
 	QueryInterval     int      `toml:"query_interval,omitempty" json:"query_interval" description:"Query interval (in seconds)"`
@@ -45,11 +46,7 @@ func (mr *MetricsReferee) ArtifactFormat() string {
 	return "gzip"
 }
 
-func (mr *MetricsReferee) Execute(
-	ctx context.Context,
-	startTime time.Time,
-	endTime time.Time,
-) (*bytes.Reader, error) {
+func (mr *MetricsReferee) Execute(ctx context.Context, startTime, endTime time.Time) (*bytes.Reader, error) {
 	// specify the range used for the PromQL query
 	queryRange := prometheusV1.Range{
 		Start: startTime.UTC(),
@@ -81,15 +78,22 @@ func (mr *MetricsReferee) Execute(
 	}
 
 	// convert metrics sample pairs to JSON
-	output, _ := json.Marshal(metrics)
+	output, err := json.Marshal(metrics)
+	if err != nil {
+		return nil, err
+	}
 	return bytes.NewReader(output), nil
 }
 
-func (mr *MetricsReferee) queryMetrics(ctx context.Context, query string, queryRange prometheusV1.Range) []model.SamplePair {
+func (mr *MetricsReferee) queryMetrics(
+	ctx context.Context,
+	query string,
+	queryRange prometheusV1.Range,
+) []model.SamplePair {
 	interval := fmt.Sprintf("%.0fs", mr.queryInterval.Seconds())
 
-	query = strings.Replace(query, "{selector}", mr.selector, -1)
-	query = strings.Replace(query, "{interval}", interval, -1)
+	query = strings.ReplaceAll(query, "{selector}", mr.selector)
+	query = strings.ReplaceAll(query, "{interval}", interval)
 
 	queryLogger := mr.logger.WithFields(logrus.Fields{
 		"query": query,
@@ -113,7 +117,9 @@ func (mr *MetricsReferee) queryMetrics(ctx context.Context, query string, queryR
 	// ensure matrix result
 	matrix, ok := result.(model.Matrix)
 	if !ok {
-		queryLogger.WithField("result-type", reflect.TypeOf(result)).Info("Failed to type assert result into model.Matrix")
+		queryLogger.
+			WithField("result-type", reflect.TypeOf(result)).
+			Info("Failed to type assert result into model.Matrix")
 		return nil
 	}
 

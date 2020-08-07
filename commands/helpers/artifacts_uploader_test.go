@@ -278,6 +278,29 @@ func TestArtifactsUploaderServiceUnavailable(t *testing.T) {
 	assert.Equal(t, serviceUnavailableTries, network.uploadCalled)
 }
 
+func TestArtifactsExcludedPaths(t *testing.T) {
+	network := &testNetwork{
+		uploadState: common.UploadSucceeded,
+	}
+
+	cmd := ArtifactsUploaderCommand{
+		JobCredentials: UploaderCredentials,
+		network:        network,
+		Format:         common.ArtifactFormatRaw,
+		fileArchiver: fileArchiver{
+			Paths:   []string{artifactsTestArchivedFile},
+			Exclude: []string{"something/**"},
+		},
+	}
+
+	writeTestFile(t, artifactsTestArchivedFile)
+	defer os.Remove(artifactsTestArchivedFile)
+
+	cmd.Execute(nil)
+
+	assert.Equal(t, 1, network.uploadCalled)
+}
+
 func TestArtifactUploaderCommandShouldRetry(t *testing.T) {
 	tests := map[string]struct {
 		err   error

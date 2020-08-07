@@ -2,6 +2,8 @@
 
 set -eo pipefail
 
+GIT_ROOT=$(cd "${BASH_SOURCE%/*}" && git rev-parse --show-toplevel)
+
 registry_credentials_available() {
     echo "Checking registry credentials"
     [[ -n "${CI_REGISTRY_USER}" ]] && [[ -n "${CI_REGISTRY_PASSWORD}" ]] && return 0
@@ -37,9 +39,14 @@ build() {
     docker build \
            --cache-from "${BUILD_IMAGE}" \
            --build-arg DOCKER_VERSION="${DOCKER_VERSION}" \
+           --build-arg BUILDX_VERSION="${BUILDX_VERSION}" \
+           --build-arg PWSH_VERSION="${PWSH_VERSION}" \
+           --build-arg GIT_LFS_VERSION="${GIT_LFS_VERSION}" \
+           --build-arg GIT_LFS_256_CHECKSUM="${GIT_LFS_256_CHECKSUM}" \
+           --build-arg KUBECTL_VERSION="${KUBECTL_VERSION}" \
            -t "${BUILD_IMAGE}" \
            -f "${BUILD_DOCKERFILE}" \
-           .
+           "${GIT_ROOT}"
 }
 
 login

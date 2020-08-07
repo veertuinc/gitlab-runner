@@ -13,16 +13,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar"
 	"github.com/sirupsen/logrus"
 )
 
 type fileArchiver struct {
 	Paths     []string `long:"path" description:"Add paths to archive"`
+	Exclude   []string `long:"exclude" description:"Exclude paths from the archive"`
 	Untracked bool     `long:"untracked" description:"Add git untracked files"`
 	Verbose   bool     `long:"verbose" description:"Detailed information"`
 
-	wd    string
-	files map[string]os.FileInfo
+	wd       string
+	files    map[string]os.FileInfo
+	excluded map[string]int64
 }
 
 func (c *fileArchiver) isChanged(modTime time.Time) bool {
@@ -59,18 +62,6 @@ func (c *fileArchiver) sortedFiles() []string {
 	return files
 }
 
-func (c *fileArchiver) add(path string) (err error) {
-	// Always use slashes
-	path = filepath.ToSlash(path)
-
-	// Check if file exist
-	info, err := os.Lstat(path)
-	if err == nil {
-		c.files[path] = info
-	}
-	return
-}
-
 func (c *fileArchiver) process(match string) bool {
 	var absolute, relative string
 	var err error
@@ -80,17 +71,28 @@ func (c *fileArchiver) process(match string) bool {
 		// Let's try to find a real relative path to an absolute from working directory
 		relative, err = filepath.Rel(c.wd, absolute)
 	}
+
 	if err == nil {
 		// Process path only if it lives in our build directory
 		if !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			excluded, rule := c.isExcluded(relative)
+			if excluded {
+				c.exclude(rule)
+
+				return false
+			}
+
 			err = c.add(relative)
 		} else {
 			err = errors.New("not supported: outside build directory")
 		}
 	}
+
 	if err == nil {
 		return true
-	} else if os.IsNotExist(err) {
+	}
+
+	if os.IsNotExist(err) {
 		// We hide the error that file doesn't exist
 		return false
 	}
@@ -99,9 +101,37 @@ func (c *fileArchiver) process(match string) bool {
 	return false
 }
 
+func (c *fileArchiver) isExcluded(path string) (bool, string) {
+	for _, pattern := range c.Exclude {
+		excluded, err := doublestar.PathMatch(pattern, path)
+		if err == nil && excluded {
+			return true, pattern
+		}
+	}
+
+	return false, ""
+}
+
+func (c *fileArchiver) exclude(rule string) {
+	c.excluded[rule]++
+}
+
+func (c *fileArchiver) add(path string) error {
+	// Always use slashes
+	path = filepath.ToSlash(path)
+
+	// Check if file exist
+	info, err := os.Lstat(path)
+	if err == nil {
+		c.files[path] = info
+	}
+
+	return err
+}
+
 func (c *fileArchiver) processPaths() {
 	for _, path := range c.Paths {
-		matches, err := filepath.Glob(path)
+		matches, err := doublestar.Glob(path)
 		if err != nil {
 			logrus.Warningf("%s: %v", path, err)
 			continue
@@ -124,7 +154,7 @@ func (c *fileArchiver) processPaths() {
 		if found == 0 {
 			logrus.Warningf("%s: no matching files", path)
 		} else {
-			logrus.Infof("%s: found %d matching files", path, found)
+			logrus.Infof("%s: found %d matching files and directories", path, found)
 		}
 	}
 }
@@ -143,28 +173,29 @@ func (c *fileArchiver) processUntracked() {
 	cmd.Stderr = os.Stderr
 	logrus.Debugln("Executing command:", strings.Join(cmd.Args, " "))
 	err := cmd.Run()
-	if err == nil {
-		reader := bufio.NewReader(&output)
-		for {
-			line, err := reader.ReadString(0)
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				logrus.Warningln(err)
-				break
-			}
-			if c.process(line[:len(line)-1]) {
-				found++
-			}
-		}
-
-		if found == 0 {
-			logrus.Warningf("untracked: no files")
-		} else {
-			logrus.Infof("untracked: found %d files", found)
-		}
-	} else {
+	if err != nil {
 		logrus.Warningf("untracked: %v", err)
+		return
+	}
+
+	reader := bufio.NewReader(&output)
+	for {
+		line, err := reader.ReadString(0)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			logrus.Warningln(err)
+			break
+		}
+		if c.process(line[:len(line)-1]) {
+			found++
+		}
+	}
+
+	if found == 0 {
+		logrus.Warningf("untracked: no files")
+	} else {
+		logrus.Infof("untracked: found %d files", found)
 	}
 }
 
@@ -176,8 +207,14 @@ func (c *fileArchiver) enumerate() error {
 
 	c.wd = wd
 	c.files = make(map[string]os.FileInfo)
+	c.excluded = make(map[string]int64)
 
 	c.processPaths()
 	c.processUntracked()
+
+	for path, count := range c.excluded {
+		logrus.Infof("%s: excluded %d files", path, count)
+	}
+
 	return nil
 }

@@ -98,7 +98,8 @@ func GetRemoteSuccessfulLFSBuild() (JobResponse, error) {
 
 func GetRemoteSuccessfulBuildWithAfterScript() (JobResponse, error) {
 	jobResponse, err := GetRemoteBuildResponse("echo Hello World")
-	jobResponse.Steps = append(jobResponse.Steps,
+	jobResponse.Steps = append(
+		jobResponse.Steps,
 		Step{
 			Name:   StepNameAfterScript,
 			Script: []string{"echo Hello World"},
@@ -106,6 +107,44 @@ func GetRemoteSuccessfulBuildWithAfterScript() (JobResponse, error) {
 		},
 	)
 	return jobResponse, err
+}
+
+func GetRemoteSuccessfulMultistepBuild() (JobResponse, error) {
+	jobResponse, err := GetRemoteBuildResponse("echo Hello World")
+	if err != nil {
+		return JobResponse{}, err
+	}
+
+	jobResponse.Steps = append(
+		jobResponse.Steps,
+		Step{
+			Name:   "release",
+			Script: []string{"echo Release"},
+			When:   StepWhenOnSuccess,
+		},
+		Step{
+			Name:   StepNameAfterScript,
+			Script: []string{"echo After Script"},
+			When:   StepWhenAlways,
+		},
+	)
+
+	return jobResponse, nil
+}
+
+func GetRemoteFailingMultistepBuild(failingStepName StepName) (JobResponse, error) {
+	jobResponse, err := GetRemoteSuccessfulMultistepBuild()
+	if err != nil {
+		return JobResponse{}, err
+	}
+
+	for i, step := range jobResponse.Steps {
+		if step.Name == failingStepName {
+			jobResponse.Steps[i].Script = append(step.Script, "exit 1")
+		}
+	}
+
+	return jobResponse, nil
 }
 
 func GetRemoteSuccessfulBuildWithDumpedVariables() (JobResponse, error) {
@@ -188,9 +227,11 @@ func getRemoteCustomTLSBuild(chain string) (JobResponse, error) {
 	}
 
 	job.TLSCAChain = chain
-	job.Variables = append(job.Variables,
+	job.Variables = append(
+		job.Variables,
 		JobVariable{Key: "GIT_STRATEGY", Value: "clone"},
-		JobVariable{Key: "GIT_SUBMODULE_STRATEGY", Value: "normal"})
+		JobVariable{Key: "GIT_SUBMODULE_STRATEGY", Value: "normal"},
+	)
 
 	return job, nil
 }
@@ -216,6 +257,9 @@ func GetRemoteBuildResponse(commands ...string) (JobResponse, error) {
 func GetLocalBuildResponse(commands ...string) (JobResponse, error) {
 	localRepoURL, err := getLocalRepoURL()
 	if err != nil {
+		if os.IsNotExist(err) {
+			panic("Local repo not found, please run `make development_setup`")
+		}
 		return JobResponse{}, err
 	}
 
@@ -223,7 +267,7 @@ func GetLocalBuildResponse(commands ...string) (JobResponse, error) {
 }
 
 func getLocalRepoURL() (string, error) {
-	_, filename, _, _ := runtime.Caller(0)
+	_, filename, _, _ := runtime.Caller(0) //nolint:dogsled
 
 	directory := path.Dir(filename)
 	if strings.Contains(directory, "_test/_obj_test") {
@@ -286,6 +330,7 @@ func getGitLabComTLSChain() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	var buff bytes.Buffer
 	for _, certs := range resp.TLS.VerifiedChains {

@@ -58,10 +58,10 @@ make development_setup
 make simple-test
 
 # Build a single binary for testing
-make build_simple
+make runner-bin-host
 
-# Build all binaries for linux and darwin
-make build_all
+# Build all binaries for linux and darwin (make sure docker daemon experimental = true)
+make runner-and-helper-bin-host
 ```
 
 Test your changes manually with `anka-gitlab-runner --debug --log-level debug run`:
@@ -174,7 +174,7 @@ Changes we made from the offical gitlab-runner repo:
   - `common/build.go`
       - Added Retries logic to support the new --preparation-retries option
   - `common/build_test.go`
-      - Fixed `TestRetryPrepare` and `TestPrepareFailure` for PrepareRetries being 0 by default + failure fix
+      - Fixed `TestRetryPrepare` and `TestPrepareFailure` for PrepareRetries being 0 by default (consts.go updated const to var)
   - `common/const.go`
       - PreparationRetries = 2
       - const PreparationRetries -> var so tests can change it

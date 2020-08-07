@@ -6,10 +6,11 @@ import (
 
 const (
 	CmdDisableDelayedErrorLevelExpansion string = "FF_CMD_DISABLE_DELAYED_ERROR_LEVEL_EXPANSION"
-	UseLegacyBuildsDirForDocker          string = "FF_USE_LEGACY_BUILDS_DIR_FOR_DOCKER"
-	UseLegacyVolumesMountingOrder        string = "FF_USE_LEGACY_VOLUMES_MOUNTING_ORDER"
 	NetworkPerBuild                      string = "FF_NETWORK_PER_BUILD"
 	UseLegacyKubernetesExecutionStrategy string = "FF_USE_LEGACY_KUBERNETES_EXECUTION_STRATEGY"
+	UseDirectDownload                    string = "FF_USE_DIRECT_DOWNLOAD"
+	SkipNoOpBuildStages                  string = "FF_SKIP_NOOP_BUILD_STAGES"
+	ShellExecutorUseLegacyProcessKill    string = "FF_SHELL_EXECUTOR_USE_LEGACY_PROCESS_KILL"
 )
 
 type FeatureFlag struct {
@@ -38,21 +39,49 @@ var flags = []FeatureFlag{
 		DefaultValue:    "false",
 		Deprecated:      false,
 		ToBeRemovedWith: "",
-		Description:     "Enables creation of a docker [network per build](../executors/docker.md#networking) with the docker executor",
+		Description: "Disables [EnableDelayedExpansion](https://ss64.com/nt/delayedexpansion.html) for " +
+			"error checking for when using [Window Batch](../shells/index.md#windows-batch) shell",
 	},
 	{
-		Name:            UseLegacyBuildsDirForDocker,
+		Name:            NetworkPerBuild,
 		DefaultValue:    "false",
-		Deprecated:      true,
-		ToBeRemovedWith: "13.0",
-		Description:     "Disables the new strategy for Docker executor to cache the content of `/builds` directory instead of `/builds/group-org`",
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description: "Enables creation of a Docker [network per build](../executors/docker.md#networking) with " +
+			"the `docker` executor",
 	},
 	{
-		Name:            UseLegacyVolumesMountingOrder,
+		Name:            UseLegacyKubernetesExecutionStrategy,
+		DefaultValue:    "true",
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description: "When set to `false` disables execution of remote Kubernetes commands through `exec` in " +
+			"favor of `attach` to solve problems like " +
+			"[#4119](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/4119)",
+	},
+	{
+		Name:            UseDirectDownload,
+		DefaultValue:    "true",
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description: "When set to `true` Runner tries to direct-download all artifacts instead of proxying " +
+			"through GitLab on a first try. Enabling might result in a download failures due to problem validating " +
+			"TLS certificate of Object Storage if it is enabled by GitLab",
+	},
+	{
+		Name:            SkipNoOpBuildStages,
+		DefaultValue:    "true",
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description:     "When set to `false` all build stages are executed even if running them has no effect",
+	},
+	{
+		Name:            ShellExecutorUseLegacyProcessKill,
 		DefaultValue:    "false",
 		Deprecated:      true,
-		ToBeRemovedWith: "13.0",
-		Description:     "Disables the new ordering of volumes mounting when `docker*` executors are being used.",
+		ToBeRemovedWith: "14.0",
+		Description: "Use the old process termination that was used prior to GitLab 13.1 where only `SIGKILL`" +
+			" was sent",
 	},
 	{
 		Name:            UseLegacyKubernetesExecutionStrategy,

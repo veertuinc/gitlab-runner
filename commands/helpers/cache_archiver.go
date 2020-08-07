@@ -11,7 +11,7 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/archives"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/url"
+	url_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/url"
 	"gitlab.com/gitlab-org/gitlab-runner/log"
 )
 
@@ -33,21 +33,21 @@ func (c *CacheArchiverCommand) getClient() *CacheClient {
 	return c.client
 }
 
-func (c *CacheArchiverCommand) upload() error {
+func (c *CacheArchiverCommand) upload(_ int) error {
 	logrus.Infoln("Uploading", filepath.Base(c.File), "to", url_helpers.CleanURL(c.URL))
 
 	file, err := os.Open(c.File)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	fi, err := file.Stat()
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest("PUT", c.URL, file)
+	req, err := http.NewRequest(http.MethodPut, c.URL, file)
 	if err != nil {
 		return retryableErr{err: err}
 	}
@@ -59,7 +59,7 @@ func (c *CacheArchiverCommand) upload() error {
 	if err != nil {
 		return retryableErr{err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return retryOnServerError(resp)
 }
@@ -97,15 +97,21 @@ func (c *CacheArchiverCommand) Execute(*cli.Context) {
 			logrus.Fatalln(err)
 		}
 	} else {
-		logrus.Infoln("No URL provided, cache will be not uploaded to shared cache server. Cache will be stored only locally.")
+		logrus.Infoln(
+			"No URL provided, cache will be not uploaded to shared cache server. " +
+				"Cache will be stored only locally.")
 	}
 }
 
 func init() {
-	common.RegisterCommand2("cache-archiver", "create and upload cache artifacts (internal)", &CacheArchiverCommand{
-		retryHelper: retryHelper{
-			Retry:     2,
-			RetryTime: time.Second,
+	common.RegisterCommand2(
+		"cache-archiver",
+		"create and upload cache artifacts (internal)",
+		&CacheArchiverCommand{
+			retryHelper: retryHelper{
+				Retry:     2,
+				RetryTime: time.Second,
+			},
 		},
-	})
+	)
 }

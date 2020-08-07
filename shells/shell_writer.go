@@ -1,6 +1,8 @@
 package shells
 
-import "gitlab.com/gitlab-org/gitlab-runner/common"
+import (
+	"gitlab.com/gitlab-org/gitlab-runner/common"
+)
 
 type ShellWriter interface {
 	EnvVariableKey(name string) string
@@ -21,14 +23,15 @@ type ShellWriter interface {
 	RmDir(path string)
 	RmFile(path string)
 	Absolute(path string) string
+	Join(elem ...string) string
 	TmpFile(name string) string
 
 	MkTmpDir(name string) string
 
-	Print(fmt string, arguments ...interface{})
-	Notice(fmt string, arguments ...interface{})
-	Warning(fmt string, arguments ...interface{})
-	Error(fmt string, arguments ...interface{})
+	Printf(fmt string, arguments ...interface{})
+	Noticef(fmt string, arguments ...interface{})
+	Warningf(fmt string, arguments ...interface{})
+	Errorf(fmt string, arguments ...interface{})
 	EmptyLine()
 
 	Finish(trace bool) string

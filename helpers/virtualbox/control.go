@@ -118,10 +118,7 @@ func FindSSHPort(vmName string) (port string, err error) {
 
 func Exist(vmName string) bool {
 	_, err := VBoxManage("showvminfo", vmName)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func CreateOsVM(vmName string, templateName string, templateSnapshot string) error {
@@ -158,7 +155,7 @@ func allocatePort(handler func(port string) error) (port string, err error) {
 		logrus.Debugln("VirtualBox ConfigureSSH:", err)
 		return
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	usedPorts, err := getUsedVirtualBoxPorts()
 	if err != nil {
@@ -203,7 +200,9 @@ func RevertToSnapshot(vmName string) error {
 }
 
 func matchSnapshotName(snapshotName string, snapshotList string) bool {
-	snapshotRe := regexp.MustCompile(fmt.Sprintf(`(?m)^Snapshot(Name|UUID)[^=]*="(%s)"\r?$`, regexp.QuoteMeta(snapshotName)))
+	snapshotRe := regexp.MustCompile(
+		fmt.Sprintf(`(?m)^Snapshot(Name|UUID)[^=]*="(%s)"\r?$`, regexp.QuoteMeta(snapshotName)),
+	)
 	snapshot := snapshotRe.FindStringSubmatch(snapshotList)
 	return snapshot != nil
 }

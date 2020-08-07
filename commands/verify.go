@@ -10,6 +10,7 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/network"
 )
 
+//nolint:lll
 type VerifyCommand struct {
 	configOptions
 	common.RunnerCredentials
@@ -61,7 +62,7 @@ func (c *VerifyCommand) Execute(context *cli.Context) {
 	logrus.Println("Updated", c.ConfigFile)
 }
 
-func (c *VerifyCommand) selectRunners() (toVerify []*common.RunnerConfig, okRunners []*common.RunnerConfig, err error) {
+func (c *VerifyCommand) selectRunners() (toVerify, okRunners []*common.RunnerConfig, err error) {
 	var selectorPresent = c.Name != "" || c.RunnerCredentials.URL != "" || c.RunnerCredentials.Token != ""
 
 	for _, runner := range c.config.Runners {

@@ -1,10 +1,280 @@
-## v12.10.0-rc2 (2020-04-20)
+## v13.2.2 (2020-07-30)
+
+### Security
+
+- Disallow redirects in Docker client
+
+### Other changes
+
+- Move GitLab release to its own job !2314
+
+## v13.2.1 (2020-07-22)
 
 ### Bug fixes
 
+- Fix untagged registration and add regression tests !2303
+
+### Other changes
+
+- Add release jobs to security fork !2300
+
+## v13.2.0 (2020-07-20)
+
+### New features
+
+- Publish a GitLab Runner Docker image for Linux on IBM Z !2263
+- Pass `multi_build_steps` as a Runner Feature when requesting a job !2213
+- Leverage docker buildx for the helper image and build for s390x !2206
+- Enable PowerShell Core support in Shell Executor !2199
+- Build and release binary for s390x !2196
+- Label docker networks in the same way as containers !1930
+- Tag helper image with runner version !1919 (Fábio Matavelli @fabiomatavelli)
+
+### Bug fixes
+
+- Fix kubernetes runner timeout when the image name is invalid !2197 (Matthias van de Meent @matthias.vandemeent)
+- Update Git TLS settings to be configured for repo URL, not GitLab URL !2111
+- Fix support for UNC paths in Powershell executor !1976 (Pedro Pombeiro @pedropombeiro)
+- Set EFS flag to indicate that filenames and comments are UTF-8 encoded !1325 (Kazunori Yamamoto @kaz.yamamoto)
+- Add openssh-client to Docker images !2281
+
+### Maintenance
+
+- Unsilence the `make lint` target !2245
+- Fix warnings reported by goargs linter !2233
+- Fix shellcheck linter reported issues !2232
+- Add goargs to CI build !2224
+- Replace gocyclo linter with gocognit !2217
+- Enable Windows tests for community MRs !2215
+- Report `panic` failures in CI tests !2212
+- Fix integration tests on Windows that rely on Git version !2207
+- Enable optional checks in gocritic linter !2162
+- Enable shadowing checking in govet !2150
+- Enable funlen linter !2149
+- Enable goprintffuncname linter !2148
+- Enable nakedret linter !2143
+- Enable nestif linter !2142
+- Enable line limit linter !2141
+- Dockerfiles restructuring !2114
+- Rename trace.Fail to trace.Complete !2102
+- Remove duplication from build_test.go !1843
+- Ensure CI image is built if CI_IMAGE value changes !2267
+- Retry helper image build !2265
+- Remove `GOLANGCI_LINT_CACHE` usage !2257
+- Remove unnecessary indentation in method !2256
+- Update alpine image version in `static QA` job to 3.12.0 !2255
+- Write diagnostics for missing `make development_setup` call !2250
+- Run PSScriptAnalyzer on PowerShell scripts !2242
+- Fix helper-docker target !2226
+- Fix code navigation job to wait until the image job is done !2221
+- Fix a spelling error in the bug template and tidy up some other wording !2219
+- Standardize Makefile target names !2216
+- Fix data race in TestDockerCommandBuildCancel !2208
+- Add native code intelligence block to CI !2201
+- Speed up `clone test repo` job !2192
+- Fix flaky TestListenReadLines in log processor !2191
+- Run kubernetes integration tests !2155
+- Enable unparam linter and fix reported errors !2135
+- Enable errcheck linter !2134
+- Fix Dockerfile issues reported by halolint !2106
+- Fix out-of-date test expectations !2012
+- Update entrypoint shebang for docker images !1780 (J0WI @J0WI)
+- Reduced layer count on Windows helper images !1777 (Alexander Kutelev @kutelev)
+- Update to alpine v3.12 !1763
+
+### Documentation changes
+
+- Docs: Updated note to add install from UI instructions !2264
+- update "screenshot" of running gitlab-runner without arguments. from version 1.0.0 to 13.0 !2262 (@mxschumacher @mxschumacher)
+- Session server listen on IPv4 and IPv6 !2260
+- Update documentation for helper image tags !2258
+- Synchronize lint rules !2254
+- Update custom executor docs with `step_*` !2253
+- Docs: Fixed git commands !2244 (Stefan Zehe @szehe)
+- Docs: Updated broken links !2240
+- Adjust metadata and move page !2235
+- Docs: fix broken external links !2234
+- Fix Debian container path and SSH port in the Autoscaling GitLab CI on AWS Fargate guide !2230
+- New config for Vale and markdownlint !2214
+- Note that Interactive Web terminal don't work with helm yet !2189 (Ben Bodenmiller @bbodenmiller)
+- Update doc for Autoscaling GitLab CI on AWS Fargate, adds troubleshooting section. !2188 ( Rob @rwd4)
+- Update Fargate Task connection info in autoscaling aws fargate doc !2181
+- Review Handbook page: /runner/configuration/tls-self-signed.html !2170
+- Add docs how to use k8s secrets for registration !2154
+- Update index.md to include documentation in for the `--access-level` param values !2137
+
+## v13.1.0 (2020-06-19)
+
+### New features
+
+- Fix file archiver message to include directories !2159
+- Use direct-download on a first attempt for artifacts !2115
+- Add full support for artifacts/exclude feature !2110
+- Add data format definition for build / artifacts / exclude !2105
+- Add support for `direct_download` artifacts !2093
+- Publish Windows 1909 helper image !2086
+- Support runner predefined variables inside overwrite variables kubernetes !2069
+- Add Centos8 and Ubuntu 19.10 & 20.04 packages !2002
+- Change default git fetch flags allowing user to overwrite them !2000 (Łukasz Groszkowski @falxcerebri)
+- Run any step from job response in a separate BuildSection !1963
+
+### Bug fixes
+
+- Fix missing logs from docker executor !2101
+- Fix automatically adding cache directory when cache disabled on register !2091 (Max Wittig @max-wittig)
+- Fix millicpu comparison for maxOverwrite !2019
+- Make commander start process group for each process !1743
+- Extract commander from custom executor !1654
+- Extract process killing from custom executor !1653
+
+### Maintenance
+
+- Increase allowed data races !2204
+- Fix test assertions for k8s integration tests !2171
+- Increase allowed data races !2164
+- Fix TestDockerCommandUsingCustomClonePath for Windows !2153
+- Rename network manager file for docker executor !2147
+- Enable staticcheck linter !2136
+- Update GitLab CI image to include git lfs !2124
+- Implement Is for *BuildError !2121
+- Update log message for failure of removing network for build !2119 (Max Wittig @max-wittig)
+- Change license management to use rules !2096
+- Use Docker client's ContainerWait !2073
+- Use taskkill windows !1797
+- Cleanup dependencies for alpine based docker image !1778 (J0WI @J0WI)
+
+### Documentation changes
+
+- Add all Vale rules from main GitLab project !2203
+- Docs: Fix distribution order !2200 (Martin @C0rn3j)
+- Update the register page to use the correct Docker registration commands - docs !2186
+- Sync spelling exceptions list from GitLab project !2184
+- Docs: fix broken links in Runner docs !2183
+- Remove reference to lack of arm64 Docker images !2178
+- Fix documentation toml examples with [[runners.machine.autoscaling]] !2177
+- Update GitLab Runner in a container documentation to prevent errors in using the Runner image - docs !2175
+- Docs: Edited runners.cache.s3 details !2167
+- Add example logs for `runner` and `json` log-format options - docs !2163
+- Adds workaround for env vars in config.toml !2156
+- Update redirected links !2152
+- Add Docker to capitalization rules !2146
+- Include MachineName and MachineDriver in autoscaling example !2140
+- Specify pull policy for kubernetes executor !2129
+- Improve Batch deprecated details !2128 (Ben Bodenmiller @bbodenmiller)
+- docs: Link to example of how to color PowerShell output !2127 (Ben Bodenmiller @bbodenmiller)
+- Docs: removed ubuntu from LXD instructions !2126
+- Refresh Vale rules !2125
+- Adds note about the image for AWS Fargate !2100
+- Add GDK to capitalization rules !2097
+- Docs: edited autoscaling period content !2094
+- Drop mention of 'OffPeakPeriods' from 'docs/faq/README.md' !2092
+- Skip build stages that have no operations !2081
+- Add vale plugin to recommended VS Code extensions !2078
+- AWS Fargate guide walkthrough !2075
+- Mark Prepare environment stage as system failure !1915
+- Expose Code coverage report artifact !1863
+- Send `SIGTERM` then `SIGKILL` to process in Shell executor !1770
+- Publish Windows 1903 helper image !1634
+
+### Other changes
+
+- Fix data race in TestNewReadLogsCommandFileLogStreamProviderCorrect !2193
+- Fix building of Windows helper image !2180
+- Rename ill-named script variable in release_docker_images !2173
+- Change alpine mirrors to default mirrors for arm/arm64 !2165
+- Skip flaky log processor test TestResumesFromCorrectSinceTimeAfterSuccessThenFailure !2151
+- Enable gocritic linter !2145
+- Return error from k8s `limits` function when parsing resource limits !2144
+- Upgrade golangci-lint to v1.27.0 !2139
+- Pass an explicit context path to docker build in `build_ci_image` !2133
+- Fix error when using attach strategy and ErrSkipBuildStage is returned when generating script !2123
+- Revert removal of Windows Batch support !2112
+- Do not log warning if trace update interval header value is empty !2103
+- Add retries for runner system failures in CI !2098
+- Remove `--kubernetes-services` command line flag !2074
+- More verbose logging for artifact uploading !2052 (Sashi @ksashikumar)
+- Fix file name typo !2049
+- Unify docker registry authentication in docker and kubernetes executors !2048
+- Improve kubernetes executor attach strategy command execution and handling by using a new read-logs command in the helper image !2038
+- Remove superfluous packages from ubuntu based docker image !1781 (J0WI @J0WI)
+
+## v13.0.1 (2020-06-01)
+
+### Bug fixes
+
+- Fix missing logs from docker executor !2101
+
+## v13.0.0 (2020-05-20)
+
+### Breaking Changes
+
+- Remove support for --docker-services flag on register command !2036
+- Remove fedora/29 package !1905 (Fábio Matavelli @fabiomatavelli)
+- Remove /debug/jobs/list?v=1 endpoint !1894 (Fábio Matavelli @fabiomatavelli)
+- Remove backported os.Expand() implementation !1892 (Fábio Matavelli @fabiomatavelli)
+- Remove FF_USE_LEGACY_VOLUMES_MOUNTING_ORDER feature flag !1889 (Fábio Matavelli @fabiomatavelli)
+- Remove macOS 32 bit support !2051
+- Remove support for Windows 1803 !2033
+- Remove legacy build directory caching in Docker Executor !2067
+- Remove support for array of strings when defining services for Docker Executor !2035
+
+### New features
+
+- Support more glob patterns for artifact/cache !1917
+- Add arm64 Docker images for gitlab/gitlab-runner !1861
+- Make docker machine configuration more elastic !1980
+- Add support for `direct_download` artifacts !2093
+
+### Bug fixes
+
+- Fix duplicate volume check with trailing slash !2050
+- Fix permissions of docker volumes created by Runner !2047
+- Fix removal of build volume when disable_cache set to true !2042
+- Fix err checks from volume manager !2034
 - Revert "Merge branch '4450-fix-container-wait' into 'master'" !2026
 
-## v12.10.0-rc1 (2020-04-10)
+### Maintenance
+
+- Retry Docker build jobs !2087
+- Update installation of mockery !2085
+- Fix Docker Auth config to be platform agnostic !2077
+- Refactor tests in builds_helper_test !2057
+- Enable unused linter !2043
+- Remove support for array of strings when defining services for Docker Executor !2035
+- Update assertion for Docker test !2031
+- Add tests for Docker config read when no username is specified !2024 (Andrii Zakharov @andriiz1)
+- Skip flaky TestDockerCommandRunAttempts until fix is merged !2017
+- Remove prealloc linter !2014
+- Pin CI jobs to gitlab-org runners !1979
+- Replace Code Climate with golangci-lint !1956
+- Change license management to use rules !2096
+
+### Documentation changes
+
+- Update capitalization configuration !2084
+- Update proxy.md documentation for grammar and clarity !2071 (Kade Cole @kadecole)
+- Add link to AWS Fargate documentation page !2070
+- Adds the link to new AWS Fargate page !2068
+- Add more Vale rules to project !2061
+- Remove tip alert box !2054
+- Added Kaniko reference materials to Runner helm charts page !2039
+- Sync Vale substitutions rules from GitLab project !2029
+- Update PowerShell documentation to include video and working example project. !2028
+- Handle situation where vale docs-lint error is overwritten by markdownlint success !2025
+- Update faq to include firewall troubleshooting !2023
+- Add recommended extensions for VS Code !2022
+- Move documentation linting to Makefile !2021
+- Add section about using TLS with custom CA in regular build scripts !2018
+- Sync Markdownlint settings from GitLab project !2015
+- Fixed helm search command !2007 (penguindustin @penguindustin)
+- Improve signals documentation and add a best practice for graceful shutdown !1988
+- Make docker machine configuration more elastic !1980
+- Autoscale GitLab Runner on AWS Fargate configuration doc !1914
+- Add details about how pull always is still fast and efficient !1885 (Ben Bodenmiller @bbodenmiller)
+- Correct documentation inaccuracies for `OffPeakPeriods` !1805 (Wes Cossick @wescossick)
+- Removed `CONTAINER_ID` in prepare.sh, so `CONTAINER_ID` in base.sh is used. !1723 (JUN JIE NAN @nanjj)
+
+## v12.10.0 (2020-04-21)
 
 ### New features
 
@@ -15,7 +285,6 @@
 ### Bug fixes
 
 - Add attempts to Docker executor for container not found !1995
-- Start watching container before starting !1990
 - Use Docker volumes instead of cache containers !1989
 - Use unique container names for Docker executor !1801
 

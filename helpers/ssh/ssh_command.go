@@ -123,13 +123,12 @@ func (s *Client) Exec(cmd string) error {
 	session.Stdout = s.Stdout
 	session.Stderr = s.Stderr
 	err = session.Run(cmd)
-	session.Close()
+	_ = session.Close()
 	return err
 }
 
 func (s *Command) fullCommand() string {
 	var arguments []string
-	// TODO: This method is compatible only with Bjourne compatible shells
 	for _, part := range s.Command {
 		arguments = append(arguments, helpers.ShellEscape(part))
 	}
@@ -145,7 +144,7 @@ func (s *Client) Run(ctx context.Context, cmd Command) error {
 	if err != nil {
 		return err
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	var envVariables bytes.Buffer
 	for _, keyValue := range cmd.Environment {
@@ -174,8 +173,8 @@ func (s *Client) Run(ctx context.Context, cmd Command) error {
 
 	select {
 	case <-ctx.Done():
-		session.Signal(ssh.SIGKILL)
-		session.Close()
+		_ = session.Signal(ssh.SIGKILL)
+		_ = session.Close()
 		return <-waitCh
 
 	case err := <-waitCh:
@@ -185,6 +184,6 @@ func (s *Client) Run(ctx context.Context, cmd Command) error {
 
 func (s *Client) Cleanup() {
 	if s.client != nil {
-		s.client.Close()
+		_ = s.client.Close()
 	}
 }

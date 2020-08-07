@@ -1,7 +1,7 @@
 package log
 
 import (
-	"github.com/ayufan/golang-kardianos-service"
+	service "github.com/ayufan/golang-kardianos-service"
 	"github.com/sirupsen/logrus"
 )
 
@@ -40,11 +40,11 @@ func (s *SystemServiceLogHook) Fire(entry *logrus.Entry) error {
 
 	switch entry.Level {
 	case logrus.PanicLevel, logrus.FatalLevel, logrus.ErrorLevel:
-		s.Error(msg)
+		return s.Error(msg)
 	case logrus.WarnLevel:
-		s.Warning(msg)
+		return s.Warning(msg)
 	case logrus.InfoLevel:
-		s.Info(msg)
+		return s.Info(msg)
 	}
 
 	return nil

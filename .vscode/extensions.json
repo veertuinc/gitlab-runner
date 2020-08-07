@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "ms-vscode.go",
+    "766b.go-outliner",
+    "bungcip.better-toml",
+    "davidanson.vscode-markdownlint",
+    "romanpeshkov.go-test-outline",
+    "testthedocs.vale",
+    "timonwong.shellcheck",
+  ]
+}

@@ -21,11 +21,12 @@ func (c *HealthCheckCommand) Execute(ctx *cli.Context) {
 	for _, e := range os.Environ() {
 		parts := strings.Split(e, "=")
 
-		if len(parts) != 2 {
+		switch {
+		case len(parts) != 2:
 			continue
-		} else if strings.HasSuffix(parts[0], "_TCP_ADDR") {
+		case strings.HasSuffix(parts[0], "_TCP_ADDR"):
 			addr = parts[1]
-		} else if strings.HasSuffix(parts[0], "_TCP_PORT") {
+		case strings.HasSuffix(parts[0], "_TCP_PORT"):
 			port = parts[1]
 		}
 	}
@@ -34,7 +35,7 @@ func (c *HealthCheckCommand) Execute(ctx *cli.Context) {
 		logrus.Fatalln("No HOST or PORT found")
 	}
 
-	fmt.Fprintf(os.Stdout, "waiting for TCP connection to %s:%s...", addr, port)
+	_, _ = fmt.Fprintf(os.Stdout, "waiting for TCP connection to %s:%s...", addr, port)
 
 	for {
 		conn, err := net.Dial("tcp", net.JoinHostPort(addr, port))
@@ -43,7 +44,7 @@ func (c *HealthCheckCommand) Execute(ctx *cli.Context) {
 			continue
 		}
 
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 }

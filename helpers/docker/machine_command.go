@@ -34,7 +34,7 @@ type logWriter struct {
 func (l *logWriter) write(line string) {
 	line = strings.TrimRight(line, "\n")
 
-	if len(line) <= 0 {
+	if line == "" {
 		return
 	}
 
@@ -42,19 +42,18 @@ func (l *logWriter) write(line string) {
 }
 
 func (l *logWriter) watch() {
-	for {
-		line, err := l.reader.ReadString('\n')
-		if err == nil || err == io.EOF {
-			l.write(line)
-			if err == io.EOF {
-				return
-			}
-		} else {
+	var err error
+	for err != io.EOF {
+		var line string
+		line, err = l.reader.ReadString('\n')
+		if err != nil && err != io.EOF {
 			if !strings.Contains(err.Error(), "bad file descriptor") {
 				logrus.WithError(err).Warn("Problem while reading command output")
 			}
 			return
 		}
+
+		l.write(line)
 	}
 }
 
@@ -266,10 +265,7 @@ func (m *machineCommand) canConnect(name string) bool {
 	cmd := newDockerMachineCommand("config", name)
 
 	err := cmd.Run()
-	if err == nil {
-		return true
-	}
-	return false
+	return err == nil
 }
 
 func (m *machineCommand) Credentials(name string) (dc Credentials, err error) {

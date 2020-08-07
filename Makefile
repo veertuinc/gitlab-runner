@@ -14,20 +14,20 @@ endif
 
 PACKAGE_CLOUD ?= ayufan/gitlab-ci-multi-runner
 PACKAGE_CLOUD_URL ?= https://packagecloud.io/
-BUILD_PLATFORMS ?= -os '!freebsd' -os '!windows' -os '!netbsd' -os '!openbsd' -arch '!mips' -arch '!mips64' -arch '!mipsle' -arch '!mips64le' -arch '!s390x'
-
+BUILD_ARCHS ?= -arch '386' -arch 'arm' -arch 'amd64' -arch 'arm64' -arch 's390x'
+BUILD_PLATFORMS ?= -osarch 'darwin/amd64' -os 'linux' -os '!freebsd' -os '!windows' ${BUILD_ARCHS}
 S3_UPLOAD_PATH ?= master
 
 # Keep in sync with docs/install/linux-repository.md
 DEB_PLATFORMS ?= debian/jessie debian/stretch debian/buster \
-    ubuntu/xenial ubuntu/bionic \
+    ubuntu/xenial ubuntu/bionic ubuntu/eoan ubuntu/focal \
     raspbian/jessie raspbian/stretch raspbian/buster \
     linuxmint/sarah linuxmint/serena linuxmint/sonya
-DEB_ARCHS ?= amd64 i386 armel armhf arm64 aarch64
-RPM_PLATFORMS ?= el/6 el/7 \
+DEB_ARCHS ?= amd64 i386 armel armhf arm64 aarch64 s390x
+RPM_PLATFORMS ?= el/6 el/7 el/8 \
     ol/6 ol/7 \
-    fedora/29 fedora/30
-RPM_ARCHS ?= x86_64 i686 arm armhf arm64 aarch64
+    fedora/30
+RPM_ARCHS ?= x86_64 i686 arm armhf arm64 aarch64 s390x
 
 PKG = gitlab.com/gitlab-org/gitlab-runner
 COMMON_PACKAGE_NAMESPACE=$(PKG)/common
@@ -49,7 +49,14 @@ export CGO_ENABLED ?= 0
 
 # Development Tools
 GOX = gox
-MOCKERY = mockery
+
+MOCKERY_VERSION ?= 1.1.0
+MOCKERY ?= .tmp/mockery-$(MOCKERY_VERSION)
+
+GOLANGLINT_VERSION ?= v1.27.0
+GOLANGLINT ?= .tmp/golangci-lint$(GOLANGLINT_VERSION)
+GOLANGLINT_GOARGS ?= .tmp/goargs.so
+
 DEVELOPMENT_TOOLS = $(GOX) $(MOCKERY)
 
 RELEASE_INDEX_GEN_VERSION ?= latest
@@ -57,36 +64,40 @@ RELEASE_INDEX_GENERATOR ?= .tmp/release-index-gen-$(RELEASE_INDEX_GEN_VERSION)
 GITLAB_CHANGELOG_VERSION ?= latest
 GITLAB_CHANGELOG = .tmp/gitlab-changelog-$(GITLAB_CHANGELOG_VERSION)
 
-.PHONY: clean version mocks
+.PHONY: all
+all: deps runner-and-helper-bin
 
-all: deps helper-docker build_all
-
+include Makefile.deprecation.mk
 include Makefile.runner_helper.mk
 include Makefile.build.mk
 include Makefile.package.mk
 
+.PHONY: help
 help:
 	# Commands:
-	# make all => deps build
+	# make all => install deps and build Runner binaries and Helper images
 	# make version - show information about current version
 	#
 	# Development commands:
 	# make development_setup - setup needed environment for tests
-	# make build_simple - build executable for your arch and OS
-	# make build_current - build executable for your arch and OS, including docker dependencies
-	# make helper-docker - build docker dependencies
+	# make runner-bin-host - build executable for your arch and OS
+	# make runner-and-helper-bin-host - build executable for your arch and OS, including docker dependencies
+	# make runner-and-helper-bin - build executable for all supported platforms, including docker dependencies
+	# make helper-dockerarchive - build Runner Helper docker dependencies for all supported platforms
 	#
 	# Testing commands:
 	# make test - run project tests
-	# make codequality - run code quality analysis
+	# make lint - run code quality analysis
+	# make lint-docs - run documentation linting
 	#
 	# Deployment commands:
 	# make deps - install all dependencies
-	# make build_all - build project for all supported OSes
+	# make runner-bin - build project for all supported platforms
 	# make package - package project using FPM
 	# make packagecloud - send all packages to packagecloud
 	# make packagecloud-yank - remove specific version from packagecloud
 
+.PHONY: version
 version:
 	@echo Current version: $(VERSION)
 	@echo Current revision: $(REVISION)
@@ -96,16 +107,24 @@ version:
 	@echo RPM platforms: $(RPM_PLATFORMS)
 	@echo IS_LATEST: $(IS_LATEST)
 
+.PHONY: deps
 deps: $(DEVELOPMENT_TOOLS)
 
-codequality:
-	./scripts/codequality analyze --dev
+.PHONY: lint
+lint: OUT_FORMAT ?= colored-line-number
+lint: LINT_FLAGS ?=
+lint: $(GOLANGLINT)
+	@$(GOLANGLINT) run ./... --out-format $(OUT_FORMAT) $(LINT_FLAGS)
 
+.PHONY: lint-docs
+lint-docs:
+	@scripts/lint-docs
 
 check_race_conditions:
 	@./scripts/check_race_conditions $(OUR_PACKAGES)
 
-test: helper-docker development_setup simple-test
+.PHONY: test
+test: helper-dockerarchive-host development_setup simple-test
 
 simple-test:
 	go test $(OUR_PACKAGES) $(TESTFLAGS)
@@ -133,18 +152,23 @@ pull_images_for_tests:
 dockerfiles:
 	$(MAKE) -C dockerfiles all
 
+.PHONY: mocks
 mocks: $(MOCKERY)
 	rm -rf ./helpers/service/mocks
 	find . -type f ! -path '*vendor/*' -name 'mock_*' -delete
-	mockery -dir=./vendor/github.com/ayufan/golang-kardianos-service -output=./helpers/service/mocks -name='(Interface)'
-	mockery -dir=./network -name='requester' -inpkg
-	mockery -dir=./helpers -all -inpkg
-	mockery -dir=./cache -all -inpkg
-	mockery -dir=./common -all -inpkg
-	mockery -dir=./log -all -inpkg
-	mockery -dir=./referees -all -inpkg
-	mockery -dir=./session -all -inpkg
-	mockery -dir=./shells -all -inpkg
+	$(MOCKERY) -dir=./vendor/github.com/ayufan/golang-kardianos-service -output=./helpers/service/mocks -name='(Interface)'
+	$(MOCKERY) -dir=./network -name='requester' -inpkg
+	$(MOCKERY) -dir=./helpers -all -inpkg
+	$(MOCKERY) -dir=./executors/docker -all -inpkg
+	$(MOCKERY) -dir=./executors/kubernetes -all -inpkg
+	$(MOCKERY) -dir=./executors/custom -all -inpkg
+	$(MOCKERY) -dir=./cache -all -inpkg
+	$(MOCKERY) -dir=./common -all -inpkg
+	$(MOCKERY) -dir=./log -all -inpkg
+	$(MOCKERY) -dir=./referees -all -inpkg
+	$(MOCKERY) -dir=./session -all -inpkg
+	$(MOCKERY) -dir=./shells -all -inpkg
+	$(MOCKERY) -dir=./commands/helpers -all -inpkg
 
 check_mocks:
 	# Checking if mocks are up-to-date
@@ -167,16 +191,21 @@ test-docker-image:
 	tests/test_installation.sh $(IMAGE) out/$(TYPE)/$(PACKAGE_NAME)_amd64.$(TYPE)
 	tests/test_installation.sh $(IMAGE) out/$(TYPE)/$(PACKAGE_NAME)_amd64.$(TYPE) Y
 
+build-and-deploy: ARCH ?= amd64
 build-and-deploy:
-	$(MAKE) build_all BUILD_PLATFORMS="-os=linux -arch=amd64"
-	$(MAKE) package-deb-fpm ARCH=amd64 PACKAGE_ARCH=amd64
-	scp out/deb/$(PACKAGE_NAME)_amd64.deb $(SERVER):
-	ssh $(SERVER) dpkg -i $(PACKAGE_NAME)_amd64.deb
+	$(MAKE) runner-and-helper-bin BUILD_PLATFORMS="-osarch=linux/$(ARCH)"
+	$(MAKE) package-deb-arch ARCH=$(ARCH) PACKAGE_ARCH=$(ARCH)
+	@[ -z "$(SERVER)" ] && echo "SERVER variable not specified!" && exit 1
+	scp out/deb/$(PACKAGE_NAME)_$(ARCH).deb $(SERVER):
+	ssh $(SERVER) dpkg -i $(PACKAGE_NAME)_$(ARCH).deb
 
+build-and-deploy-binary: ARCH ?= amd64
 build-and-deploy-binary:
-	$(MAKE) build_all BUILD_PLATFORMS="-os=linux -arch=amd64"
-	scp out/binaries/$(PACKAGE_NAME)-linux-amd64 $(SERVER):/usr/bin/gitlab-runner
+	$(MAKE) runner-bin BUILD_PLATFORMS="-osarch=linux/$(ARCH)"
+	@[ -z "$(SERVER)" ] && echo "SERVER variable not specified!" && exit 1
+	scp out/binaries/$(PACKAGE_NAME)-linux-$(ARCH) $(SERVER):/usr/bin/anka-gitlab-runner
 
+.PHONY: packagecloud
 packagecloud: packagecloud-deps packagecloud-deb packagecloud-rpm
 
 packagecloud-deps:
@@ -232,35 +261,29 @@ release_s3: copy_helper_binaries prepare_windows_zip prepare_zoneinfo prepare_in
 	# Releasing to S3
 	@./ci/release_s3
 
-out/binaries/gitlab-runner-windows-%.zip: out/binaries/gitlab-runner-windows-%.exe
+out/binaries/gitlab-runner-windows-%.zip: out/binaries/anka-gitlab-runner-windows-%.exe
 	zip --junk-paths $@ $<
 	cd out/ && zip -r ../$@ helper-images
 
-prepare_windows_zip: out/binaries/gitlab-runner-windows-386.zip out/binaries/gitlab-runner-windows-amd64.zip
+prepare_windows_zip: out/binaries/anka-gitlab-runner-windows-386.zip out/binaries/anka-gitlab-runner-windows-amd64.zip
 
 prepare_zoneinfo:
 	# preparing the zoneinfo file
 	@cp $$GOROOT/lib/time/zoneinfo.zip out/
-
-copy_helper_binaries:
-	# copying helper binaries
-	@mkdir -p out/binaries/gitlab-runner-helper
-	@cp dockerfiles/build/binaries/gitlab-runner-helper* out/binaries/gitlab-runner-helper/
 
 prepare_index: export CI_COMMIT_REF_NAME ?= $(BRANCH)
 prepare_index: export CI_COMMIT_SHA ?= $(REVISION)
 prepare_index: $(RELEASE_INDEX_GENERATOR)
 	# Preparing index file
 	@$(RELEASE_INDEX_GENERATOR) -working-directory out/ \
-						      -project-version $(VERSION) \
-						      -project-git-ref $(CI_COMMIT_REF_NAME) \
-						      -project-git-revision $(CI_COMMIT_SHA) \
-						      -project-name "GitLab Runner" \
-						      -project-repo-url "https://gitlab.com/gitlab-org/gitlab-runner" \
-						      -gpg-key-env GPG_KEY \
-						      -gpg-password-env GPG_PASSPHRASE
+								-project-version $(VERSION) \
+								-project-git-ref $(CI_COMMIT_REF_NAME) \
+								-project-git-revision $(CI_COMMIT_SHA) \
+								-project-name "GitLab Runner" \
+								-project-repo-url "https://gitlab.com/gitlab-org/gitlab-runner" \
+								-gpg-key-env GPG_KEY \
+								-gpg-password-env GPG_PASSPHRASE
 
-release_docker_images: export RUNNER_BINARY := out/binaries/gitlab-runner-linux-amd64
 release_docker_images:
 	# Releasing Docker images
 	@./ci/release_docker_images
@@ -307,8 +330,35 @@ check_modules:
 $(GOX):
 	go get github.com/mitchellh/gox
 
+$(GOLANGLINT): TOOL_BUILD_DIR := .tmp/build/golangci-lint
+$(GOLANGLINT): $(GOLANGLINT_GOARGS)
+	rm -rf $(TOOL_BUILD_DIR)
+	git clone https://github.com/golangci/golangci-lint.git --no-tags --depth 1 -b "$(GOLANGLINT_VERSION)" $(TOOL_BUILD_DIR) && \
+	cd $(TOOL_BUILD_DIR) && \
+	export COMMIT=$(shell git rev-parse --short HEAD) && \
+	export DATE=$(shell date -u '+%FT%TZ') && \
+	CGO_ENABLED=1 go build -o $(BUILD_DIR)/$(GOLANGLINT) \
+		-ldflags "-s -w -X main.version=$(GOLANGLINT_VERSION) -X main.commit=$${COMMIT} -X main.date=$${DATE}" \
+		./cmd/golangci-lint/ && \
+	cd $(BUILD_DIR) && \
+	rm -rf $(TOOL_BUILD_DIR) && \
+	$(GOLANGLINT) --version
+
+$(GOLANGLINT_GOARGS): TOOL_BUILD_DIR := .tmp/build/goargs
+$(GOLANGLINT_GOARGS):
+	rm -rf $(TOOL_BUILD_DIR)
+	git clone https://gitlab.com/gitlab-org/language-tools/go/linters/goargs.git --no-tags --depth 1 $(TOOL_BUILD_DIR)
+	cd $(TOOL_BUILD_DIR) && \
+	CGO_ENABLED=1 go build -buildmode=plugin -o $(BUILD_DIR)/$(GOLANGLINT_GOARGS) plugin/analyzer.go
+	rm -rf $(TOOL_BUILD_DIR)
+
+$(MOCKERY): OS_TYPE ?= $(shell uname -s)
+$(MOCKERY): DOWNLOAD_URL = "https://github.com/vektra/mockery/releases/download/v$(MOCKERY_VERSION)/mockery_$(MOCKERY_VERSION)_$(OS_TYPE)_x86_64.tar.gz"
 $(MOCKERY):
-	go get github.com/vektra/mockery/cmd/mockery
+	# Installing $(DOWNLOAD_URL) as $(MOCKERY)
+	@mkdir -p $(shell dirname $(MOCKERY))
+	@curl -sL "$(DOWNLOAD_URL)" | tar xz -O mockery > $(MOCKERY)
+	@chmod +x "$(MOCKERY)"
 
 $(RELEASE_INDEX_GENERATOR): OS_TYPE ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
 $(RELEASE_INDEX_GENERATOR): DOWNLOAD_URL = "https://storage.googleapis.com/gitlab-runner-tools/release-index-generator/$(RELEASE_INDEX_GEN_VERSION)/release-index-gen-$(OS_TYPE)-amd64"
@@ -326,5 +376,6 @@ $(GITLAB_CHANGELOG):
 	@curl -sL "$(DOWNLOAD_URL)" -o "$(GITLAB_CHANGELOG)"
 	@chmod +x "$(GITLAB_CHANGELOG)"
 
+.PHONY: clean
 clean:
 	-$(RM) -rf $(TARGET_DIR)

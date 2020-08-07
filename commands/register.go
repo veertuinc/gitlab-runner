@@ -61,6 +61,7 @@ func (c *configTemplate) loadConfigTemplate() error {
 	return nil
 }
 
+//nolint:lll
 type RegisterCommand struct {
 	context    *cli.Context
 	network    common.Network
@@ -296,36 +297,38 @@ func (s *RegisterCommand) askRunner() {
 		if !s.network.VerifyRunner(s.RunnerCredentials) {
 			logrus.Panicln("Failed to verify this runner. Perhaps you are having network problems")
 		}
-	} else {
-		// we store registration token as token, since we pass that to RunnerCredentials
-		s.Token = s.ask("registration-token", "Please enter the gitlab-ci token for this runner:")
-		s.Name = s.ask("name", "Please enter the name for this runner (you'll use this to unregister):")
-		s.TagList = s.ask("tag-list", "Please enter the gitlab-ci tags for this runner (comma separated):", true)
-
-		if s.TagList == "" {
-			s.RunUntagged = true
-		}
-
-		parameters := common.RegisterRunnerParameters{
-			Description:    s.Name,
-			Tags:           s.TagList,
-			Locked:         s.Locked,
-			AccessLevel:    s.AccessLevel,
-			RunUntagged:    s.RunUntagged,
-			MaximumTimeout: s.MaximumTimeout,
-			Active:         !s.Paused,
-		}
-
-		result := s.network.RegisterRunner(s.RunnerCredentials, parameters)
-		if result == nil {
-			logrus.Panicln("Failed to register this runner. Perhaps you are having network problems")
-		}
-
-		s.Token = result.Token
-		s.registered = true
+		return
 	}
+
+	// we store registration token as token, since we pass that to RunnerCredentials
+	s.Token = s.ask("registration-token", "Please enter the gitlab-ci token for this runner:")
+	s.Name = s.ask("name", "Please enter the gitlab-ci description for this runner:")
+	s.TagList = s.ask("tag-list", "Please enter the gitlab-ci tags for this runner (comma separated):", true)
+
+	if s.TagList == "" {
+		s.RunUntagged = true
+	}
+
+	parameters := common.RegisterRunnerParameters{
+		Description:    s.Name,
+		Tags:           s.TagList,
+		Locked:         s.Locked,
+		AccessLevel:    s.AccessLevel,
+		RunUntagged:    s.RunUntagged,
+		MaximumTimeout: s.MaximumTimeout,
+		Active:         !s.Paused,
+	}
+
+	result := s.network.RegisterRunner(s.RunnerCredentials, parameters)
+	if result == nil {
+		logrus.Panicln("Failed to register this runner. Perhaps you are having network problems")
+	}
+
+	s.Token = result.Token
+	s.registered = true
 }
 
+//nolint:funlen
 func (s *RegisterCommand) askExecutorOptions() {
 
 	ssh := s.SSH
@@ -421,30 +424,16 @@ func (s *RegisterCommand) Execute(context *cli.Context) {
 	s.askRunner()
 
 	if !s.LeaveRunner {
-		defer func() {
-			// De-register runner on panic
-			if r := recover(); r != nil {
-				if s.registered {
-					s.network.UnregisterRunner(s.RunnerCredentials)
-				}
-
-				// pass panic to next defer
-				panic(r)
-			}
-		}()
-
-		signals := make(chan os.Signal, 1)
-		signal.Notify(signals, os.Interrupt)
-
-		go func() {
-			signal := <-signals
-			s.network.UnregisterRunner(s.RunnerCredentials)
-			logrus.Fatalf("RECEIVED SIGNAL: %v", signal)
-		}()
+		defer s.unregisterRunner()()
 	}
 
 	if s.config.Concurrent < s.Limit {
-		logrus.Warningf("Specified limit (%d) larger then current concurrent limit (%d). Concurrent limit will not be enlarged.", s.Limit, s.config.Concurrent)
+		logrus.Warningf(
+			"Specified limit (%d) larger then current concurrent limit (%d). "+
+				"Concurrent limit will not be enlarged.",
+			s.Limit,
+			s.config.Concurrent,
+		)
 	}
 
 	s.askExecutor()
@@ -462,6 +451,30 @@ func (s *RegisterCommand) Execute(context *cli.Context) {
 
 	logrus.Println("Updated: ", s.ConfigFile)
 	logrus.Printf("Feel free to start %v, but if it's running already the config should be automatically reloaded!", common.NAME)
+
+}
+
+func (s *RegisterCommand) unregisterRunner() func() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+
+	go func() {
+		signal := <-signals
+		s.network.UnregisterRunner(s.RunnerCredentials)
+		logrus.Fatalf("RECEIVED SIGNAL: %v", signal)
+	}()
+
+	return func() {
+		// De-register runner on panic
+		if r := recover(); r != nil {
+			if s.registered {
+				s.network.UnregisterRunner(s.RunnerCredentials)
+			}
+
+			// pass panic to next defer
+			panic(r)
+		}
+	}
 }
 
 // TODO: Remove in 13.0 https://gitlab.com/gitlab-org/gitlab-runner/issues/6404

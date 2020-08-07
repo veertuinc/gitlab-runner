@@ -31,7 +31,7 @@ func NewBuilder(logger logrus.FieldLogger) Builder {
 
 	return &defaultBuilder{
 		certificates:     make([]*x509.Certificate, 0),
-		seenCertificates: make(map[string]bool, 0),
+		seenCertificates: make(map[string]bool),
 		resolver: newChainResolver(
 			newURLResolver(logger),
 			newVerifyResolver(logger),
@@ -51,8 +51,8 @@ type defaultBuilder struct {
 	logger logrus.FieldLogger
 }
 
-func (b *defaultBuilder) BuildChainFromTLSConnectionState(TLS *tls.ConnectionState) error {
-	for _, verifiedChain := range TLS.VerifiedChains {
+func (b *defaultBuilder) BuildChainFromTLSConnectionState(tls *tls.ConnectionState) error {
+	for _, verifiedChain := range tls.VerifiedChains {
 		b.logger.
 			WithField("chain-leaf", fmt.Sprintf("%v", verifiedChain)).
 			Debug("Processing chain")

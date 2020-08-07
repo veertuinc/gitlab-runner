@@ -22,18 +22,27 @@ const (
 
 type testNetwork struct {
 	common.MockNetwork
-	downloadState  common.DownloadState
-	downloadCalled int
-	uploadState    common.UploadState
-	uploadCalled   int
-	uploadFormat   common.ArtifactFormat
-	uploadName     string
-	uploadType     string
-	uploadedFiles  []string
+	downloadState        common.DownloadState
+	downloadCalled       int
+	directDownloadCalled int
+	uploadState          common.UploadState
+	uploadCalled         int
+	uploadFormat         common.ArtifactFormat
+	uploadName           string
+	uploadType           string
+	uploadedFiles        []string
 }
 
-func (m *testNetwork) DownloadArtifacts(config common.JobCredentials, artifactsFile string) common.DownloadState {
+func (m *testNetwork) DownloadArtifacts(
+	config common.JobCredentials,
+	artifactsFile string,
+	directDownload *bool,
+) common.DownloadState {
 	m.downloadCalled++
+
+	if directDownload != nil && *directDownload {
+		m.directDownloadCalled++
+	}
 
 	if m.downloadState == common.DownloadSucceeded {
 		file, err := os.Create(artifactsFile)
@@ -44,15 +53,15 @@ func (m *testNetwork) DownloadArtifacts(config common.JobCredentials, artifactsF
 		defer file.Close()
 
 		archive := zip.NewWriter(file)
-		archive.Create(artifactsTestArchivedFile)
+		_, _ = archive.Create(artifactsTestArchivedFile)
 		archive.Close()
 	}
 	return m.downloadState
 }
 
-func (m *testNetwork) consumeZipUpload(config common.JobCredentials, reader io.Reader, options common.ArtifactsOptions) common.UploadState {
+func (m *testNetwork) consumeZipUpload(reader io.Reader) common.UploadState {
 	var buffer bytes.Buffer
-	io.Copy(&buffer, reader)
+	_, _ = io.Copy(&buffer, reader)
 	archive, err := zip.NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
 	if err != nil {
 		logrus.Warningln(err)
@@ -68,9 +77,9 @@ func (m *testNetwork) consumeZipUpload(config common.JobCredentials, reader io.R
 	return m.uploadState
 }
 
-func (m *testNetwork) consumeGzipUpload(config common.JobCredentials, reader io.Reader, options common.ArtifactsOptions) common.UploadState {
+func (m *testNetwork) consumeGzipUpload(reader io.Reader) common.UploadState {
 	var buffer bytes.Buffer
-	io.Copy(&buffer, reader)
+	_, _ = io.Copy(&buffer, reader)
 
 	stream := bytes.NewReader(buffer.Bytes())
 
@@ -102,15 +111,19 @@ func (m *testNetwork) consumeGzipUpload(config common.JobCredentials, reader io.
 	return m.uploadState
 }
 
-func (m *testNetwork) consumeRawUpload(config common.JobCredentials, reader io.Reader, options common.ArtifactsOptions) common.UploadState {
-	io.Copy(ioutil.Discard, reader)
+func (m *testNetwork) consumeRawUpload(reader io.Reader) common.UploadState {
+	_, _ = io.Copy(ioutil.Discard, reader)
 
 	m.uploadedFiles = append(m.uploadedFiles, "raw")
 	m.uploadFormat = common.ArtifactFormatRaw
 	return m.uploadState
 }
 
-func (m *testNetwork) UploadRawArtifacts(config common.JobCredentials, reader io.Reader, options common.ArtifactsOptions) common.UploadState {
+func (m *testNetwork) UploadRawArtifacts(
+	config common.JobCredentials,
+	reader io.Reader,
+	options common.ArtifactsOptions,
+) common.UploadState {
 	m.uploadCalled++
 
 	if m.uploadState == common.UploadSucceeded {
@@ -119,13 +132,13 @@ func (m *testNetwork) UploadRawArtifacts(config common.JobCredentials, reader io
 
 		switch options.Format {
 		case common.ArtifactFormatZip, common.ArtifactFormatDefault:
-			return m.consumeZipUpload(config, reader, options)
+			return m.consumeZipUpload(reader)
 
 		case common.ArtifactFormatGzip:
-			return m.consumeGzipUpload(config, reader, options)
+			return m.consumeGzipUpload(reader)
 
 		case common.ArtifactFormatRaw:
-			return m.consumeRawUpload(config, reader, options)
+			return m.consumeRawUpload(reader)
 
 		default:
 			return common.UploadForbidden

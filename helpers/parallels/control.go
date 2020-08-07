@@ -73,10 +73,9 @@ func Version() (string, error) {
 	}
 
 	versionRe := regexp.MustCompile(`prlctl version (\d+\.\d+.\d+)`)
-	matches := versionRe.FindStringSubmatch(string(out))
+	matches := versionRe.FindStringSubmatch(out)
 	if matches == nil {
-		return "", fmt.Errorf(
-			"could not find Parallels Desktop version in output:\n%s", string(out))
+		return "", fmt.Errorf("could not find Parallels Desktop version in output:\n%s", out)
 	}
 
 	version := matches[1]
@@ -86,10 +85,7 @@ func Version() (string, error) {
 
 func Exist(name string) bool {
 	err := Prlctl("list", name, "--no-header", "--output", "status")
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func CreateTemplate(vmName, templateName string) error {
@@ -231,7 +227,7 @@ func IPAddress(mac string) (string, error) {
 		}
 	}
 
-	if len(mostRecentIP) == 0 {
+	if mostRecentIP == "" {
 		return "", fmt.Errorf("IP lease not found for MAC address %s in: %s", mac, dhcpLeases)
 	}
 
