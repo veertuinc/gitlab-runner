@@ -5,7 +5,7 @@ VERSION=$(cat $ROOT_DIR/VERSION | cut -d/ -f2)
 cd $ROOT_DIR
 # Build binaries
 echo "Building binaries..."
-make build_all
+make runner-bin
 # Create dockerfile
 for arch in amd64 386; do
   cd $ROOT_DIR
