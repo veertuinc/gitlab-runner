@@ -168,7 +168,10 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 	retryLimit := 6
 	for tries := 0; tries <= retryLimit; tries++ {
 		var response *http.Response
-		fmt.Printf("Retries thus far: %v\n", tries)
+		if tries > 0 {
+			time.Sleep(time.Duration(10*tries) * time.Second)
+		}
+		fmt.Printf("doRequest retries: %v\n", tries)
 		response, err = client.Do(req)
 		if err != nil {
 			fmt.Printf("client.Do(req) %v\n", err)
@@ -180,7 +183,6 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 				break
 			} else {
 				fmt.Printf("something caused the controller to return nill... retrying until we get a valid retry...")
-				time.Sleep(time.Duration(10*tries) * time.Second)
 				continue
 			}
 		}

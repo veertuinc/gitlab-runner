@@ -606,8 +606,9 @@ func (b *Build) retryCreateExecutor(options ExecutorPrepareOptions, provider Exe
 		if (tries + 1) <= Retries {
 			logger.SoftErrorln("Preparation failed:", err)
 			logger.Infoln("-------------------")
-			logger.Infoln("Will be retried in", PreparationRetryInterval, " seconds...")
-			time.Sleep(PreparationRetryInterval)
+			secondsToSleep := PreparationRetryInterval * (tries + 1) // Exponential
+			logger.Infoln("Will be retried in", secondsToSleep, "seconds...")
+			time.Sleep(time.Duration(secondsToSleep) * time.Second)
 		}
 	}
 

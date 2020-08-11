@@ -12,7 +12,7 @@ const HealthCheckInterval = 3600
 const DefaultWaitForServicesTimeout = 30
 const ShutdownTimeout = 30
 
-var PreparationRetries = 2
+var PreparationRetries = 0
 
 const DefaultGetSourcesAttempts = 1
 const DefaultArtifactDownloadAttempts = 1
@@ -32,10 +32,10 @@ const (
 	DefaultTracePatchLimit     = 1024 * 1024     // in bytes
 	DefaultTraceUpdateInterval = 3 * time.Second
 	TraceFinishRetryInterval   = 3 * time.Second
-	TraceForceSendInterval     = 30 * time.Second
+	TraceForceSendInterval     = 10 * time.Second
 )
 
-var PreparationRetryInterval = 3 * time.Second
+var PreparationRetryInterval = 10
 
 const (
 	TestAlpineImage       = "alpine:3.12.0"

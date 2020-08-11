@@ -124,6 +124,7 @@ func TestBuildRunNoModifyConfig(t *testing.T) {
 }
 
 func TestRetryPrepare(t *testing.T) {
+	PreparationRetries = 2
 	PreparationRetryInterval = 0
 
 	e := MockExecutor{}
@@ -157,6 +158,7 @@ func TestRetryPrepare(t *testing.T) {
 }
 
 func TestPrepareFailure(t *testing.T) {
+	PreparationRetries = 2
 	PreparationRetryInterval = 0
 
 	e := MockExecutor{}

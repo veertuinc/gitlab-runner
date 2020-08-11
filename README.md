@@ -82,7 +82,7 @@ export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME
 ```
 
 ```bash
-rm -f ./out/binaries/anka-gitlab-runner; make build_simple && \
+rm -f ./out/binaries/anka-gitlab-runner; make runner-bin-host && \
 ./out/binaries/anka-gitlab-runner stop && \
 $(./out/binaries/anka-gitlab-runner unregister -n "localhost shared runner" || true) && \
 ./out/binaries/anka-gitlab-runner register --non-interactive \
@@ -178,6 +178,7 @@ Changes we made from the offical gitlab-runner repo:
   - `common/const.go`
       - PreparationRetries = 2
       - const PreparationRetries -> var so tests can change it
+      - shortened TraceForceSendInterval for when users cancel jobs in the UI (30 seconds is too long)
   - `VERSION`
       - Added {gitlab runner version}/{anka executor version}
   - `ci/version`

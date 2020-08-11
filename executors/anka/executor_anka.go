@@ -21,8 +21,8 @@ type executor struct {
 }
 
 func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
-
 	s.Debugln("Prepare Anka executor")
+
 	err := s.AbstractExecutor.Prepare(options)
 	if err != nil {
 		return err
@@ -71,9 +71,15 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	s.Println("Please be patient...")
 	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
 
-	// TODO Cancelling the job at this point fails to terminate the scheduling instance
+	// Handle canceled jobs in the UI
+	done := false
+	go func() {
+		doneChannel := s.Context.Done()
+		<-doneChannel
+		done = true
+	}()
 
-	connectInfo, err := s.connector.StartInstance(s.Config.Anka)
+	connectInfo, err := s.connector.StartInstance(s.Config.Anka, &done)
 	if err != nil {
 		return err
 	}

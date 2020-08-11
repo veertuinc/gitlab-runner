@@ -401,7 +401,7 @@ func (n *GitLabClient) UpdateJob(
 		log.Debugln("Submitting job to coordinator...", "ok")
 		return common.UpdateSucceeded
 	case result == http.StatusNotFound:
-		log.Warningln("Submitting job to coordinator...", "aborted")
+		log.Warningln("Submitting job to coordinator...", "aborted (status not found)")
 		return common.UpdateAbort
 	case result == http.StatusForbidden:
 		log.WithField("status", statusText).Errorln("Submitting job to coordinator...", "forbidden")
