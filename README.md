@@ -187,6 +187,3 @@ Changes we made from the offical gitlab-runner repo:
       - Script for building, tagging, and pushing to veertu/ dockerhub
 
 > **`executor/ssh.go` must stay as an available executor**
-
-## TO-DO
-- Handle user cancellation. Sometimes it leaves instances in a "Terminated" state and keeps waiting for the IP to be returned from the controller API.
