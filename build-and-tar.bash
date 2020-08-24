@@ -11,8 +11,8 @@ for arch in linux-amd64 linux-386 darwin-amd64; do
   cp $ROOT_DIR/out/binaries/anka-gitlab-runner-$arch $ROOT_DIR/out/archived_binaries/
   pushd $ROOT_DIR/out/archived_binaries
   echo "Creating tar.gz for $arch binary..."
-  rm -f anka-gitlab-runner-$arch.tar.gz
-  tar -czvf anka-gitlab-runner-$arch.tar.gz anka-gitlab-runner-$arch
+  rm -f anka-gitlab-runner-$VERSION-$arch.tar.gz
+  tar -czvf anka-gitlab-runner-$VERSION-$arch.tar.gz anka-gitlab-runner-$arch
   rm -f anka-gitlab-runner-$arch
   popd
 done
