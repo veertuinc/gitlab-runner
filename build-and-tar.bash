@@ -5,11 +5,7 @@ VERSION=$(cat $ROOT_DIR/VERSION | cut -d/ -f2)
 cd $ROOT_DIR
 # Build binaries
 echo "Building binaries..."
-<<<<<<< HEAD
-# make runner-bin
-=======
 make runner-bin
->>>>>>> e4f9095daf6e8574ae01bac7188917f1a458f77b
 for arch in linux-amd64 linux-386 darwin-amd64; do
   mkdir -p $ROOT_DIR/out/archived_binaries
   cp $ROOT_DIR/out/binaries/anka-gitlab-runner-$arch $ROOT_DIR/out/archived_binaries/
