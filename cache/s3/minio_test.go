@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/minio/minio-go"
-	"github.com/minio/minio-go/pkg/credentials"
+	"github.com/minio/minio-go/v6"
+	"github.com/minio/minio-go/v6/pkg/credentials"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -176,24 +176,25 @@ func runOnFakeMinio(t *testing.T, test minioClientInitializationTest) func() {
 
 func runOnFakeMinioWithCredentials(t *testing.T, test minioClientInitializationTest) func() {
 	oldNewMinioWithCredentials := newMinioWithCredentials
-	newMinioWithCredentials = func(endpoint string, creds *credentials.Credentials, secure bool, region string) (*minio.Client, error) {
-		if !test.expectedToUseIAM {
-			t.Error("Should not use minio with IAM client initializator")
+	newMinioWithCredentials =
+		func(endpoint string, creds *credentials.Credentials, secure bool, region string) (*minio.Client, error) {
+			if !test.expectedToUseIAM {
+				t.Error("Should not use minio with IAM client initializator")
+			}
+
+			if test.errorOnInitialization {
+				return nil, errors.New("test error")
+			}
+
+			assert.Equal(t, "s3.amazonaws.com", endpoint)
+			assert.True(t, secure)
+			assert.Empty(t, region)
+
+			client, err := minio.NewWithCredentials(endpoint, creds, secure, region)
+			require.NoError(t, err)
+
+			return client, nil
 		}
-
-		if test.errorOnInitialization {
-			return nil, errors.New("test error")
-		}
-
-		assert.Equal(t, "s3.amazonaws.com", endpoint)
-		assert.True(t, secure)
-		assert.Empty(t, region)
-
-		client, err := minio.NewWithCredentials(endpoint, creds, secure, region)
-		require.NoError(t, err)
-
-		return client, nil
-	}
 
 	return func() {
 		newMinioWithCredentials = oldNewMinioWithCredentials

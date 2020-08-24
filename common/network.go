@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/url"
+	url_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/url"
 )
 
 type UpdateState int
@@ -22,7 +23,6 @@ const (
 )
 
 const (
-	NoneFailure         JobFailureReason = ""
 	ScriptFailure       JobFailureReason = "script_failure"
 	RunnerSystemFailure JobFailureReason = "runner_system_failure"
 	JobExecutionTimeout JobFailureReason = "job_execution_timeout"
@@ -41,6 +41,7 @@ const (
 	UploadTooLarge
 	UploadForbidden
 	UploadFailed
+	UploadServiceUnavailable
 )
 
 const (
@@ -64,6 +65,9 @@ type FeaturesInfo struct {
 	Refspecs                bool `json:"refspecs"`
 	Masking                 bool `json:"masking"`
 	Proxy                   bool `json:"proxy"`
+	RawVariables            bool `json:"raw_variables"`
+	ArtifactsExclude        bool `json:"artifacts_exclude"`
+	MultiBuildSteps         bool `json:"multi_build_steps"`
 }
 
 type RegisterRunnerParameters struct {
@@ -200,6 +204,8 @@ type Services []Image
 
 type ArtifactPaths []string
 
+type ArtifactExclude []string
+
 type ArtifactWhen string
 
 const (
@@ -226,13 +232,14 @@ const (
 )
 
 type Artifact struct {
-	Name      string         `json:"name"`
-	Untracked bool           `json:"untracked"`
-	Paths     ArtifactPaths  `json:"paths"`
-	When      ArtifactWhen   `json:"when"`
-	Type      string         `json:"artifact_type"`
-	Format    ArtifactFormat `json:"artifact_format"`
-	ExpireIn  string         `json:"expire_in"`
+	Name      string          `json:"name"`
+	Untracked bool            `json:"untracked"`
+	Paths     ArtifactPaths   `json:"paths"`
+	Exclude   ArtifactExclude `json:"exclude"`
+	When      ArtifactWhen    `json:"when"`
+	Type      string          `json:"artifact_type"`
+	Format    ArtifactFormat  `json:"artifact_format"`
+	ExpireIn  string          `json:"expire_in"`
 }
 
 type Artifacts []Artifact
@@ -252,7 +259,7 @@ func (c Cache) CheckPolicy(wanted CachePolicy) (bool, error) {
 		return wanted == c.Policy, nil
 	}
 
-	return false, fmt.Errorf("Unknown cache policy %s", c.Policy)
+	return false, fmt.Errorf("unknown cache policy %s", c.Policy)
 }
 
 type Caches []Cache
@@ -315,6 +322,7 @@ type UpdateJobRequest struct {
 	FailureReason JobFailureReason `json:"failure_reason,omitempty"`
 }
 
+//nolint:lll
 type JobCredentials struct {
 	ID          int    `long:"id" env:"CI_JOB_ID" description:"The build ID to upload artifacts for"`
 	Token       string `long:"token" env:"CI_JOB_TOKEN" required:"true" description:"Build token"`
@@ -366,10 +374,25 @@ type JobTrace interface {
 	Success()
 	Fail(err error, failureReason JobFailureReason)
 	SetCancelFunc(cancelFunc context.CancelFunc)
+	Cancel() bool
 	SetFailuresCollector(fc FailuresCollector)
 	SetMasked(values []string)
 	IsStdout() bool
-	IsJobSuccesFull() bool
+	IsJobSuccessful() bool
+}
+
+type PatchTraceResult struct {
+	SentOffset        int
+	State             UpdateState
+	NewUpdateInterval time.Duration
+}
+
+func NewPatchTraceResult(sentOffset int, state UpdateState, newUpdateInterval int) PatchTraceResult {
+	return PatchTraceResult{
+		SentOffset:        sentOffset,
+		State:             state,
+		NewUpdateInterval: time.Duration(newUpdateInterval) * time.Second,
+	}
 }
 
 type Network interface {
@@ -378,8 +401,8 @@ type Network interface {
 	UnregisterRunner(config RunnerCredentials) bool
 	RequestJob(config RunnerConfig, sessionInfo *SessionInfo) (*JobResponse, bool)
 	UpdateJob(config RunnerConfig, jobCredentials *JobCredentials, jobInfo UpdateJobInfo) UpdateState
-	PatchTrace(config RunnerConfig, jobCredentials *JobCredentials, content []byte, startOffset int) (int, UpdateState)
-	DownloadArtifacts(config JobCredentials, artifactsFile string) DownloadState
+	PatchTrace(config RunnerConfig, jobCredentials *JobCredentials, content []byte, startOffset int) PatchTraceResult
+	DownloadArtifacts(config JobCredentials, artifactsFile string, directDownload *bool) DownloadState
 	UploadRawArtifacts(config JobCredentials, reader io.Reader, options ArtifactsOptions) UploadState
 	ProcessJob(config RunnerConfig, buildCredentials *JobCredentials) (JobTrace, error)
 }

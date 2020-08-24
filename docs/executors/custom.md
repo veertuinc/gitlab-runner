@@ -1,6 +1,6 @@
 # The Custom executor
 
-> [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/issues/2885) in GitLab Runner 12.1
+> [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/2885) in GitLab Runner 12.1
 
 GitLab Runner provides the Custom executor for environments that it
 doesn't support natively, for example, Podman or Libvirt.
@@ -9,16 +9,18 @@ This gives you the control to create your own executor by configuring
 GitLab Runner to use some executable to provision, run, and clean up
 your environment.
 
+The scripts you configure for the custom executor are called `Drivers`.
+For example, you could create a Podman driver, an [LXD
+driver](custom_examples/lxd.md) or a [Libvirt
+driver](custom_examples/libvirt.md).
+
 ## Limitations
 
 Below are some current limitations when using the Custom executor:
 
-- No support for [`image`](https://docs.gitlab.com/ee/ci/yaml/#image).
-  See [#4357](https://gitlab.com/gitlab-org/gitlab-runner/issues/4357)
-  for more details.
 - No support for
   [`services`](https://docs.gitlab.com/ee/ci/yaml/#services). See
-  [#4358](https://gitlab.com/gitlab-org/gitlab-runner/issues/4358) for
+  [#4358](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/4358) for
   more details.
 - No [Interactive Web
   Terminal](https://docs.gitlab.com/ee/ci/interactive_web_terminal/) support.
@@ -75,7 +77,7 @@ be present in the `PATH`:
 - [Git](https://git-scm.com/download): Used to clone the repositories.
 - [Git LFS](https://git-lfs.github.com/): Pulls any LFS objects that
   might be in the repository.
-- [GitLab Runner](https://docs.gitlab.com/runner/install/): Used to
+- [GitLab Runner](../install/index.md): Used to
   download/update artifacts and cache.
 
 ## Stages
@@ -122,7 +124,7 @@ specific keys.
 
 For example:
 
-```sh
+```shell
 #!/usr/bin/env bash
 
 cat << EOS
@@ -181,7 +183,7 @@ The Prepare stage is executed by `prepare_exec`.
 
 At this point, GitLab Runner knows everything about the job (where and
 how it's going to run). The only thing left is for the environment to be
-set up so the job can run.  GitLab Runner will execute the executable
+set up so the job can run. GitLab Runner will execute the executable
 that is specified in `prepare_exec`.
 
 This is responsible for setting up the environment (for example,
@@ -229,10 +231,15 @@ order:
 1. `get_sources`
 1. `restore_cache`
 1. `download_artifacts`
+1. `step_*`
 1. `build_script`
+1. `step_*`
 1. `after_script`
 1. `archive_cache`
-1. `upload_artifact_on_success` OR `upload_artifact_on_failure`
+1. `upload_artifacts_on_success` OR `upload_artifacts_on_failure`
+
+NOTE: **Note:**
+In GitLab Runner 14.0 and later, `build_script` will be replaced with `step_script`. For more information, see [this issue](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26426).
 
 For each stage mentioned above, the `run_exec` executable will be
 executed with:
@@ -245,7 +252,7 @@ executed with:
 
 For example:
 
-```sh
+```shell
 /path/to/run_exec.sh /path/to/tmp/script1 prepare_executor
 /path/to/run_exec.sh /path/to/tmp/script1 prepare_script
 /path/to/run_exec.sh /path/to/tmp/script1 get_sources
@@ -266,21 +273,22 @@ example, suppose we have the following `config.toml`:
 
 GitLab Runner will execute the executable with the following arguments:
 
-```sh
+```shell
 /path/to/run_exec.sh Arg1 Arg2 /path/to/tmp/script1 prepare_executor
 /path/to/run_exec.sh Arg1 Arg2 /path/to/tmp/script1 prepare_script
 /path/to/run_exec.sh Arg1 Arg2 /path/to/tmp/script1 get_sources
 ```
 
-This executable should be responsible of executing the scripts that are
+This executable should be responsible for executing the scripts that are
 specified in the first argument. They contain all the scripts any GitLab
 Runner executor would run normally to clone, download artifacts, run
 user scripts and all the other steps described below. The scripts can be
 of the following shells:
 
 - Bash
-- PowerShell
-- Batch (Deprecated)
+- PowerShell Desktop
+- PowerShell Core
+- Batch (deprecated)
 
 We generate the script using the shell configured by `shell` inside of
 [`[[runners]]`](../configuration/advanced-configuration.md#the-runners-section).
@@ -291,15 +299,16 @@ what the main goal of that script is.
 
 | Script Name | Script Contents |
 |:-----------:|:---------------:|
-| `prepare_script` | Simple debug info on which machine the Job is running on. |
-| `get_sources`    | Prepares the Git config, and clone/fetch the repository. We suggest you keep this as is since you get all of the benefits of Git strategies that GitLab provides. |
+| `prepare_script` | Simple debug information which machine the Job is running on. |
+| `get_sources`    | Prepares the Git configuration, and clone/fetch the repository. We suggest you keep this as is since you get all of the benefits of Git strategies that GitLab provides. |
 | `restore_cache` | Extract the cache if any are defined. This expects the `gitlab-runner` binary is available in `$PATH`. |
 | `download_artifacts` | Download artifacts, if any are defined. This expects `gitlab-runner` binary is available in `$PATH`. |
-| `build_script` | This is a combination of [`before_script`](https://docs.gitlab.com/ee/ci/yaml/#before_script-and-after_script) and [script](https://docs.gitlab.com/ee/ci/yaml/#script). |
+| `step_*` | Generated by GitLab. A set of scripts to execute. It may never be sent to the custom executor. It may have multiple steps, like `step_release` and `step_accessibility`. This can be a feature from the `.gitlab-ci.yml` file. |
+| `build_script` | A combination of [`before_script`](https://docs.gitlab.com/ee/ci/yaml/#before_script-and-after_script) and [`script`](https://docs.gitlab.com/ee/ci/yaml/#script). In GitLab Runner 14.0 and later, `build_script` will be replaced with `step_script`. For more information, see [this issue](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26426). |
 | `after_script` | This is the [`after_script`](https://docs.gitlab.com/ee/ci/yaml/#before_script-and-after_script) defined from the job. This is always called even if any of the previous steps failed. |
 | `archive_cache` | Will create an archive of all the cache, if any are defined. |
-| `upload_artifact_on_success` | Upload any artifacts that are defined. Only executed when `build_script` was successful. |
-| `upload_artifact_on_failure` | Upload any artifacts that are defined. Only exected when `build_script` fails. |
+| `upload_artifacts_on_success` | Upload any artifacts that are defined. Only executed when `build_script` was successful. |
+| `upload_artifacts_on_failure` | Upload any artifacts that are defined. Only executed when `build_script` fails. |
 
 ### Cleanup
 
@@ -348,6 +357,7 @@ of the following conditions:
 
 - `config_exec_timeout`, `prepare_exec_timeout` or `cleanup_exec_timeout` are met.
 - The job [times out](https://docs.gitlab.com/ee/user/project/pipelines/settings.html#timeout).
+- The job is cancelled.
 
 When a timeout is reached, a `SIGTERM` is sent to the executable, and
 the countdown for
@@ -361,6 +371,14 @@ will start. If the process is still running after
 process and will not try to stop/kill anymore. If both these timeouts
 are reached during `config_exec`, `prepare_exec` or `run_exec` the build
 is marked as failed.
+
+As of [GitLab
+13.1](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/1743)
+any child process that is spawned by the driver will also receive the
+graceful termination process explained above on UNIX based systems. This
+is achieved by having the main process set as a [process
+group](https://man7.org/linux/man-pages/man2/setpgid.2.html)
+which all the child processes belong too.
 
 ## Error handling
 
@@ -412,7 +430,7 @@ We strongly suggest using `SYSTEM_FAILURE_EXIT_CODE` to exit
 instead of a hard coded value since it can change in any release, making
 your binary/script future proof.
 
-## Examples
+## Driver examples
 
-A set of example executors using the Custom executor can be found in
-the [examples page](custom_examples/index.md).
+A set of example drivers using the Custom executor can be found in the
+[examples page](custom_examples/index.md).

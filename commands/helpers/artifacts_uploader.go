@@ -6,23 +6,31 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/archives"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/retry"
 	"gitlab.com/gitlab-org/gitlab-runner/log"
 	"gitlab.com/gitlab-org/gitlab-runner/network"
 )
 
-const DefaultUploadName = "default"
+const (
+	DefaultUploadName       = "default"
+	defaultTries            = 3
+	serviceUnavailableTries = 6
+)
+
+var (
+	errServiceUnavailable = errors.New("service unavailable")
+	errTooLarge           = errors.New("too large")
+)
 
 type ArtifactsUploaderCommand struct {
 	common.JobCredentials
 	fileArchiver
-	retryHelper
 	network common.Network
 
 	Name     string                `long:"name" description:"The name of the archive"`
@@ -33,12 +41,12 @@ type ArtifactsUploaderCommand struct {
 
 func (c *ArtifactsUploaderCommand) generateZipArchive(w *io.PipeWriter) {
 	err := archives.CreateZipArchive(w, c.sortedFiles())
-	w.CloseWithError(err)
+	_ = w.CloseWithError(err)
 }
 
 func (c *ArtifactsUploaderCommand) generateGzipStream(w *io.PipeWriter) {
 	err := archives.CreateGzipArchive(w, c.sortedFiles())
-	w.CloseWithError(err)
+	_ = w.CloseWithError(err)
 }
 
 func (c *ArtifactsUploaderCommand) openRawStream() (io.ReadCloser, error) {
@@ -83,7 +91,7 @@ func (c *ArtifactsUploaderCommand) createReadStream() (string, io.ReadCloser, er
 	}
 }
 
-func (c *ArtifactsUploaderCommand) createAndUpload() error {
+func (c *ArtifactsUploaderCommand) Run() error {
 	artifactsName, stream, err := c.createReadStream()
 	if err != nil {
 		return err
@@ -93,7 +101,7 @@ func (c *ArtifactsUploaderCommand) createAndUpload() error {
 
 		return nil
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// Create the archive
 	options := common.ArtifactsOptions{
@@ -110,18 +118,38 @@ func (c *ArtifactsUploaderCommand) createAndUpload() error {
 	case common.UploadForbidden:
 		return os.ErrPermission
 	case common.UploadTooLarge:
-		return errors.New("too large")
+		return errTooLarge
 	case common.UploadFailed:
 		return retryableErr{err: os.ErrInvalid}
+	case common.UploadServiceUnavailable:
+		return retryableErr{err: errServiceUnavailable}
 	default:
 		return os.ErrInvalid
 	}
 }
 
+func (c *ArtifactsUploaderCommand) ShouldRetry(tries int, err error) bool {
+	var errAs retryableErr
+	if !errors.As(err, &errAs) {
+		return false
+	}
+
+	maxTries := defaultTries
+	if errors.Is(errAs, errServiceUnavailable) {
+		maxTries = serviceUnavailableTries
+	}
+
+	if tries >= maxTries {
+		return false
+	}
+
+	return true
+}
+
 func (c *ArtifactsUploaderCommand) Execute(*cli.Context) {
 	log.SetRunnerFormatter()
 
-	if len(c.URL) == 0 || len(c.Token) == 0 {
+	if c.URL == "" || c.Token == "" {
 		logrus.Fatalln("Missing runner credentials")
 	}
 	if c.ID <= 0 {
@@ -135,19 +163,21 @@ func (c *ArtifactsUploaderCommand) Execute(*cli.Context) {
 	}
 
 	// If the upload fails, exit with a non-zero exit code to indicate an issue?
-	err = c.doRetry(c.createAndUpload)
+	logger := logrus.WithField("context", "artifacts-uploader")
+	retryable := retry.New(retry.WithLogrus(c, logger))
+	err = retryable.Run()
 	if err != nil {
 		logrus.Fatalln(err)
 	}
 }
 
 func init() {
-	common.RegisterCommand2("artifacts-uploader", "create and upload build artifacts (internal)", &ArtifactsUploaderCommand{
-		network: network.NewGitLabClient(),
-		retryHelper: retryHelper{
-			Retry:     2,
-			RetryTime: time.Second,
+	common.RegisterCommand2(
+		"artifacts-uploader",
+		"create and upload build artifacts (internal)",
+		&ArtifactsUploaderCommand{
+			network: network.NewGitLabClient(),
+			Name:    "artifacts",
 		},
-		Name: "artifacts",
-	})
+	)
 }

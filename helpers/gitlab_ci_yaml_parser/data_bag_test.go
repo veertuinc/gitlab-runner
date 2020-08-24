@@ -2,10 +2,11 @@ package gitlab_ci_yaml_parser
 
 import (
 	"encoding/json"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
-	"testing"
 )
 
 type dataOptions struct {
@@ -46,7 +47,7 @@ variables:
 `
 
 func (o *buildTest) Unmarshal(data string) error {
-	return json.Unmarshal([]byte(data), o)
+	return json.Unmarshal([]byte(data), o) // nolint:staticcheck
 }
 
 func TestDataBagUnmarshaling(t *testing.T) {

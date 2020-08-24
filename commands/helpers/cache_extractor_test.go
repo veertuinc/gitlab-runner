@@ -80,7 +80,7 @@ func TestCacheExtractorForNotExistingFile(t *testing.T) {
 }
 
 func testServeCache(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
+	if r.Method != http.MethodGet {
 		http.Error(w, "408 Method not allowed", 408)
 		return
 	}
@@ -94,7 +94,7 @@ func testServeCache(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Last-Modified", time.Now().Format(http.TimeFormat))
 	archive := zip.NewWriter(w)
-	archive.Create(cacheExtractorTestArchivedFile)
+	_, _ = archive.Create(cacheExtractorTestArchivedFile)
 	archive.Close()
 }
 
@@ -168,9 +168,7 @@ func TestCacheExtractorRemoteServer(t *testing.T) {
 	err = os.Chtimes(cacheExtractorArchive, time.Now().Add(time.Hour), time.Now().Add(time.Hour))
 	assert.NoError(t, err)
 
-	assert.NotPanics(t, func() {
-		cmd.Execute(nil)
-	}, "archive is up to date")
+	assert.NotPanics(t, func() { cmd.Execute(nil) }, "archive is up to date")
 }
 
 func TestCacheExtractorRemoteServerFailOnInvalidServer(t *testing.T) {

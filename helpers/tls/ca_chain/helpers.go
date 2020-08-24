@@ -11,8 +11,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
-	"net/http"
 	"strings"
 
 	"github.com/fullsailor/pkcs7"
@@ -33,11 +31,12 @@ type ErrorInvalidCertificate struct {
 func (e *ErrorInvalidCertificate) Error() string {
 	msg := []string{"invalid certificate"}
 
-	if e.nilBlock {
+	switch {
+	case e.nilBlock:
 		msg = append(msg, "empty PEM block")
-	} else if e.nonCertBlockType {
+	case e.nonCertBlockType:
 		msg = append(msg, "non-certificate PEM block")
-	} else if e.inner != nil {
+	case e.inner != nil:
 		msg = append(msg, e.inner.Error())
 	}
 
@@ -82,7 +81,11 @@ func prepareCertificateLogger(logger logrus.FieldLogger, cert *x509.Certificate)
 	return preparePrefixedCertificateLogger(logger, cert, "")
 }
 
-func preparePrefixedCertificateLogger(logger logrus.FieldLogger, cert *x509.Certificate, prefix string) logrus.FieldLogger {
+func preparePrefixedCertificateLogger(
+	logger logrus.FieldLogger,
+	cert *x509.Certificate,
+	prefix string,
+) logrus.FieldLogger {
 	return logger.
 		WithFields(logrus.Fields{
 			fmt.Sprintf("%sSubject", prefix):       cert.Subject.CommonName,
@@ -90,23 +93,6 @@ func preparePrefixedCertificateLogger(logger logrus.FieldLogger, cert *x509.Cert
 			fmt.Sprintf("%sSerial", prefix):        cert.SerialNumber.String(),
 			fmt.Sprintf("%sIssuerCertURL", prefix): cert.IssuingCertificateURL,
 		})
-}
-
-func fetchRemoteCertificate(url string) ([]byte, error) {
-	resp, err := http.Get(url)
-	if resp != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
 }
 
 func verifyCertificate(cert *x509.Certificate) ([][]*x509.Certificate, error) {

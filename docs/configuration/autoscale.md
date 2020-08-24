@@ -19,20 +19,19 @@ In case of many cloud providers this helps to utilize the cost of already used
 instances.
 
 Below, you can see a real life example of the runners autoscale feature, tested
-on GitLab.com for the [GitLab Community Edition][ce] project:
+on GitLab.com for the [GitLab Community Edition](https://gitlab.com/gitlab-org/gitlab-foss) project:
 
 ![Real life example of autoscaling](img/autoscale-example.png)
 
 Each machine on the chart is an independent cloud instance, running jobs
 inside of Docker containers.
 
-[ce]: https://gitlab.com/gitlab-org/gitlab-ce
-
 ## System requirements
 
-At this point you should have
-[installed all the requirements](../executors/docker_machine.md#preparing-the-environment).
-If not, make sure to do it before going over the configuration.
+Before configuring autoscale, you must:
+
+- [Prepare your own environment](../executors/docker_machine.md#preparing-the-environment).
+- Optionally use a [forked version](../executors/docker_machine.md#forked-version-of-docker-machine) of Docker machine supplied by GitLab, which has some additional fixes.
 
 ## Supported cloud providers
 
@@ -50,7 +49,7 @@ autoscale feature point of view. For more configurations details read the
 
 | Parameter    | Value   | Description |
 |--------------|---------|-------------|
-| `concurrent` | integer | Limits how many jobs globally can be run concurrently. This is the most upper limit of number of jobs using _all_ defined runners, local and autoscale. Together with `limit` (from [`[[runners]]` section](#runners-options)) and `IdleCount` (from [`[runners.machine]` section][runners-machine]) it affects the upper limit of created machines. |
+| `concurrent` | integer | Limits how many jobs globally can be run concurrently. This is the most upper limit of number of jobs using _all_ defined runners, local and autoscale. Together with `limit` (from [`[[runners]]` section](#runners-options)) and `IdleCount` (from [`[runners.machine]` section](advanced-configuration.md#the-runnersmachine-section)) it affects the upper limit of created machines. |
 
 ### `[[runners]]` options
 
@@ -62,12 +61,12 @@ autoscale feature point of view. For more configurations details read the
 ### `[runners.machine]` options
 
 Configuration parameters details can be found
-in [GitLab Runner - Advanced Configuration - The `[runners.machine]` section][runners-machine].
+in [GitLab Runner - Advanced Configuration - The `[runners.machine]` section](advanced-configuration.md#the-runnersmachine-section).
 
 ### `[runners.cache]` options
 
 Configuration parameters details can be found
-in [GitLab Runner - Advanced Configuration - The `[runners.cache]` section][runners-cache]
+in [GitLab Runner - Advanced Configuration - The `[runners.cache]` section](advanced-configuration.md#the-runnerscache-section)
 
 ### Additional configuration information
 
@@ -99,15 +98,15 @@ automatically removed.
 Let's suppose, that we have configured GitLab Runner with the following
 autoscale parameters:
 
-```bash
+```toml
 [[runners]]
   limit = 10
-  (...)
+  # (...)
   executor = "docker+machine"
   [runners.machine]
     IdleCount = 2
     IdleTime = 1800
-    (...)
+    # (...)
 ```
 
 At the beginning, when no jobs are queued, GitLab Runner starts two machines
@@ -190,7 +189,7 @@ queue is empty.
 
 Let's assume the following example:
 
-```bash
+```toml
 concurrent=20
 
 [[runners]]
@@ -207,7 +206,7 @@ concurrent machines running jobs and 10 idle, summing up to 30.
 But what happens if the `limit` is less than the total amount of machines that
 could be created? The example below explains that case:
 
-```bash
+```toml
 concurrent=20
 
 [[runners]]
@@ -220,28 +219,76 @@ In this example we will have at most 20 concurrent jobs, and at most 25
 machines created. In the worst case scenario regarding idle machines, we will
 not be able to have 10 idle machines, but only 5, because the `limit` is 25.
 
-## Off Peak time mode configuration
+## Autoscaling periods configuration
 
-> Introduced in GitLab Runner v1.7
+> Introduced in [GitLab Runner 13.0](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/5069).
+
+Autoscaling can be configured to have different values depending on the time period.
+Organizations might have regular times when spikes of jobs are being executed,
+and other times with few to no jobs.
+For example, most commercial companies work from Monday to
+Friday in fixed hours, like 10am to 6pm. On nights and weekends
+for the rest of the week, and on the weekends, no pipelines are started.
+
+These periods can be configured with the help of `[[runners.machine.autoscaling]]` sections.
+Each of them supports setting `IdleCount` and `IdleTime` based on a set of `Periods`.
+
+**How autoscaling periods work**
+
+In the `[runners.machine]` settings, you can add multiple `[[runners.machine.autoscaling]]` sections, each one with its own `IdleCount`, `IdleTime`, `Periods` and `Timezone` properties. A section should be defined for each configuration, proceeding in order from the most general scenario to the most specific scenario.
+
+All sections will be parsed and the last one to match the current time will be active. If none matches, the values from the root of `[runners.machine]` are used.
+
+For example:
+
+```toml
+[runners.machine]
+  MachineName = "auto-scale-%s"
+  MachineDriver = "digitalocean"
+  IdleCount = 10
+  IdleTime = 1800
+  [[runners.machine.autoscaling]]
+    Periods = ["* * 9-17 * * mon-fri *"]
+    IdleCount = 50
+    IdleTime = 3600
+    Timezone = "UTC"
+  [[runners.machine.autoscaling]]
+    Periods = ["* * * * * sat,sun *"]
+    IdleCount = 5
+    IdleTime = 60
+    Timezone = "UTC"
+```
+
+In this configuration, every weekday between 9 and 17 UTC, machines will be overprovisioned to handle the large traffic during operating hours. On the weekend, `IdleCount` drops to 5 to account for the drop in traffic.
+During the rest of the time the values will be taken from the defaults in the root - `IdleCount = 10` and `IdleTime = 1800`.
+
+NOTE: **Note:**
+The 59th second of the last
+minute in any period that you specify will *not* be considered part of the
+period. For more information, see [issue #2170](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/2170).
+
+You can specify the `Timezone` of a period, for example `"Australia/Sydney"`. If you don't,
+the system setting of the host machine of every runner will be used. This
+default can be stated as `Timezone = "Local"` explicitly.
+
+More information about the syntax of `[[runner.machine.autoscaling]]` sections can be found
+in [GitLab Runner - Advanced Configuration - The `[runners.machine]` section](advanced-configuration.md#the-runnersmachine-section).
+
+## Off Peak time mode configuration (Deprecated)
+
+> This setting is deprecated and will be removed in 14.0. Use autoscaling periods instead.
+> If both settings are used, the Off Peak settings will be ignored.
 
 Autoscale can be configured with the support for _Off Peak_ time mode periods.
 
 **What is _Off Peak_ time mode period?**
 
 Some organizations can select a regular time periods when no work is done.
-For example most of commercial companies are working from Monday to
-Friday in a fixed hours, eg. from 10am to 6pm. In the rest of the week -
-from Monday to Friday at 12am-9am and 6pm-11pm and whole Saturday and Sunday -
-no one is working. These time periods we're naming here as _Off Peak_.
+These time periods are called _Off Peak_.
 
 Organizations where _Off Peak_ time periods occurs probably don't want
 to pay for the _Idle_ machines when it's certain that no jobs will be
 executed in this time. Especially when `IdleCount` is set to a big number.
-
-In the `v1.7` version of the Runner we've added the support for _Off Peak_
-configuration. With parameters described in configuration file you can now
-change the `IdleCount` and `IdleTime` values for the _Off Peak_ time mode
-periods.
 
 **How it is working?**
 
@@ -253,24 +300,15 @@ when the _Off Peak_ time mode should be set on. For example:
 ```toml
 [runners.machine]
   OffPeakPeriods = [
-    "* * 0-9,18-23 * * mon-fri *",
+    "* * 0-8,18-23 * * mon-fri *",
     "* * * * * sat,sun *"
   ]
 ```
 
-will enable the _Off Peak_ periods described above, so the _working_ days
-from 12am to 9am and from 6pm to 11pm and whole weekend days. Machines
+will enable the _Off Peak_ periods described above, so on weekdays
+from 12:00am through 8:59am and 6:00pm through 11:59pm, plus all of Saturday and Sunday. Machines
 scheduler is checking all patterns from the array and if at least one of
 them describes current time, then the _Off Peak_ time mode is enabled.
-
-NOTE: **Note:**
-The 59th second of the last
-minute in any period that you specify will *not* be considered part of the
-period. For more information, see [issue #2170](https://gitlab.com/gitlab-org/gitlab-runner/issues/2170).
-
-You can specify the `OffPeakTimezone` e.g. `"Australia/Sydney"`. If you don't,
-the system setting of the host machine of every runner will be used. This
-default can be stated as `OffPeakTimezone = "Local"` explicitly if you wish.
 
 When the _Off Peak_ time mode is enabled machines scheduler use
 `OffPeakIdleCount` instead of `IdleCount` setting and `OffPeakIdleTime`
@@ -279,15 +317,12 @@ only the parameters. When machines scheduler discovers that none from
 the `OffPeakPeriods` pattern is fulfilled then it switches back to
 `IdleCount` and `IdleTime` settings.
 
-More information about syntax of `OffPeakPeriods` patterns can be found
-in [GitLab Runner - Advanced Configuration - The `[runners.machine]` section][runners-machine].
-
 ## Distributed runners caching
 
 NOTE: **Note:**
 Read how to [install your own cache server](../install/registry_and_cache_servers.md#install-your-own-cache-server).
 
-To speed up your jobs, GitLab Runner provides a [cache mechanism][cache]
+To speed up your jobs, GitLab Runner provides a [cache mechanism](https://docs.gitlab.com/ee/ci/yaml/README.html#cache)
 where selected directories and/or files are saved and shared between subsequent
 jobs.
 
@@ -305,9 +340,9 @@ When restoring and archiving the cache, GitLab Runner will query the server
 and will download or upload the archive respectively.
 
 To enable distributed caching, you have to define it in `config.toml` using the
-[`[runners.cache]` directive][runners-cache]:
+[`[runners.cache]` directive](advanced-configuration.md#the-runnerscache-section):
 
-```bash
+```toml
 [[runners]]
   limit = 10
   executor = "docker+machine"
@@ -337,7 +372,7 @@ NOTE: **Note:**
 Read how to [install a container registry](../install/registry_and_cache_servers.md#install-a-proxy-container-registry).
 
 To speed up jobs executed inside of Docker containers, you can use the [Docker
-registry mirroring service][registry]. This will provide a proxy between your
+registry mirroring service](https://docs.docker.com/registry/). This will provide a proxy between your
 Docker machines and all used registries. Images will be downloaded once by the
 registry mirror. On each new host, or on an existing host where the image is
 not available, it will be downloaded from the configured registry mirror.
@@ -348,7 +383,7 @@ downloading step should be much faster on each host.
 To configure the Docker registry mirroring, you have to add `MachineOptions` to
 the configuration in `config.toml`:
 
-```bash
+```toml
 [[runners]]
   limit = 10
   executor = "docker+machine"
@@ -368,7 +403,7 @@ each host created by Docker Machine.
 
 The `config.toml` below uses the [`digitalocean` Docker Machine driver](https://docs.docker.com/machine/drivers/digital-ocean/):
 
-```bash
+```toml
 concurrent = 50   # All registered Runners can run up to 50 concurrent jobs
 
 [[runners]]
@@ -378,14 +413,8 @@ concurrent = 50   # All registered Runners can run up to 50 concurrent jobs
   executor = "docker+machine"        # This Runner is using the 'docker+machine' executor
   limit = 10                         # This Runner can execute up to 10 jobs (created machines)
   [runners.docker]
-    image = "ruby:2.1"               # The default image used for jobs is 'ruby:2.1'
+    image = "ruby:2.6"               # The default image used for jobs is 'ruby:2.6'
   [runners.machine]
-    OffPeakPeriods = [               # Set the Off Peak time mode on for:
-      "* * 0-9,18-23 * * mon-fri *", # - Monday to Friday for 12am to 9am and 6pm to 11pm
-      "* * * * * sat,sun *"          # - whole Saturday and Sunday
-    ]
-    OffPeakIdleCount = 1             # There must be 1 machine in Idle state - when Off Peak time mode is on
-    OffPeakIdleTime = 1200           # Each machine can be in Idle state up to 1200 seconds (after this it will be removed) - when Off Peak time mode is on
     IdleCount = 5                    # There must be 5 machines in Idle state - when Off Peak time mode is off
     IdleTime = 600                   # Each machine can be in Idle state up to 600 seconds (after this it will be removed) - when Off Peak time mode is off
     MaxBuilds = 100                  # Each machine can handle up to 100 jobs in a row (after this it will be removed)
@@ -400,6 +429,16 @@ concurrent = 50   # All registered Runners can run up to 50 concurrent jobs
         "digitalocean-private-networking",
         "engine-registry-mirror=http://10.11.12.13:12345"   # Docker Machine is using registry mirroring
     ]
+    [[runners.machine.autoscaling]]  # Define periods with different settings
+      Periods = ["* * 9-17 * * mon-fri *"] # Every workday between 9 and 17 UTC
+      IdleCount = 50
+      IdleTime = 3600
+      Timezone = "UTC"
+    [[runners.machine.autoscaling]]
+      Periods = ["* * * * * sat,sun *"] # During the weekends
+      IdleCount = 5
+      IdleTime = 60
+      Timezone = "UTC"
   [runners.cache]
     Type = "s3"
     [runners.cache.s3]
@@ -413,11 +452,3 @@ concurrent = 50   # All registered Runners can run up to 50 concurrent jobs
 Note that the `MachineOptions` parameter contains options for the `digitalocean`
 driver which is used by Docker Machine to spawn machines hosted on Digital Ocean,
 and one option for Docker Machine itself (`engine-registry-mirror`).
-
-[cache]: https://docs.gitlab.com/ee/ci/yaml/README.html#cache
-[docker-machine-docs]: https://docs.docker.com/machine/
-[docker-machine-driver]: https://docs.docker.com/machine/drivers/
-[docker-machine-installation]: https://docs.docker.com/machine/install-machine/
-[runners-cache]: advanced-configuration.md#the-runnerscache-section
-[runners-machine]: advanced-configuration.md#the-runnersmachine-section
-[registry]: https://docs.docker.com/registry/

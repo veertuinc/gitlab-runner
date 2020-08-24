@@ -20,7 +20,7 @@ func newTestGetServiceArgumentsCommand(t *testing.T, expectedArgs []string) func
 	}
 }
 
-func testServiceCommandRun(t *testing.T, command func(*cli.Context), args ...string) {
+func testServiceCommandRun(command func(*cli.Context), args ...string) {
 	app := cli.NewApp()
 	app.Commands = []cli.Command{
 		{
@@ -31,7 +31,7 @@ func testServiceCommandRun(t *testing.T, command func(*cli.Context), args ...str
 	}
 
 	args = append([]string{"binary", "test-command"}, args...)
-	app.Run(args)
+	_ = app.Run(args)
 }
 
 type getServiceArgumentsTestCase struct {
@@ -45,7 +45,7 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", helpers.GetCurrentWorkingDirectory(),
 				"--config", getDefaultConfigFile(),
-				"--service", "gitlab-runner",
+				"--service", "anka-gitlab-runner",
 				"--syslog",
 			},
 		},
@@ -56,7 +56,7 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", helpers.GetCurrentWorkingDirectory(),
 				"--config", "/tmp/config.toml",
-				"--service", "gitlab-runner",
+				"--service", "anka-gitlab-runner",
 				"--syslog",
 			},
 		},
@@ -67,7 +67,7 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", "/tmp",
 				"--config", getDefaultConfigFile(),
-				"--service", "gitlab-runner",
+				"--service", "anka-gitlab-runner",
 				"--syslog",
 			},
 		},
@@ -89,7 +89,7 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", helpers.GetCurrentWorkingDirectory(),
 				"--config", getDefaultConfigFile(),
-				"--service", "gitlab-runner",
+				"--service", "anka-gitlab-runner",
 				"--syslog",
 			},
 		},
@@ -100,14 +100,14 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", helpers.GetCurrentWorkingDirectory(),
 				"--config", getDefaultConfigFile(),
-				"--service", "gitlab-runner",
+				"--service", "anka-gitlab-runner",
 			},
 		},
 	}
 
 	for id, testCase := range tests {
 		t.Run(fmt.Sprintf("case-%d", id), func(t *testing.T) {
-			testServiceCommandRun(t, newTestGetServiceArgumentsCommand(t, testCase.expectedArgs), testCase.cliFlags...)
+			testServiceCommandRun(newTestGetServiceArgumentsCommand(t, testCase.expectedArgs), testCase.cliFlags...)
 		})
 	}
 }

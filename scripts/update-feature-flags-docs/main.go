@@ -18,6 +18,7 @@ const (
 	endPlaceholder   = "<!-- feature_flags_list_end -->"
 )
 
+//nolint:lll
 var ffTableTemplate = `{{ placeholder "start" }}
 
 | Feature flag | Default value | Deprecated | To be removed with | Description |
@@ -86,7 +87,7 @@ func prepareTable() string {
 	return buffer.String()
 }
 
-func replace(fileContent string, tableContent string) string {
+func replace(fileContent, tableContent string) string {
 	replacer := newBlockLineReplacer(startPlaceholder, endPlaceholder, fileContent, tableContent)
 
 	newContent, err := replacer.Replace()
@@ -124,7 +125,7 @@ func (r *blockLineReplacer) Replace() (string, error) {
 		}
 
 		if err != nil {
-			return "", fmt.Errorf("error while reading issue description: %v", err)
+			return "", fmt.Errorf("error while reading issue description: %w", err)
 		}
 
 		r.handleLine(line)
@@ -164,7 +165,7 @@ func (r *blockLineReplacer) handleEnd(line string) {
 	r.output.WriteString(r.replaceContent)
 }
 
-func newBlockLineReplacer(startLine string, endLine string, input string, replaceContent string) *blockLineReplacer {
+func newBlockLineReplacer(startLine, endLine string, input, replaceContent string) *blockLineReplacer {
 	return &blockLineReplacer{
 		startLine:      startLine,
 		endLine:        endLine,

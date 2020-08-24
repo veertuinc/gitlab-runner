@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,12 +10,94 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const fileArchiverUntrackedFile = "untracked_test_file.txt"
-const fileArchiverUntrackedUnicodeFile = "неотслеживаемый_тестовый_файл.txt"
-const fileArchiverArchiveZipFile = "archive.zip"
-const fileArchiverNotExistingFile = "not_existing_file.txt"
-const fileArchiverAbsoluteFile = "/absolute.txt"
-const fileArchiverRelativeFile = "../../../relative.txt"
+const (
+	fileArchiverUntrackedFile   = "untracked_test_file.txt"
+	fileArchiverArchiveZipFile  = "archive.zip"
+	fileArchiverNotExistingFile = "not_existing_file.txt"
+	fileArchiverAbsoluteFile    = "/absolute.txt"
+	fileArchiverRelativeFile    = "../../../relative.txt"
+)
+
+func TestGlobbedFilePaths(t *testing.T) {
+	const (
+		fileArchiverGlobbedFilePath = "foo/**/*.txt"
+		fileArchiverGlobPath        = "foo/bar/baz"
+	)
+
+	err := os.MkdirAll(fileArchiverGlobPath, 0700)
+	require.NoError(t, err, "Creating directory path: %s", fileArchiverGlobPath)
+	defer os.RemoveAll(strings.Split(fileArchiverGlobPath, "/")[0])
+
+	expectedMatchingFiles := []string{
+		"foo/bar/baz/glob1.txt",
+		"foo/bar/baz/glob2.txt",
+		"foo/bar/glob3.txt",
+	}
+	for _, f := range expectedMatchingFiles {
+		writeTestFile(t, f)
+	}
+
+	// Write a file that doesn't match glob
+	writeTestFile(t, "foo/bar/baz/main.go")
+
+	// Write a dir that is outside of glob pattern
+	const (
+		fileArchiverGlobNonMatchingPath = "bar/foo"
+	)
+	err = os.MkdirAll(fileArchiverGlobNonMatchingPath, 0700)
+	writeTestFile(t, "bar/foo/test.txt")
+	require.NoError(t, err, "Creating directory path: %s", fileArchiverGlobNonMatchingPath)
+	defer os.RemoveAll(strings.Split(fileArchiverGlobNonMatchingPath, "/")[0])
+
+	f := fileArchiver{
+		Paths: []string{fileArchiverGlobbedFilePath},
+	}
+	err = f.enumerate()
+	assert.NoError(t, err)
+	assert.Equal(t, expectedMatchingFiles, f.sortedFiles())
+}
+
+func TestExcludedFilePaths(t *testing.T) {
+	fooTestDirectory := "foo/test/bar/baz"
+
+	err := os.MkdirAll(fooTestDirectory, 0700)
+	require.NoError(t, err, "could not create test directory")
+	defer os.RemoveAll(fooTestDirectory)
+
+	existingFiles := []string{
+		"foo/test/bar/baz/1.txt",
+		"foo/test/bar/baz/1.md",
+		"foo/test/bar/baz/2.txt",
+		"foo/test/bar/baz/2.md",
+		"foo/test/bar/baz/3.txt",
+	}
+	for _, f := range existingFiles {
+		writeTestFile(t, f)
+	}
+
+	f := fileArchiver{
+		Paths:   []string{"foo/test/"},
+		Exclude: []string{"foo/test/bar/baz/3.txt", "foo/**/*.md"},
+	}
+
+	err = f.enumerate()
+
+	includedFiles := []string{
+		"foo/test",
+		"foo/test/bar",
+		"foo/test/bar/baz",
+		"foo/test/bar/baz/1.txt",
+		"foo/test/bar/baz/2.txt",
+	}
+
+	assert.NoError(t, err)
+	assert.Equal(t, includedFiles, f.sortedFiles())
+	assert.Equal(t, 2, len(f.excluded))
+	require.Contains(t, f.excluded, "foo/test/bar/baz/3.txt")
+	assert.Equal(t, int64(1), f.excluded["foo/test/bar/baz/3.txt"])
+	require.Contains(t, f.excluded, "foo/**/*.md")
+	assert.Equal(t, int64(2), f.excluded["foo/**/*.md"])
+}
 
 func TestCacheArchiverAddingUntrackedFiles(t *testing.T) {
 	writeTestFile(t, artifactsTestArchivedFile)
@@ -34,6 +117,8 @@ func TestCacheArchiverAddingUntrackedFiles(t *testing.T) {
 }
 
 func TestCacheArchiverAddingUntrackedUnicodeFiles(t *testing.T) {
+	const fileArchiverUntrackedUnicodeFile = "неотслеживаемый_тестовый_файл.txt"
+
 	writeTestFile(t, fileArchiverUntrackedUnicodeFile)
 	defer os.Remove(fileArchiverUntrackedUnicodeFile)
 
@@ -120,7 +205,11 @@ func TestFileArchiverFileIsNotChanged(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, os.Chtimes(fileArchiverUntrackedFile, now, now.Add(-time.Second)))
-	assert.False(t, f.isFileChanged(fileArchiverArchiveZipFile), "should return false if file was modified before the listed file")
+	assert.False(
+		t,
+		f.isFileChanged(fileArchiverArchiveZipFile),
+		"should return false if file was modified before the listed file",
+	)
 }
 
 func TestFileArchiverFileIsChanged(t *testing.T) {
@@ -152,5 +241,9 @@ func TestFileArchiverFileDoesNotExist(t *testing.T) {
 	err := f.enumerate()
 	require.NoError(t, err)
 
-	assert.True(t, f.isFileChanged(fileArchiverNotExistingFile), "should return true if file doesn't exist")
+	assert.True(
+		t,
+		f.isFileChanged(fileArchiverNotExistingFile),
+		"should return true if file doesn't exist",
+	)
 }

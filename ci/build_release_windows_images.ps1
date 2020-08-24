@@ -7,11 +7,12 @@ $InformationPreference = "Continue"
 #
 # - $Env:WINDOWS_VERSION - This is the version of windows that is going to be
 #   used for building the Docker image. It is important for the version to match
-#   one of the Dockerfile suffix, for example, `nanoserver1809` for the Dockerfile
-#   `Dockerfile.x86_64_nanoserver1809`
-# - $Env:GIT_VERSON - Specify which version of Git needs to be installed on
+#   one of the mcr.microsoft.com/windows/servercore or https://hub.docker.com/_/microsoft-windows-nanoserver
+#   tag prefixes (discarding the architecture suffix).
+#   For example, `servercore1903` will build from mcr.microsoft.com/windows/servercore:1903-amd64.
+# - $Env:GIT_VERSION - Specify which version of Git needs to be installed on
 #   the Docker image. This is done through Docker build args.
-# - $Env:GIT_VERSON_BUILD - Specify which build is needed to download for the
+# - $Env:GIT_VERSION_BUILD - Specify which build is needed to download for the
 #   GIT_VERSION you specified.
 # - $Env:GIT_256_CHECKSUM - The checksum of the downloaded zip, usually found in
 #   the GitHub release page.
@@ -27,7 +28,7 @@ $InformationPreference = "Continue"
 # - $Env:PUSH_TO_DOCKER_HUB - If set to true, it will login to the registry and
 #   push the tags.
 # ---------------------------------------------------------------------------
-$imagesBasePath = "dockerfiles\build\Dockerfile.x86_64"
+$imagesBasePath = "dockerfiles\runner-helper\Dockerfile.x86_64"
 
 function Main
 {
@@ -63,11 +64,17 @@ function Get-Tag
 
 function Build-Image($tag)
 {
-    Write-Information "Build image for x86_64_$Env:WINDOWS_VERSION"
+    $windowsFlavor = $env:WINDOWS_VERSION.Substring(0, $env:WINDOWS_VERSION.length -4)
+    $windowsVersion = $env:WINDOWS_VERSION.Substring($env:WINDOWS_VERSION.length -4)
 
-    $dockerFile = "${imagesBasePath}_$Env:WINDOWS_VERSION"
-    $context = "dockerfiles\build"
+    Write-Information "Build image for x86_64_${env:WINDOWS_VERSION}"
+
+    $dockerFile = "${imagesBasePath}_${windowsFlavor}"
+    $context = "dockerfiles\runner-helper"
+    New-Item -ItemType Directory -Force -Path $context\binaries
+    Copy-Item -Path "out\binaries\gitlab-runner-helper\gitlab-runner-helper.x86_64-windows.exe" -Destination "$context\binaries"
     $buildArgs = @(
+        '--build-arg', "BASE_IMAGE_TAG=mcr.microsoft.com/windows/${windowsFlavor}:${windowsVersion}-amd64",
         '--build-arg', "GIT_VERSION=$Env:GIT_VERSION",
         '--build-arg', "GIT_VERSION_BUILD=$Env:GIT_VERSION_BUILD",
         '--build-arg', "GIT_256_CHECKSUM=$Env:GIT_256_CHECKSUM"

@@ -66,23 +66,29 @@ func newRunSingleCommand(executorName string, network common.Network) *RunSingle
 	}
 }
 
-func mockingExecutionStack(t *testing.T, executorName string, maxBuilds int, job jobSimulation) (*RunSingleCommand, func()) {
+func mockingExecutionStack(
+	t *testing.T,
+	executorName string,
+	maxBuilds int,
+	job jobSimulation,
+) (*RunSingleCommand, func()) {
 	// mocking the whole stack
 	e := common.MockExecutor{}
 	p := common.MockExecutorProvider{}
 	mockNetwork := common.MockNetwork{}
 
-	//Network
+	// Network
 	jobData := common.JobResponse{}
 	_, cancel := context.WithCancel(context.Background())
-	jobTrace := common.Trace{Writer: ioutil.Discard, CancelFunc: cancel}
+	jobTrace := common.Trace{Writer: ioutil.Discard}
+	jobTrace.SetCancelFunc(cancel)
 	mockNetwork.On("RequestJob", mock.Anything, mock.Anything).Return(&jobData, true).Times(maxBuilds)
 	processJob := mockNetwork.On("ProcessJob", mock.Anything, mock.Anything).Return(&jobTrace, nil).Times(maxBuilds)
 	if job != nil {
 		processJob.Run(job)
 	}
 
-	//ExecutorProvider
+	// ExecutorProvider
 	p.On("CanCreate").Return(true).Once()
 	p.On("GetDefaultShell").Return("bash").Once()
 	p.On("GetFeatures", mock.Anything).Return(nil).Times(maxBuilds + 1)
@@ -91,16 +97,16 @@ func mockingExecutionStack(t *testing.T, executorName string, maxBuilds int, job
 	p.On("Acquire", mock.Anything).Return(&common.MockExecutorData{}, nil).Times(maxBuilds)
 	p.On("Release", mock.Anything, mock.Anything).Return(nil).Times(maxBuilds)
 
-	//Executor
+	// Executor
 	e.On("Prepare", mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(maxBuilds)
-	e.On("Finish", nil).Return().Times(maxBuilds)
-	e.On("Cleanup").Return().Times(maxBuilds)
+	e.On("Finish", nil).Times(maxBuilds)
+	e.On("Cleanup").Times(maxBuilds)
 
 	// Run script successfully
 	e.On("Shell").Return(&common.ShellScriptInfo{Shell: "script-shell"})
 	e.On("Run", mock.Anything).Return(nil)
 
-	common.RegisterExecutor(executorName, &p)
+	common.RegisterExecutorProvider(executorName, &p)
 
 	single := newRunSingleCommand(executorName, &mockNetwork)
 	single.MaxBuilds = maxBuilds

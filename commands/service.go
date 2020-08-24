@@ -5,18 +5,18 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/ayufan/golang-kardianos-service"
+	service "github.com/ayufan/golang-kardianos-service"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/service"
+	service_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/service"
 )
 
 const (
-	defaultServiceName = "gitlab-runner"
-	defaultDescription = "GitLab Runner"
+	defaultServiceName = "anka-gitlab-runner"
+	defaultDescription = "Anka GitLab Runner"
 )
 
 type NullService struct {
@@ -38,6 +38,7 @@ func runServiceInstall(s service.Service, c *cli.Context) error {
 	if configFile := c.String("config"); configFile != "" {
 		// try to load existing config
 		config := common.NewConfig()
+
 		err := config.LoadConfig(configFile)
 		if err != nil {
 			return err
@@ -54,7 +55,7 @@ func runServiceInstall(s service.Service, c *cli.Context) error {
 	return service.Control(s, "install")
 }
 
-func runServiceStatus(displayName string, s service.Service) error {
+func runServiceStatus(displayName string, s service.Service) {
 	err := s.Status()
 	if err == nil {
 		fmt.Println(displayName+":", "Service is running!")
@@ -62,7 +63,6 @@ func runServiceStatus(displayName string, s service.Service) error {
 		fmt.Fprintln(os.Stderr, displayName+":", err)
 		os.Exit(1)
 	}
-	return nil
 }
 
 func getServiceArguments(c *cli.Context) (arguments []string) {
@@ -96,7 +96,7 @@ func createServiceConfig(c *cli.Context) (svcConfig *service.Config) {
 	svcConfig.Arguments = append(svcConfig.Arguments, getServiceArguments(c)...)
 
 	switch runtime.GOOS {
-	case "linux":
+	case osTypeLinux:
 		if os.Getuid() != 0 {
 			logrus.Fatal("Please run the commands as root")
 		}
@@ -104,7 +104,7 @@ func createServiceConfig(c *cli.Context) (svcConfig *service.Config) {
 			svcConfig.Arguments = append(svcConfig.Arguments, "--user", user)
 		}
 
-	case "darwin":
+	case osTypeDarwin:
 		svcConfig.Option = service.KeyValue{
 			"KeepAlive":   true,
 			"RunAtLoad":   true,
@@ -119,13 +119,14 @@ func createServiceConfig(c *cli.Context) (svcConfig *service.Config) {
 			}
 		}
 
-	case "windows":
+	case osTypeWindows:
 		svcConfig.Option = service.KeyValue{
 			"Password": c.String("password"),
 		}
 		svcConfig.UserName = c.String("user")
 	}
-	return
+
+	return svcConfig
 }
 
 func RunServiceControl(c *cli.Context) {
@@ -140,13 +141,19 @@ func RunServiceControl(c *cli.Context) {
 	case "install":
 		err = runServiceInstall(s, c)
 	case "status":
-		err = runServiceStatus(svcConfig.DisplayName, s)
+		runServiceStatus(svcConfig.DisplayName, s)
 	default:
 		err = service.Control(s, c.Command.Name)
 	}
 
 	if err != nil {
 		logrus.Fatal(err)
+	}
+
+	if c.Command.Name == "uninstall" || c.Command.Name == "install" {
+		logrus.Println("success")
+	} else {
+		logrus.Println("executed")
 	}
 }
 
@@ -162,32 +169,37 @@ func getFlags() []cli.Flag {
 
 func getInstallFlags() []cli.Flag {
 	installFlags := getFlags()
-	installFlags = append(installFlags, cli.StringFlag{
-		Name:  "working-directory, d",
-		Value: helpers.GetCurrentWorkingDirectory(),
-		Usage: "Specify custom root directory where all data are stored",
-	})
-	installFlags = append(installFlags, cli.StringFlag{
-		Name:  "config, c",
-		Value: getDefaultConfigFile(),
-		Usage: "Specify custom config file",
-	})
-	installFlags = append(installFlags, cli.BoolFlag{
-		Name:  "syslog",
-		Usage: "Setup system logging integration",
-	})
+	installFlags = append(
+		installFlags,
+		cli.StringFlag{
+			Name:  "working-directory, d",
+			Value: helpers.GetCurrentWorkingDirectory(),
+			Usage: "Specify custom root directory where all data are stored",
+		},
+		cli.StringFlag{
+			Name:  "config, c",
+			Value: getDefaultConfigFile(),
+			Usage: "Specify custom config file",
+		},
+		cli.BoolFlag{
+			Name:  "syslog",
+			Usage: "Setup system logging integration",
+		},
+	)
 
-	if runtime.GOOS == "windows" {
-		installFlags = append(installFlags, cli.StringFlag{
-			Name:  "user, u",
-			Value: "",
-			Usage: "Specify user-name to secure the runner",
-		})
-		installFlags = append(installFlags, cli.StringFlag{
-			Name:  "password, p",
-			Value: "",
-			Usage: "Specify user password to install service (required)",
-		})
+	if runtime.GOOS == osTypeWindows {
+		installFlags = append(
+			installFlags,
+			cli.StringFlag{
+				Name:  "user, u",
+				Value: "",
+				Usage: "Specify user-name to secure the runner",
+			},
+			cli.StringFlag{
+				Name:  "password, p",
+				Value: "",
+				Usage: "Specify user password to install service (required)",
+			})
 	} else if os.Getuid() == 0 {
 		installFlags = append(installFlags, cli.StringFlag{
 			Name:  "user, u",

@@ -9,6 +9,10 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/trace"
 )
 
+const (
+	emptyRemoteTraceUpdateInterval = 0
+)
+
 type clientJobTrace struct {
 	client         common.Network
 	config         common.RunnerConfig
@@ -35,10 +39,10 @@ type clientJobTrace struct {
 }
 
 func (c *clientJobTrace) Success() {
-	c.Fail(nil, common.NoneFailure)
+	c.complete(nil, "")
 }
 
-func (c *clientJobTrace) Fail(err error, failureReason common.JobFailureReason) {
+func (c *clientJobTrace) complete(err error, failureReason common.JobFailureReason) {
 	c.lock.Lock()
 
 	if c.state != common.Running {
@@ -56,11 +60,8 @@ func (c *clientJobTrace) Fail(err error, failureReason common.JobFailureReason) 
 	c.finish()
 }
 
-func (c *clientJobTrace) IsJobSuccesFull() bool {
-	if c.state == common.Success {
-		return true
-	}
-	return false
+func (c *clientJobTrace) Fail(err error, failureReason common.JobFailureReason) {
+	c.complete(err, failureReason)
 }
 
 func (c *clientJobTrace) Write(data []byte) (n int, err error) {
@@ -72,7 +73,22 @@ func (c *clientJobTrace) SetMasked(masked []string) {
 }
 
 func (c *clientJobTrace) SetCancelFunc(cancelFunc context.CancelFunc) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	c.cancelFunc = cancelFunc
+}
+
+func (c *clientJobTrace) Cancel() bool {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	if c.cancelFunc == nil {
+		return false
+	}
+
+	c.cancelFunc()
+	return true
 }
 
 func (c *clientJobTrace) SetFailuresCollector(fc common.FailuresCollector) {
@@ -80,6 +96,13 @@ func (c *clientJobTrace) SetFailuresCollector(fc common.FailuresCollector) {
 }
 
 func (c *clientJobTrace) IsStdout() bool {
+	return false
+}
+
+func (c *clientJobTrace) IsJobSuccessful() bool {
+	if c.state == common.Success {
+		return true
+	}
 	return false
 }
 
@@ -171,17 +194,29 @@ func (c *clientJobTrace) sendPatch() common.UpdateState {
 		return common.UpdateSucceeded
 	}
 
-	sentOffset, state := c.client.PatchTrace(
-		c.config, c.jobCredentials, content, sentTrace)
+	result := c.client.PatchTrace(c.config, c.jobCredentials, content, sentTrace)
 
-	if state == common.UpdateSucceeded || state == common.UpdateRangeMismatch {
+	c.setUpdateInterval(result.NewUpdateInterval)
+
+	if result.State == common.UpdateSucceeded || result.State == common.UpdateRangeMismatch {
 		c.lock.Lock()
 		c.sentTime = time.Now()
-		c.sentTrace = sentOffset
+		c.sentTrace = result.SentOffset
 		c.lock.Unlock()
 	}
 
-	return state
+	return result.State
+}
+
+func (c *clientJobTrace) setUpdateInterval(newUpdateInterval time.Duration) {
+	if newUpdateInterval <= time.Duration(emptyRemoteTraceUpdateInterval) {
+		return
+	}
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	c.updateInterval = newUpdateInterval
 }
 
 // Update Coordinator that the job is still running.
@@ -233,18 +268,15 @@ func (c *clientJobTrace) sendUpdate() common.UpdateState {
 }
 
 func (c *clientJobTrace) abort() bool {
-	if c.cancelFunc != nil {
-		c.cancelFunc()
-		c.cancelFunc = nil
-		return true
-	}
-	return false
+	cancelled := c.Cancel()
+	c.SetCancelFunc(nil)
+	return cancelled
 }
 
 func (c *clientJobTrace) watch() {
 	for {
 		select {
-		case <-time.After(c.updateInterval):
+		case <-time.After(c.getUpdateInterval()):
 			state := c.incrementalUpdate()
 			if state == common.UpdateAbort && c.abort() {
 				<-c.finished
@@ -258,16 +290,27 @@ func (c *clientJobTrace) watch() {
 	}
 }
 
+func (c *clientJobTrace) getUpdateInterval() time.Duration {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	return c.updateInterval
+}
+
 func (c *clientJobTrace) setupLogLimit() {
 	bytesLimit := c.config.OutputLimit * 1024 // convert to bytes
 	if bytesLimit == 0 {
-		bytesLimit = common.DefaultOutputLimit
+		bytesLimit = common.DefaultTraceOutputLimit
 	}
 
 	c.buffer.SetLimit(bytesLimit)
 }
 
-func newJobTrace(client common.Network, config common.RunnerConfig, jobCredentials *common.JobCredentials) (*clientJobTrace, error) {
+func newJobTrace(
+	client common.Network,
+	config common.RunnerConfig,
+	jobCredentials *common.JobCredentials,
+) (*clientJobTrace, error) {
 	buffer, err := trace.New()
 	if err != nil {
 		return nil, err
@@ -280,8 +323,8 @@ func newJobTrace(client common.Network, config common.RunnerConfig, jobCredentia
 		jobCredentials:      jobCredentials,
 		id:                  jobCredentials.ID,
 		maxTracePatchSize:   common.DefaultTracePatchLimit,
-		updateInterval:      common.UpdateInterval,
-		forceSendInterval:   common.ForceTraceSentInterval,
-		finishRetryInterval: common.UpdateRetryInterval,
+		updateInterval:      common.DefaultTraceUpdateInterval,
+		forceSendInterval:   common.TraceForceSendInterval,
+		finishRetryInterval: common.TraceFinishRetryInterval,
 	}, nil
 }

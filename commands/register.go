@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/imdario/mergo"
@@ -14,6 +15,7 @@ import (
 	"github.com/urfave/cli"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
 	"gitlab.com/gitlab-org/gitlab-runner/network"
 )
@@ -59,6 +61,7 @@ func (c *configTemplate) loadConfigTemplate() error {
 	return nil
 }
 
+//nolint:lll
 type RegisterCommand struct {
 	context    *cli.Context
 	network    common.Network
@@ -78,6 +81,9 @@ type RegisterCommand struct {
 	AccessLevel       string `long:"access-level" env:"REGISTER_ACCESS_LEVEL" description:"Set access_level of the runner to not_protected or ref_protected; defaults to not_protected"`
 	MaximumTimeout    int    `long:"maximum-timeout" env:"REGISTER_MAXIMUM_TIMEOUT" description:"What is the maximum timeout (in seconds) that will be set for job when using this Runner"`
 	Paused            bool   `long:"paused" env:"REGISTER_PAUSED" description:"Set Runner to be paused, defaults to 'false'"`
+
+	// TODO: Remove in 13.0 https://gitlab.com/gitlab-org/gitlab-runner/issues/6404
+	// DockerServices []string `long:"docker-services" json:"docker-services" env:"DOCKER_SERVICES" description:"DEPRECATED will be remove in 13.0: Add service that is started with container from main register command"`
 
 	common.RunnerConfig
 }
@@ -145,89 +151,136 @@ func (s *RegisterCommand) ask(key, prompt string, allowEmptyOptional ...bool) st
 
 func (s *RegisterCommand) askExecutor() {
 	for {
-		names := common.GetExecutors()
+		names := common.GetExecutorNames()
 		executors := strings.Join(names, ", ")
 		s.Executor = s.ask("executor", "Please enter the executor: "+executors+":", true)
-		if common.GetExecutor(s.Executor) != nil {
+		if common.GetExecutorProvider(s.Executor) != nil {
 			return
 		}
 
-		message := "Invalid executor specified"
+		message := "Invalid executor specified:"
 		if s.NonInteractive {
-			logrus.Panicln(message)
+			logrus.Panicln(message, s.Executor, "(Available:", executors, ")")
 		} else {
-			logrus.Errorln(message)
+			logrus.Panicln(message, s.Executor, "(Available: ", executors, ")")
 		}
 	}
 }
 
-func (s *RegisterCommand) askDocker() {
-	s.askBasicDocker("ruby:2.6")
+// func (s *RegisterCommand) askDocker() {
+// 	s.askBasicDocker("ruby:2.6")
 
-	for _, volume := range s.Docker.Volumes {
-		parts := strings.Split(volume, ":")
-		if parts[len(parts)-1] == "/cache" {
-			return
-		}
-	}
-	s.Docker.Volumes = append(s.Docker.Volumes, "/cache")
-}
+// 	for _, volume := range s.Docker.Volumes {
+// 		parts := strings.Split(volume, ":")
+// 		if parts[len(parts)-1] == "/cache" {
+// 			return
+// 		}
+// 	}
+// 	s.Docker.Volumes = append(s.Docker.Volumes, "/cache")
+// }
 
-func (s *RegisterCommand) askDockerWindows() {
-	s.askBasicDocker("mcr.microsoft.com/windows/servercore:1809")
+// func (s *RegisterCommand) askDockerWindows() {
+// 	s.askBasicDocker("mcr.microsoft.com/windows/servercore:1809")
 
-	for _, volume := range s.Docker.Volumes {
-		// This does not cover all the possibilities since we don't have access
-		// to volume parsing package since it's internal.
-		if strings.Contains(volume, defaultDockerWindowCacheDir) {
-			return
-		}
-	}
-	s.Docker.Volumes = append(s.Docker.Volumes, defaultDockerWindowCacheDir)
-}
+// 	for _, volume := range s.Docker.Volumes {
+// 		// This does not cover all the possibilities since we don't have access
+// 		// to volume parsing package since it's internal.
+// 		if strings.Contains(volume, defaultDockerWindowCacheDir) {
+// 			return
+// 		}
+// 	}
+// 	s.Docker.Volumes = append(s.Docker.Volumes, defaultDockerWindowCacheDir)
+// }
 
-func (s *RegisterCommand) askBasicDocker(exampleHelperImage string) {
-	if s.Docker == nil {
-		s.Docker = &common.DockerConfig{}
-	}
+// func (s *RegisterCommand) askBasicDocker(exampleHelperImage string) {
+// 	if s.Docker == nil {
+// 		s.Docker = &common.DockerConfig{}
+// 	}
 
-	s.Docker.Image = s.ask("docker-image", fmt.Sprintf("Please enter the default Docker image (e.g. %s):", exampleHelperImage))
-}
+// 	s.Docker.Image = s.ask("docker-image", fmt.Sprintf("Please enter the default Docker image (e.g. %s):", exampleHelperImage))
+// }
 
-func (s *RegisterCommand) askParallels() {
-	s.Parallels.BaseName = s.ask("parallels-base-name", "Please enter the Parallels VM (e.g. my-vm):")
-}
+// func (s *RegisterCommand) askParallels() {
+// 	s.Parallels.BaseName = s.ask("parallels-base-name", "Please enter the Parallels VM (e.g. my-vm):")
+// }
 
-func (s *RegisterCommand) askVirtualBox() {
-	s.VirtualBox.BaseName = s.ask("virtualbox-base-name", "Please enter the VirtualBox VM (e.g. my-vm):")
-}
-
-
+// func (s *RegisterCommand) askVirtualBox() {
+// 	s.VirtualBox.BaseName = s.ask("virtualbox-base-name", "Please enter the VirtualBox VM (e.g. my-vm):")
+// }
 
 func (s *RegisterCommand) askAnka() {
-	// anka executor
-
-	s.Anka.ControllerAddress = s.ask("anka-controller-address", "Please enter the Anka Cloud Controller address")
-	s.Anka.ImageId = s.ask("anka-image-id", "Please enter the Anka Image id")
-	tag := s.ask("anka-tag", "Pleas enter the tag to use (leave empty for latest)", true)
+	httpCheck := regexp.MustCompile(`^(http|https)://`)
+	s.Anka.ControllerAddress = s.ask("anka-controller-address", "Please enter the Anka Cloud Controller address (http[s]://<address>)")
+	if httpCheck.MatchString(s.Anka.ControllerAddress) == false {
+		logrus.Panicln("you must use http:// or https://")
+	}
+	s.Anka.TemplateUUID = s.ask("anka-template-uuid", "Please enter the Anka Template UUID you wish to use for this runner")
+	tag := s.ask("anka-tag", "Please enter the Tag name for the Template (leave empty for latest)", true)
 	if tag == "" {
 		s.Anka.Tag = nil
 	} else {
 		s.Anka.Tag = &tag
 	}
+
+	if !s.NonInteractive {
+		fmt.Printf("%s%s%s\n", helpers.ANSI_BOLD_YELLOW, "Certificate paths cannot contain a tilde (example: '~/cert.pem')", helpers.ANSI_RESET)
+	}
+	tildeCheck := regexp.MustCompile("^~/")
+	rootCaPath := s.ask("anka-root-ca-path", "[Certificate Authentication] Specify the location of your Controller's Root CA (optional)", true)
+	if rootCaPath == "" {
+		s.Anka.RootCaPath = nil
+	} else {
+		s.Anka.RootCaPath = &rootCaPath
+	}
+	if tildeCheck.MatchString(rootCaPath) == true {
+		logrus.Panicln("paths cannot contain tilde (~)")
+	}
+	certPath := s.ask("anka-cert-path", "[Certificate Authentication] Specify the location of your GitLab Certificate (optional)", true)
+	if certPath == "" {
+		s.Anka.CertPath = nil
+	} else {
+		s.Anka.CertPath = &certPath
+	}
+	if tildeCheck.MatchString(certPath) == true {
+		logrus.Panicln("paths cannot contain tilde (~)")
+	}
+	keyPath := s.ask("anka-key-path", "[Certificate Authentication] Specify the location of your GitLab Certificate Key (optional)", true)
+	if keyPath == "" {
+		s.Anka.KeyPath = nil
+	} else {
+		s.Anka.KeyPath = &keyPath
+	}
+	if tildeCheck.MatchString(keyPath) == true {
+		logrus.Panicln("paths cannot contain tilde (~)")
+	}
+	var err error
+	tlsBool := false
+	tlsVerification := s.ask("anka-skip-tls-verification", "[Certificate Authentication] Skip TLS Verification? (optional)", true)
+	if tlsVerification == "true" || tlsVerification == "false" {
+		tlsBool, err = strconv.ParseBool(tlsVerification)
+		if err != nil {
+			logrus.Panicln(err)
+		}
+	} else {
+		logrus.Panicln("you must provide a boolean (true or false)")
+	}
+	s.Anka.SkipTLSVerification = tlsBool
 }
-
-
-
 
 func (s *RegisterCommand) askSSHServer() {
 	s.SSH.Host = s.ask("ssh-host", "Please enter the SSH server address (e.g. my.server.com):")
 	s.SSH.Port = s.ask("ssh-port", "Please enter the SSH server port (e.g. 22):", true)
 }
 
-func (s *RegisterCommand) askSSHLogin() {
-	s.SSH.User = s.ask("ssh-user", "Please enter the SSH user (e.g. root):")
-	s.SSH.Password = s.ask("ssh-password", "Please enter the SSH password (e.g. docker.io):", true)
+// func (s *RegisterCommand) askSSHLogin() {
+// 	s.SSH.User = s.ask("ssh-user", "Please enter the SSH user (e.g. root):")
+// 	s.SSH.Password = s.ask("ssh-password", "Please enter the SSH password (e.g. docker.io):", true)
+// 	s.SSH.IdentityFile = s.ask("ssh-identity-file", "Please enter path to SSH identity file (e.g. /home/user/.ssh/id_rsa):", true)
+// }
+
+func (s *RegisterCommand) askAnkaSSHLogin() {
+	s.SSH.User = s.ask("ssh-user", "Please enter the SSH user for your Anka VM (e.g. anka):")
+	s.SSH.Password = s.ask("ssh-password", "Please enter the SSH password (e.g. admin):", true)
 	s.SSH.IdentityFile = s.ask("ssh-identity-file", "Please enter path to SSH identity file (e.g. /home/user/.ssh/id_rsa):", true)
 }
 
@@ -244,114 +297,106 @@ func (s *RegisterCommand) askRunner() {
 		if !s.network.VerifyRunner(s.RunnerCredentials) {
 			logrus.Panicln("Failed to verify this runner. Perhaps you are having network problems")
 		}
-	} else {
-		// we store registration token as token, since we pass that to RunnerCredentials
-		s.Token = s.ask("registration-token", "Please enter the gitlab-ci token for this runner:")
-		s.Name = s.ask("name", "Please enter the gitlab-ci description for this runner:")
-		s.TagList = s.ask("tag-list", "Please enter the gitlab-ci tags for this runner (comma separated):", true)
-
-		if s.TagList == "" {
-			s.RunUntagged = true
-		}
-
-		parameters := common.RegisterRunnerParameters{
-			Description:    s.Name,
-			Tags:           s.TagList,
-			Locked:         s.Locked,
-			AccessLevel:    s.AccessLevel,
-			RunUntagged:    s.RunUntagged,
-			MaximumTimeout: s.MaximumTimeout,
-			Active:         !s.Paused,
-		}
-
-		result := s.network.RegisterRunner(s.RunnerCredentials, parameters)
-		if result == nil {
-			logrus.Panicln("Failed to register this runner. Perhaps you are having network problems")
-		}
-
-		s.Token = result.Token
-		s.registered = true
+		return
 	}
+
+	// we store registration token as token, since we pass that to RunnerCredentials
+	s.Token = s.ask("registration-token", "Please enter the gitlab-ci token for this runner:")
+	s.Name = s.ask("name", "Please enter the gitlab-ci description for this runner:")
+	s.TagList = s.ask("tag-list", "Please enter the gitlab-ci tags for this runner (comma separated):", true)
+
+	if s.TagList == "" {
+		s.RunUntagged = true
+	}
+
+	parameters := common.RegisterRunnerParameters{
+		Description:    s.Name,
+		Tags:           s.TagList,
+		Locked:         s.Locked,
+		AccessLevel:    s.AccessLevel,
+		RunUntagged:    s.RunUntagged,
+		MaximumTimeout: s.MaximumTimeout,
+		Active:         !s.Paused,
+	}
+
+	result := s.network.RegisterRunner(s.RunnerCredentials, parameters)
+	if result == nil {
+		logrus.Panicln("Failed to register this runner. Perhaps you are having network problems")
+	}
+
+	s.Token = result.Token
+	s.registered = true
 }
 
+//nolint:funlen
 func (s *RegisterCommand) askExecutorOptions() {
-	kubernetes := s.Kubernetes
-	machine := s.Machine
-	docker := s.Docker
-	ssh := s.SSH
-	parallels := s.Parallels
-	virtualbox := s.VirtualBox
-	anka := s.Anka
-	custom := s.Custom
 
-	s.Kubernetes = nil
-	s.Machine = nil
-	s.Docker = nil
+	ssh := s.SSH
+	anka := s.Anka
+
 	s.SSH = nil
-	s.Parallels = nil
-	s.VirtualBox = nil
-	s.Custom = nil
+	s.Referees = nil
 
 	executorFns := map[string]func(){
-		"kubernetes": func() {
-			s.Kubernetes = kubernetes
-		},
-		"docker+machine": func() {
-			s.Machine = machine
-			s.Docker = docker
-			s.askDocker()
-		},
-		"docker-ssh+machine": func() {
-			s.Machine = machine
-			s.Docker = docker
-			s.SSH = ssh
-			s.askDocker()
-			s.askSSHLogin()
-		},
-		"docker": func() {
-			s.Docker = docker
-			s.askDocker()
-		},
-		"docker-windows": func() {
-			s.Docker = docker
-			s.askDockerWindows()
-		},
-		"docker-ssh": func() {
-			s.Docker = docker
-			s.SSH = ssh
-			s.askDocker()
-			s.askSSHLogin()
-		},
-		"ssh": func() {
-			s.SSH = ssh
-			s.askSSHServer()
-			s.askSSHLogin()
-		},
-		"parallels": func() {
-			s.SSH = ssh
-			s.Parallels = parallels
-			s.askParallels()
-			s.askSSHServer()
-		},
-		"virtualbox": func() {
-			s.SSH = ssh
-			s.VirtualBox = virtualbox
-			s.askVirtualBox()
-			s.askSSHLogin()
-		},
-		"shell": func() {
-			if runtime.GOOS == "windows" && s.RunnerConfig.Shell == "" {
-				s.Shell = "powershell"
-			}
-		},
-		"custom": func() {
-			s.Custom = custom
-		},
+		// "kubernetes": func() {
+		// 	s.Kubernetes = kubernetes
+		// },
+		// "docker+machine": func() {
+		// 	s.Machine = machine
+		// 	s.Docker = docker
+		// 	s.askDocker()
+		// },
+		// "docker-ssh+machine": func() {
+		// 	s.Machine = machine
+		// 	s.Docker = docker
+		// 	s.SSH = ssh
+		// 	s.askDocker()
+		// 	s.askSSHLogin()
+		// },
+		// "docker": func() {
+		// 	s.Docker = docker
+		// 	s.askDocker()
+		// },
+		// "docker-windows": func() {
+		// 	s.Docker = docker
+		// 	s.askDockerWindows()
+		// },
+		// "docker-ssh": func() {
+		// 	s.Docker = docker
+		// 	s.SSH = ssh
+		// 	s.askDocker()
+		// 	s.askSSHLogin()
+		// },
+		// "ssh": func() {
+		// 	s.SSH = ssh
+		// 	s.askSSHServer()
+		// 	s.askSSHLogin()
+		// },
+		// "parallels": func() {
+		// 	s.SSH = ssh
+		// 	s.Parallels = parallels
+		// 	s.askParallels()
+		// 	s.askSSHServer()
+		// },
+		// "virtualbox": func() {
+		// 	s.SSH = ssh
+		// 	s.VirtualBox = virtualbox
+		// 	s.askVirtualBox()
+		// 	s.askSSHLogin()
+		// },
+		// "shell": func() {
+		// 	if runtime.GOOS == "windows" && s.RunnerConfig.Shell == "" {
+		// 		s.Shell = "powershell"
+		// 	}
+		// },
+		// "custom": func() {
+		// 	s.Custom = custom
+		// },
 		"anka": func() {
 			s.SSH = ssh
 			s.Anka = anka
 			s.askAnka()
-			s.askSSHLogin()
+			s.askAnkaSSHLogin()
 		},
 	}
 
@@ -379,34 +424,22 @@ func (s *RegisterCommand) Execute(context *cli.Context) {
 	s.askRunner()
 
 	if !s.LeaveRunner {
-		defer func() {
-			// De-register runner on panic
-			if r := recover(); r != nil {
-				if s.registered {
-					s.network.UnregisterRunner(s.RunnerCredentials)
-				}
-
-				// pass panic to next defer
-				panic(r)
-			}
-		}()
-
-		signals := make(chan os.Signal, 1)
-		signal.Notify(signals, os.Interrupt)
-
-		go func() {
-			signal := <-signals
-			s.network.UnregisterRunner(s.RunnerCredentials)
-			logrus.Fatalf("RECEIVED SIGNAL: %v", signal)
-		}()
+		defer s.unregisterRunner()()
 	}
 
 	if s.config.Concurrent < s.Limit {
-		logrus.Warningf("Specified limit (%d) larger then current concurrent limit (%d). Concurrent limit will not be enlarged.", s.Limit, s.config.Concurrent)
+		logrus.Warningf(
+			"Specified limit (%d) larger then current concurrent limit (%d). "+
+				"Concurrent limit will not be enlarged.",
+			s.Limit,
+			s.config.Concurrent,
+		)
 	}
 
 	s.askExecutor()
 	s.askExecutorOptions()
+
+	// s.transformDockerServices(s.DockerServices)
 
 	s.mergeTemplate()
 
@@ -416,8 +449,52 @@ func (s *RegisterCommand) Execute(context *cli.Context) {
 		logrus.Panicln(err)
 	}
 
-	logrus.Printf("Runner registered successfully. Feel free to start it, but if it's running already the config should be automatically reloaded!")
+	logrus.Println("Updated: ", s.ConfigFile)
+	logrus.Printf("Feel free to start %v, but if it's running already the config should be automatically reloaded!", common.NAME)
+
 }
+
+func (s *RegisterCommand) unregisterRunner() func() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+
+	go func() {
+		signal := <-signals
+		s.network.UnregisterRunner(s.RunnerCredentials)
+		logrus.Fatalf("RECEIVED SIGNAL: %v", signal)
+	}()
+
+	return func() {
+		// De-register runner on panic
+		if r := recover(); r != nil {
+			if s.registered {
+				s.network.UnregisterRunner(s.RunnerCredentials)
+			}
+
+			// pass panic to next defer
+			panic(r)
+		}
+	}
+}
+
+// TODO: Remove in 13.0 https://gitlab.com/gitlab-org/gitlab-runner/issues/6404
+//
+// transformDockerServices will take the value from `DockerServices`
+// and convert the value of each entry into a `common.DockerService` definition.
+//
+// This is to keep backward compatibility when the user passes
+// `--docker-services alpine:3.11 --docker-services ruby:3.10` we parse this
+// correctly and create the service definition.
+// func (s *RegisterCommand) transformDockerServices(services []string) {
+// 	for _, service := range services {
+// 		s.Docker.Services = append(
+// 			s.Docker.Services,
+// 			&common.DockerService{
+// 				Service: common.Service{Name: service},
+// 			},
+// 		)
+// 	}
+// }
 
 func (s *RegisterCommand) mergeTemplate() {
 	if !s.ConfigTemplate.Enabled() {
@@ -442,14 +519,8 @@ func newRegisterCommand() *RegisterCommand {
 		RunnerConfig: common.RunnerConfig{
 			Name: getHostname(),
 			RunnerSettings: common.RunnerSettings{
-				Kubernetes: &common.KubernetesConfig{},
-				Cache:      &common.CacheConfig{},
-				Machine:    &common.DockerMachine{},
-				Docker:     &common.DockerConfig{},
-				SSH:        &ssh.Config{},
-				Parallels:  &common.ParallelsConfig{},
-				VirtualBox: &common.VirtualBoxConfig{},
-				Anka:       &common.AnkaConfig{},
+				Anka: &common.AnkaConfig{},
+				SSH:  &ssh.Config{},
 			},
 		},
 		Locked:  true,

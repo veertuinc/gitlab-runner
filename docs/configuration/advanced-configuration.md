@@ -4,7 +4,7 @@ table_display_block: true
 
 # Advanced configuration
 
-GitLab Runner configuration uses the [TOML][] format.
+GitLab Runner configuration uses the [TOML](https://github.com/toml-lang/toml) format.
 
 The file to be edited can be found in:
 
@@ -21,17 +21,61 @@ This defines global settings of GitLab Runner.
 | Setting | Description |
 | ------- | ----------- |
 | `concurrent`     | limits how many jobs globally can be run concurrently. The most upper limit of jobs using all defined runners. `0` **does not** mean unlimited |
-| `log_level`      | Log level (options: debug, info, warn, error, fatal, panic). Note that this setting has lower priority than level set by command line argument `--debug`, `-l` or `--log-level` |
-| `log_format`     | Log format (options: runner, text, json). Note that this setting has lower priority than format set by command line argument `--log-format` |
+| `log_level`      | Log level (options: `debug`, `info`, `warn`, `error`, `fatal`, `panic`). Note that this setting has lower priority than level set by command line argument `--debug`, `-l`, or `--log-level` |
+| `log_format`     | Log format (options: `runner`, `text`, `json`). Note that this setting has lower priority than format set by command line argument `--log-format` The default value is `runner`. |
 | `check_interval` | defines the interval length, in seconds, between new jobs check. The default value is `3`; if set to `0` or lower, the default value will be used. |
-| `sentry_dsn`     | enable tracking of all system level errors to sentry |
+| `sentry_dsn`     | enable tracking of all system level errors to Sentry |
 | `listen_address` | address (`<host>:<port>`) on which the Prometheus metrics HTTP server should be listening |
 
-Example:
+Configuration example:
 
-```bash
+```toml
 concurrent = 4
 log_level = "warning"
+```
+
+### `log_format` examples (truncated)
+
+#### `runner`
+
+```shell
+Runtime platform                                    arch=amd64 os=darwin pid=37300 revision=HEAD version=development version
+Starting multi-runner from /etc/gitlab-runner/config.toml...  builds=0
+WARNING: Running in user-mode.
+WARNING: Use sudo for system-mode:
+WARNING: $ sudo gitlab-runner...
+
+Configuration loaded                                builds=0
+listen_address not defined, metrics & debug endpoints disabled  builds=0
+[session_server].listen_address not defined, session endpoints disabled  builds=0
+```
+
+#### `text`
+
+```shell
+INFO[0000] Runtime platform                              arch=amd64 os=darwin pid=37773 revision=HEAD version="development version"
+INFO[0000] Starting multi-runner from /etc/gitlab-runner/config.toml...  builds=0
+WARN[0000] Running in user-mode.
+WARN[0000] Use sudo for system-mode:
+WARN[0000] $ sudo gitlab-runner...
+INFO[0000]
+INFO[0000] Configuration loaded                          builds=0
+INFO[0000] listen_address not defined, metrics & debug endpoints disabled  builds=0
+INFO[0000] [session_server].listen_address not defined, session endpoints disabled  builds=0
+```
+
+#### `json`
+
+```shell
+{"arch":"amd64","level":"info","msg":"Runtime platform","os":"darwin","pid":38229,"revision":"HEAD","time":"2020-06-05T15:57:35+02:00","version":"development version"}
+{"builds":0,"level":"info","msg":"Starting multi-runner from /etc/gitlab-runner/config.toml...","time":"2020-06-05T15:57:35+02:00"}
+{"level":"warning","msg":"Running in user-mode.","time":"2020-06-05T15:57:35+02:00"}
+{"level":"warning","msg":"Use sudo for system-mode:","time":"2020-06-05T15:57:35+02:00"}
+{"level":"warning","msg":"$ sudo gitlab-runner...","time":"2020-06-05T15:57:35+02:00"}
+{"level":"info","msg":"","time":"2020-06-05T15:57:35+02:00"}
+{"builds":0,"level":"info","msg":"Configuration loaded","time":"2020-06-05T15:57:35+02:00"}
+{"builds":0,"level":"info","msg":"listen_address not defined, metrics \u0026 debug endpoints disabled","time":"2020-06-05T15:57:35+02:00"}
+{"builds":0,"level":"info","msg":"[session_server].listen_address not defined, session endpoints disabled","time":"2020-06-05T15:57:35+02:00"}
 ```
 
 ### How `check_interval` works
@@ -71,8 +115,8 @@ be repeated after all requests for the other workers + their sleeps are called.
 
 NOTE: **Note:**
 `session_server` is not yet supported by
-[`gitlab-runner` helm chart](https://docs.gitlab.com/charts/charts/gitlab/gitlab-runner/index.html),
-but support [is planned](https://gitlab.com/gitlab-org/charts/gitlab-runner/issues/79).
+[`gitlab-runner` Helm chart](https://docs.gitlab.com/charts/charts/gitlab/gitlab-runner/index.html),
+but support [is planned](https://gitlab.com/gitlab-org/charts/gitlab-runner/-/issues/79).
 
 The section `[session_server]` is a system runner level configuration, so it should be specified at the root level,
 not per executor i.e. it should be outside `[[runners]]` section. The session server allows the user to interact
@@ -95,12 +139,16 @@ section and terminal support will be disabled.
 
 Example:
 
-```bash
+```toml
 [session_server]
-  listen_address = "0.0.0.0:8093" #  listen on all available interfaces on port 8093
+  listen_address = "[::]:8093" #  listen on all available interfaces on port 8093
   advertise_address = "runner-host-name.tld:8093"
   session_timeout = 1800
 ```
+
+NOTE: **Note:**
+If using the GitLab Runner Docker image, you will also need to expose port 8093 by
+adding `-p 8093:8093` to your [`docker run` command](../install/docker.md).
 
 ## The `[[runners]]` section
 
@@ -127,12 +175,13 @@ This defines one runner entry.
 | `post_build_script`  | Commands to be executed on the Runner just after executing the build, but before executing `after_script`. To insert multiple commands, use a (triple-quoted) multi-line string or "\n" character. |
 | `clone_url`          | Overwrite the URL for the GitLab instance. Used if the Runner can't connect to GitLab on the URL GitLab exposes itself. |
 | `debug_trace_disabled` | Disables the `CI_DEBUG_TRACE` feature. When set to true, then debug log (trace) will remain disabled even if `CI_DEBUG_TRACE` will be set to `true` by the user. |
+| `referees` | Extra job monitoring workers that pass their results as job artifacts to GitLab |
 
 Example:
 
-```bash
+```toml
 [[runners]]
-  name = "ruby-2.1-docker"
+  name = "ruby-2.6-docker"
   url = "https://CI/"
   token = "TOKEN"
   limit = 0
@@ -145,11 +194,11 @@ Example:
 
 ### How `clone_url` works
 
-In cases where the GitLab instance is exposed to an URL which can't be used
+In cases where the GitLab instance is exposed to a URL which can't be used
 by the runner, a `clone_url` can be configured. For example; GitLab is exposed
 to `https://gitlab.example.com`, but the runner can't reach that because of
 a firewall setup. If the runner can reach the node on `192.168.1.23`,
-the `clone_url` should be set to `"http://192.168.1.23`.
+the `clone_url` should be set to `http://192.168.1.23`.
 
 Only if the `clone_url` is set, the runner will construct a clone URL in the form
 of `http://gitlab-ci-token:s3cr3tt0k3n@192.168.1.23/namespace/project.git`.
@@ -161,9 +210,9 @@ There are a couple of available executors currently.
 | Executor | Description |
 | -------- | ----------- |
 | `shell`       | run build locally, default |
-| `docker`      | run build using Docker container. This requires the presence of `[runners.docker]` and [Docker Engine][] installed on a system that the Runner will run the job on. |
-| `docker-windows` | run build using Windows Docker container. This requires the presence of `[runners.docker]` and [Docker Engine][] installed on a Windows system. |
-| `docker-ssh`  | run build using Docker container, but connect to it with SSH - this requires the presence of `[runners.docker]` , `[runners.ssh]` and [Docker Engine][] installed on the system that the Runner runs. **Note: This will run the docker container on the local machine, it just changes how the commands are run inside that container. If you want to run docker commands on an external machine, then you should change the `host` parameter in the `runners.docker` section.**|
+| `docker`      | run build using Docker container. This requires the presence of `[runners.docker]` and [Docker Engine](https://docs.docker.com/engine/) installed on a system that the Runner will run the job on. |
+| `docker-windows` | run build using Windows Docker container. This requires the presence of `[runners.docker]` and [Docker Engine](https://docs.docker.com/engine/) installed on a Windows system. |
+| `docker-ssh`  | run build using Docker container, but connect to it with SSH - this requires the presence of `[runners.docker]` , `[runners.ssh]` and [Docker Engine](https://docs.docker.com/engine/) installed on the system that the Runner runs. **Note: This will run the Docker container on the local machine, it just changes how the commands are run inside that container. If you want to run Docker commands on an external machine, then you should change the `host` parameter in the `runners.docker` section.**|
 | `ssh`         | run build remotely with SSH - this requires the presence of `[runners.ssh]` |
 | `parallels`   | run build using Parallels VM, but connect to it with SSH - this requires the presence of `[runners.parallels]` and `[runners.ssh]` |
 | `virtualbox`  | run build using VirtualBox VM, but connect to it with SSH - this requires the presence of `[runners.virtualbox]` and `[runners.ssh]` |
@@ -179,8 +228,8 @@ There are a couple of available shells that can be run on different platforms.
 | ----- | ----------- |
 | `bash`        | generate Bash (Bourne-shell) script. All commands executed in Bash context (default for all Unix systems) |
 | `sh`          | generate Sh (Bourne-shell) script. All commands executed in Sh context (fallback for `bash` for all Unix systems) |
-| `cmd`         | generate Windows Batch script. All commands are executed in Batch context (default for Windows) |
-| `powershell`  | generate Windows PowerShell script. All commands are executed in PowerShell context |
+| `powershell`  | generate PowerShell script. All commands are executed in Windows PowerShell Desktop context (default for Windows) |
+| `pwsh`        | generate PowerShell script. All commands are executed in PowerShell Core context |
 
 ## The `[runners.docker]` section
 
@@ -198,42 +247,54 @@ This defines the Docker Container parameters.
 | `memory_swap`                  | String value containing the total memory limit |
 | `memory_reservation`           | String value containing the memory soft limit |
 | `oom_kill_disable`             | Do not kill processes in a container if an out-of-memory (OOM) error occurs |
+| `oom_score_adjust`             | OOM score adjustment, positive means kill earlier |
 | `cpuset_cpus`                  | String value containing the cgroups CpusetCpus to use |
-| `cpus`                         | String value of number of CPUs (available in docker 1.13 or later) |
+| `cpu_shares`                   | Number of CPU shares used to set relative cpu usage, default: 1024 |
+| `cpus`                         | String value of number of CPUs (available in Docker 1.13 or later) |
 | `dns`                          | A list of DNS servers for the container to use |
 | `dns_search`                   | A list of DNS search domains |
 | `privileged`                   | Make container run in Privileged mode (insecure) |
 | `disable_entrypoint_overwrite` | Disable the image entrypoint overwriting |
-| `userns_mode`                  | Sets the usernamespace mode for the container when usernamespace remapping option is enabled. (available in docker 1.10 or later) |
+| `userns_mode`                  | Sets the usernamespace mode for the container when usernamespace remapping option is enabled. (available in Docker 1.10 or later) |
 | `cap_add`                      | Add additional Linux capabilities to the container |
 | `cap_drop`                     | Drop additional Linux capabilities from the container |
-| `security_opt`                 | Set security options (--security-opt in docker run), takes a list of ':' separated key/values |
+| `security_opt`                 | Set security options (--security-opt in `docker run`), takes a list of ':' separated key/values |
 | `devices`                      | Share additional host devices with the container |
 | `cache_dir`                    | Specify where Docker caches should be stored (this can be absolute or relative to current working directory). See `disable_cache` for more information. |
 | `disable_cache`                | The Docker executor has 2 levels of caching: a global one (like any other executor) and a local cache based on Docker volumes. This configuration flag acts only on the local one which disables the use of automatically created (not mapped to a host directory) cache volumes. In other words, it only prevents creating a container that holds temporary files of builds, it does not disable the cache if the Runner is configured in [distributed cache mode](autoscale.md#distributed-runners-caching). |
 | `network_mode`              | Add container to a custom network |
-| `wait_for_services_timeout` | Specify how long to wait for docker services, set to 0 to disable, default: 30 |
+| `wait_for_services_timeout` | Specify how long to wait for Docker services, set to 0 to disable, default: 30 |
 | `volumes`                   | Specify additional volumes that should be mounted (same syntax as Docker's `-v` flag) |
 | `extra_hosts`               | Specify hosts that should be defined in container environment |
 | `shm_size`                  | Specify shared memory size for images (in bytes) |
-| `volumes_from`              | Specify a list of volumes to inherit from another container in the form `\<container name\>[:\<ro&#124;rw\>]` |
+| `volumes_from`              | Specify a list of volumes to inherit from another container in the form `<container name>[:<ro|rw>]`. Access level defaults to read-write, but can be manually set to `ro` (read-only) or `rw` (read-write). |
 | `volume_driver`             | Specify the volume driver to use for the container |
 | `links`                     | Specify containers which should be linked with building container |
-| `services`                  | Specify additional services that should be run with build. Please visit [Docker Registry](https://hub.docker.com) for list of available applications. Each service will be run in separate container and linked to the build. |
 | `allowed_images`            | Specify wildcard list of images that can be specified in `.gitlab-ci.yml`. If not present all images are allowed (equivalent to `["*/*:*"]`) |
 | `allowed_services`          | Specify wildcard list of services that can be specified in `.gitlab-ci.yml`. If not present all images are allowed (equivalent to `["*/*:*"]`) |
 | `pull_policy`               | Specify the image pull policy: `never`, `if-not-present` or `always` (default); read more in the [pull policies documentation](../executors/docker.md#how-pull-policies-work) |
 | `sysctls`                   | specify the sysctl options |
 | `helper_image`              | (Advanced) [Override the default helper image](#helper-image) used to clone repos and upload artifacts. |
 
+### The `[[runners.docker.services]]` section
+
+Specify additional services that should be run with the build. Please visit the
+[Docker Registry](https://hub.docker.com) for the list of available applications.
+Each service will be run in a separate container and linked to the build.
+
+| Parameter | Description |
+| --------- | ----------- |
+| `name`  | The name of the image to be run as a service |
+| `alias` | Additional [alias name](https://docs.gitlab.com/ee/ci/docker/using_docker_images.html#available-settings-for-services) that can be used to access the service |
+
 Example:
 
-```bash
+```toml
 [runners.docker]
   host = ""
   hostname = ""
   tls_cert_path = "/Users/ayufan/.boot2docker/certs"
-  image = "ruby:2.1"
+  image = "ruby:2.6"
   memory = "128m"
   memory_swap = "256m"
   memory_reservation = "64m"
@@ -255,9 +316,17 @@ Example:
   shm_size = 300000
   volumes_from = ["storage_container:ro"]
   links = ["mysql_container:mysql"]
-  services = ["mysql", "redis:2.8", "postgres:9"]
   allowed_images = ["ruby:*", "python:*", "php:*"]
-  allowed_services = ["postgres:9.4", "postgres:latest"]
+  allowed_services = ["postgres:9", "redis:*", "mysql:*"]
+  [[runners.docker.services]]
+    name = "mysql"
+    alias = "db"
+  [[runners.docker.services]]
+    name = "redis:2.8"
+    alias = "cache"
+  [[runners.docker.services]]
+    name = "postgres:9"
+    alias = "postgres-db"
   [runners.docker.sysctls]
     "net.ipv4.ip_forward" = "1"
 ```
@@ -276,12 +345,12 @@ A data volume is a specially-designated directory within one or more containers
 that bypasses the Union File System. Data volumes are designed to persist data,
 independent of the container's life cycle.
 
-```bash
+```toml
 [runners.docker]
   host = ""
   hostname = ""
   tls_cert_path = "/Users/ayufan/.boot2docker/certs"
-  image = "ruby:2.1"
+  image = "ruby:2.6"
   privileged = false
   disable_cache = true
   volumes = ["/path/to/volume/in/container"]
@@ -295,12 +364,12 @@ In addition to creating a volume using a data volume, you can also mount
 a directory from your Docker daemon's host into a container. It's useful
 when you want to store directories outside the container.
 
-```bash
+```toml
 [runners.docker]
   host = ""
   hostname = ""
   tls_cert_path = "/Users/ayufan/.boot2docker/certs"
-  image = "ruby:2.1"
+  image = "ruby:2.6"
   privileged = false
   disable_cache = true
   volumes = ["/path/to/bind/from/host:/path/to/bind/in/container:rw"]
@@ -311,7 +380,7 @@ This will use `/path/to/bind/from/host` of the CI host inside the container at
 
 NOTE: **Note:**
 GitLab Runner 11.11 and newer [will mount the host
-directory](https://gitlab.com/gitlab-org/gitlab-runner/merge_requests/1261)
+directory](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/1261)
 for the defined [services](https://docs.gitlab.com/ee/ci/services/) as
 well.
 
@@ -325,15 +394,15 @@ well.
 >  of credentials on runner's host. We recommend to upgrade your Runner to
 >  at least version **1.8** if you want to use private registries.
 >- Using private registries with the `if-not-present` pull policy may introduce
->  [security implications][secpull]. To fully understand how pull policies work,
+>  [security implications](../security/index.md#usage-of-private-docker-images-with-if-not-present-pull-policy). To fully understand how pull policies work,
 >  read the [pull policies documentation](../executors/docker.md#how-pull-policies-work).
 
 If you want to use private registries as a source of images for your builds,
 you can set the authorization configuration in the `DOCKER_AUTH_CONFIG`
-[variable]. It can be set in both GitLab Variables section of
+[variable](https://docs.gitlab.com/ee/ci/variables/#variables). It can be set in both GitLab Variables section of
 a project and in the `config.toml` file.
 
-For a detailed example, visit the [Using Docker images documentation][priv-example].
+For a detailed example, visit the [Using Docker images documentation](https://docs.gitlab.com/ee/ci/docker/using_docker_images.html#define-an-image-from-a-private-container-registry).
 
 The steps performed by the Runner can be summed up to:
 
@@ -344,7 +413,7 @@ The steps performed by the Runner can be summed up to:
    found, subsequent pulls will make use of it.
 
 Now that the Runner is set up to authenticate against your private registry,
-learn [how to configure `.gitlab-ci.yml`][yaml-priv-reg] in order to use that
+learn [how to configure `.gitlab-ci.yml`](https://docs.gitlab.com/ee/ci/yaml/README.html#image-and-services) in order to use that
 registry.
 
 #### Support for GitLab integrated registry
@@ -364,7 +433,7 @@ configuration added with `DOCKER_AUTH_CONFIG` variable.
 Thanks to this, in your builds you can use any image from you GitLab integrated
 registry, even if the image is private/protected. To fully understand for
 which images the builds will have access, read the
-[New CI build permissions model][ci-build-permissions-model] documentation.
+[New CI build permissions model](https://docs.gitlab.com/ee/user/project/new_ci_build_permissions_model.html) documentation.
 
 #### Precedence of Docker authorization resolving
 
@@ -384,10 +453,10 @@ if you add some credentials for the _integrated registry_ with the
 
 #### Restrict `allowed_images` to private registry
 
-For certain setups you will restrict access of the build jobs to docker images
-which comes from your private docker registry. In that case set
+For certain setups you will restrict access of the build jobs to Docker images
+which comes from your private Docker registry. In that case set
 
-```bash
+```toml
 [runners.docker]
   ...
   allowed_images = ["my.registry.tld:5000/*:*"]
@@ -405,7 +474,7 @@ This defines the Parallels parameters.
 
 Example:
 
-```bash
+```toml
 [runners.parallels]
   base_name = "my-parallels-image"
   template_name = ""
@@ -427,7 +496,7 @@ your `PATH` environment variable on Windows hosts:
 
 Example:
 
-```bash
+```toml
 [runners.virtualbox]
   base_name = "my-virtualbox-image"
   base_snapshot = "my-image-snapshot"
@@ -448,7 +517,7 @@ This defines the SSH connection parameters.
 
 Example:
 
-```
+```toml
 [runners.ssh]
   host = "my-production-server"
   port = "22"
@@ -468,28 +537,31 @@ found in the separate [runners autoscale documentation](autoscale.md).
 |---------------------|-------------|
 | `IdleCount`         | Number of machines, that need to be created and waiting in _Idle_ state. |
 | `IdleTime`          | Time (in seconds) for machine to be in _Idle_ state before it is removed. |
-| `OffPeakPeriods`    | Time periods when the scheduler is in the OffPeak mode. An array of cron-style patterns (described below). |
-| `OffPeakTimezone`   | Timezone for the times given in OffPeakPeriods. A timezone string like `Europe/Berlin`. Defaults to the locale system setting of the host if omitted or empty. GitLab Runner attempts to locate the timezone database in the directory or uncompressed zip file named by the `ZONEINFO` environment variable, then looks in known installation locations on Unix systems, and finally looks in `$GOROOT/lib/time/zoneinfo.zip`. |
-| `OffPeakIdleCount`  | Like `IdleCount`, but for _Off Peak_ time periods. |
-| `OffPeakIdleTime`   | Like `IdleTime`, but for _Off Peak_ time mperiods. |
+| `[[runners.machine.autoscaling]]` | Multiple sections each containing overrides for autoscaling configuration. The last section with the expression matching the current time is selected. |
+| `OffPeakPeriods`    | Deprecated: Time periods when the scheduler is in the OffPeak mode. An array of cron-style patterns (described [below](#periods-syntax)). |
+| `OffPeakTimezone`   | Deprecated: Timezone for the times given in OffPeakPeriods. A timezone string like `Europe/Berlin`. Defaults to the locale system setting of the host if omitted or empty. GitLab Runner attempts to locate the timezone database in the directory or uncompressed zip file named by the `ZONEINFO` environment variable, then looks in known installation locations on Unix systems, and finally looks in `$GOROOT/lib/time/zoneinfo.zip`. |
+| `OffPeakIdleCount`  | Deprecated: Like `IdleCount`, but for _Off Peak_ time periods. |
+| `OffPeakIdleTime`   | Deprecated: Like `IdleTime`, but for _Off Peak_ time periods. |
 | `MaxBuilds`         | Builds count after which machine will be removed. |
 | `MachineName`       | Name of the machine. It **must** contain `%s`, which will be replaced with a unique machine identifier. |
 | `MachineDriver`     | Docker Machine `driver` to use. More details can be found in the [Docker Machine configuration section](autoscale.md#supported-cloud-providers). |
 | `MachineOptions`    | Docker Machine options. More details can be found in the [Docker Machine configuration section](autoscale.md#supported-cloud-providers). |
 
+### The `[[runners.machine.autoscaling]]` sections
+
+| Parameter           | Description |
+|---------------------|-------------|
+| `Periods`           | Time periods during which this schedule is active. An array of cron-style patterns (described [below](#periods-syntax)).
+| `IdleCount`         | Number of machines that need to be created and waiting in _Idle_ state. |
+| `IdleTime`          | Time (in seconds) for a machine to be in _Idle_ state before it is removed. |
+| `Timezone`   | Timezone for the times given in `Periods`. A timezone string like `Europe/Berlin`. Defaults to the locale system setting of the host if omitted or empty. GitLab Runner attempts to locate the timezone database in the directory or uncompressed zip file named by the `ZONEINFO` environment variable, then looks in known installation locations on Unix systems, and finally looks in `$GOROOT/lib/time/zoneinfo.zip`. |
+
 Example:
 
-```bash
+```toml
 [runners.machine]
   IdleCount = 5
   IdleTime = 600
-  OffPeakPeriods = [
-    "* * 0-10,18-23 * * mon-fri *",
-    "* * * * * sat,sun *"
-  ]
-  OffPeakTimezone = "Europe/Berlin"
-  OffPeakIdleCount = 1
-  OffPeakIdleTime = 3600
   MaxBuilds = 100
   MachineName = "auto-scale-%s"
   MachineDriver = "digitalocean"
@@ -502,26 +574,35 @@ Example:
       "digitalocean-private-networking",
       "engine-registry-mirror=http://10.11.12.13:12345"
   ]
+  [[runners.machine.autoscaling]]
+    Periods = ["* * 9-17 * * mon-fri *"]
+    IdleCount = 50
+    IdleTime = 3600
+    Timezone = "UTC"
+  [[runners.machine.autoscaling]]
+    Periods = ["* * * * * sat,sun *"]
+    IdleCount = 5
+    IdleTime = 60
+    Timezone = "UTC"
 ```
 
-### OffPeakPeriods syntax
+### Periods syntax
 
-The `OffPeakPeriods` setting contains an array of string patterns of
+The `Periods` setting contains an array of string patterns of
 time periods represented in a cron-style format. The line contains
 following fields:
 
-```
+```plaintext
 [second] [minute] [hour] [day of month] [month] [day of week] [year]
 ```
 
 Like in the standard cron configuration file, the fields can contain single
 values, ranges, lists and asterisks. A detailed description of the syntax
-can be found [here][cronvendor].
+can be found [here](https://github.com/gorhill/cronexpr#implementation).
 
 ## The `[runners.custom]` section
 
-Define configuration for the [custom
-executor](../executors/custom.md).
+Define configuration for the [custom executor](../executors/custom.md).
 
 | Parameter               | Type         | Required | Description                                                                                                                                                                                                                                                                                         |
 |-------------------------|--------------|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -594,12 +675,12 @@ Below is a table containing a summary of `config.toml`, cli options and ENV vari
 NOTE: **Note:**
 Moved from the `[runners.cache]` section in GitLab Runner 11.3.0.
 
-Allows to configure S3 storage for cache. This section contains settings related to S3, that previously were
+Configure S3 storage for cache. This section contains settings related to S3, that previously were
 present globally in the `[runners.cache]` section.
 
 | Parameter        | Type             | Description |
 |------------------|------------------|-------------|
-| `ServerAddress`  | string           | A `host:port` to the used S3-compatible server. |
+| `ServerAddress`  | string           | A `host:port` for the S3-compatible server. If you are using a server other than AWS, consult the storage product documentation to determine the correct address. For DigitalOcean, the address must be in the format `spacename.region.digitaloceanspaces.com`. |
 | `AccessKey`      | string           | The access key specified for your S3 instance. |
 | `SecretKey`      | string           | The secret key specified for your S3 instance. |
 | `BucketName`     | string           | Name of the storage bucket where cache will be stored. |
@@ -615,15 +696,15 @@ Example:
   Shared = false
   [runners.cache.s3]
     ServerAddress = "s3.amazonaws.com"
-    AccessKey = "AMAZON_S3_ACCESS_KEY"
-    SecretKey = "AMAZON_S3_SECRET_KEY"
+    AccessKey = "AWS_S3_ACCESS_KEY"
+    SecretKey = "AWS_S3_SECRET_KEY"
     BucketName = "runners-cache"
     BucketLocation = "eu-west-1"
     Insecure = false
 ```
 
 NOTE: **Note:**
-For Amazon's S3 service, the `ServerAddress` should always be `s3.amazonaws.com`. The Minio S3 client will
+For Amazon's S3 service, the `ServerAddress` should always be `s3.amazonaws.com`. The MinIO S3 client will
 get bucket metadata and modify the URL to point to the valid region (eg. `s3-eu-west-1.amazonaws.com`) itself.
 
 NOTE: **Note:**
@@ -676,7 +757,7 @@ Examples:
 
 ## The `[runners.kubernetes]` section
 
-> Added in GitLab Runner v1.6.0
+> Introduced in GitLab Runner v1.6.0.
 
 This defines the Kubernetes parameters.
 See [Kubernetes executor](../executors/kubernetes.md) for additional parameters.
@@ -687,15 +768,15 @@ See [Kubernetes executor](../executors/kubernetes.md) for additional parameters.
 | `cert_file`      | string  | Optional Kubernetes master auth certificate |
 | `key_file`       | string  | Optional Kubernetes master auth private key |
 | `ca_file`        | string  | Optional Kubernetes master auth ca certificate |
-| `image`          | string  | Default docker image to use for builds when none is specified |
+| `image`          | string  | Default Docker image to use for builds when none is specified |
 | `namespace`      | string  | Namespace to run Kubernetes jobs in |
 | `privileged`     | boolean | Run all containers with the privileged flag enabled |
 | `node_selector`  | table   | A `table` of `key=value` pairs of `string=string`. Setting this limits the creation of pods to Kubernetes nodes matching all the `key=value` pairs |
-| `image_pull_secrets` | array | A list of secrets that are used to authenticate docker image pulling |
+| `image_pull_secrets` | array | A list of secrets that are used to authenticate Docker image pulling |
 
 Example:
 
-```bash
+```toml
 [runners.kubernetes]
   host = "https://45.67.34.123:4892"
   cert_file = "/etc/ssl/kubernetes/api.crt"
@@ -715,7 +796,7 @@ to handle Git, artifacts and cache operations. This container is created from a 
 
 The helper image is based on Alpine Linux and it's provided for amd64 and arm architectures. It contains
 a `gitlab-runner-helper` binary which is a special compilation of GitLab Runner binary, that contains only a subset
-of available commands, as well as Git, Git LFS, SSL certificates store and basic configuration of Alpine.
+of available commands, as well as Git, Git LFS, SSL certificates store, and basic configuration of Alpine.
 
 When GitLab Runner is installed from the DEB/RPM packages, both images (`amd64` and `arm` based) are installed on the host.
 When the Runner prepares the environment for the job execution, if the image in specified version (based on Runner's Git
@@ -723,8 +804,8 @@ revision) is not found on Docker Engine, it is automatically loaded. It works li
 `docker` and `docker+machine` executors.
 
 Things work a little different for the `kubernetes` executor or when GitLab Runner is installed manually. For manual
-installations, the `gitlab-runner-helper` binary is not included and for the `kubernetes` executor,the API of Kubernetes
-doesn't allow to load the `gitlab-runner-helper` image from a local archive. In both cases, GitLab Runner will download
+installations, the `gitlab-runner-helper` binary is not included and for the `kubernetes` executor, the API of Kubernetes
+doesn't allow loading the `gitlab-runner-helper` image from a local archive. In both cases, GitLab Runner will download
 the helper image from Docker Hub, from GitLab's official repository `gitlab/gitlab-runner-helper` by using the Runner's
 revision and architecture for defining which tag should be downloaded.
 
@@ -782,10 +863,22 @@ which is based on its compilation data. After updating the Runner to a new versi
 Runner will try to download the proper image. This of course means that the image should be uploaded to the registry
 before upgrading the Runner, otherwise the jobs will start failing with a "No such image" error.
 
+In GitLab Runner 13.2 and later, the helper image is tagged by
+`$CI_RUNNER_VERSION` in addition to `$CI_RUNNER_REVISION`. Both tags are
+valid and point to the same image.
+
+```toml
+[[runners]]
+  (...)
+  executor = "docker"
+  [runners.docker]
+    (...)
+    helper_image = "my.registry.local/gitlab/gitlab-runner-helper:x86_64-v${CI_RUNNER_VERSION}"
+```
+
 ## The `[runners.custom_build_dir]` section
 
-NOTE: **Note:**
-[Introduced](https://gitlab.com/gitlab-org/gitlab-runner/merge_requests/1267) in GitLab Runner 11.10
+> [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/1267) in GitLab Runner 11.10.
 
 This section defines [custom build directories](https://docs.gitlab.com/ee/ci/yaml/README.html#custom-build-directories) parameters.
 
@@ -809,23 +902,74 @@ with executors that share `builds_dir` and have `concurrent > 1`.
 
 Example:
 
-```bash
+```toml
 [runners.custom_build_dir]
   enabled = true
 ```
+
+## The `[runners.referees]` section
+
+> - [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/1545) in GitLab Runner 12.7.
+> - Requires [GitLab v12.6](https://about.gitlab.com/releases/2019/12/22/gitlab-12-6-released/) or later.
+
+Use Runner Referees to pass extra job monitoring data to GitLab. Runner referees are special workers within the Runner manager that query and collect additional data related to a job and upload their results to GitLab as job artifacts.
+
+### Using the Metrics Runner Referee
+
+If the machine/container that is running the job exposes [Prometheus](https://prometheus.io) metrics that are gathered by a Prometheus server, GitLab Runner can query the Prometheus server for the entirety of the job duration. After the metrics are received, they are uploaded as a job artifact which can be used for analysis later.
+
+Currently, only the [`docker-machine` executor](../executors/docker_machine.md) supports the referee.
+
+### Configuring the Metrics Runner Referee for a Runner
+
+Define `[runner.referees]` and `[runner.referees.metrics]` in your `config.toml` file within a `[[runner]]` section and add the following fields:
+
+| Setting              | Description                                                                                                                         |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `prometheus_address` | The server that collects metrics from Runner instances. It must be accessible by the Runner manager when the job finishes.          |
+| `query_interval`     | The frequency the Prometheus instance associated with a job is queried for time series data, defined as an interval (in seconds).   |
+| `queries`            | An array of [PromQL](https://prometheus.io/docs/prometheus/latest/querying/basics/) queries that will be executed for each interval. |
+
+Here is a complete configuration example for `node_exporter` metrics:
+
+```toml
+[[runners]]
+  [runners.referees]
+    [runners.referees.metrics]
+      prometheus_address = "http://localhost:9090"
+      query_interval = 10
+      metric_queries = [
+        "arp_entries:rate(node_arp_entries{{selector}}[{interval}])",
+        "context_switches:rate(node_context_switches_total{{selector}}[{interval}])",
+        "cpu_seconds:rate(node_cpu_seconds_total{{selector}}[{interval}])",
+        "disk_read_bytes:rate(node_disk_read_bytes_total{{selector}}[{interval}])",
+        "disk_written_bytes:rate(node_disk_written_bytes_total{{selector}}[{interval}])",
+        "memory_bytes:rate(node_memory_MemTotal_bytes{{selector}}[{interval}])",
+        "memory_swap_bytes:rate(node_memory_SwapTotal_bytes{{selector}}[{interval}])",
+        "network_tcp_active_opens:rate(node_netstat_Tcp_ActiveOpens{{selector}}[{interval}])",
+        "network_tcp_passive_opens:rate(node_netstat_Tcp_PassiveOpens{{selector}}[{interval}])",
+        "network_receive_bytes:rate(node_network_receive_bytes_total{{selector}}[{interval}])",
+        "network_receive_drops:rate(node_network_receive_drop_total{{selector}}[{interval}])",
+        "network_receive_errors:rate(node_network_receive_errs_total{{selector}}[{interval}])",
+        "network_receive_packets:rate(node_network_receive_packets_total{{selector}}[{interval}])",
+        "network_transmit_bytes:rate(node_network_transmit_bytes_total{{selector}}[{interval}])",
+        "network_transmit_drops:rate(node_network_transmit_drop_total{{selector}}[{interval}])",
+        "network_transmit_errors:rate(node_network_transmit_errs_total{{selector}}[{interval}])",
+        "network_transmit_packets:rate(node_network_transmit_packets_total{{selector}}[{interval}])"
+      ]
+```
+
+Metrics queries are in `canonical_name:query_string` format. The query string supports two variables that are replaced during execution:
+
+| Setting      | Description                                                                                                                   |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `{selector}` | Replaced with a `label_name=label_value` pair that selects metrics generated by a specific Runner instance within Prometheus. |
+| `{interval}` | Replaced with the `query_interval` parameter from the `[runners.referees.metrics]` configuration for this referee.            |
+
+For example, a shared Runner environment using the `docker-machine` executor would have a `{selector}` similar to `node=shared-runner-123`.
 
 ## Note
 
 If you'd like to deploy to multiple servers using GitLab CI, you can create a
 single script that deploys to multiple servers or you can create many scripts.
 It depends on what you'd like to do.
-
-[TOML]: https://github.com/toml-lang/toml
-[Docker Engine]: https://docs.docker.com/engine/
-[yaml-priv-reg]: https://docs.gitlab.com/ee/ci/yaml/README.html#image-and-services
-[ci-build-permissions-model]: https://docs.gitlab.com/ee/user/project/new_ci_build_permissions_model.html
-[secpull]: ../security/index.md#usage-of-private-docker-images-with-if-not-present-pull-policy
-
-[priv-example]: https://docs.gitlab.com/ee/ci/docker/using_docker_images.html#define-an-image-from-a-private-container-registry
-[variable]: https://docs.gitlab.com/ee/ci/variables/#variables
-[cronvendor]: https://github.com/gorhill/cronexpr#implementation

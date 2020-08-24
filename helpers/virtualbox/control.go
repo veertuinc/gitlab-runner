@@ -118,10 +118,7 @@ func FindSSHPort(vmName string) (port string, err error) {
 
 func Exist(vmName string) bool {
 	_, err := VBoxManage("showvminfo", vmName)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func CreateOsVM(vmName string, templateName string, templateSnapshot string) error {
@@ -158,7 +155,7 @@ func allocatePort(handler func(port string) error) (port string, err error) {
 		logrus.Debugln("VirtualBox ConfigureSSH:", err)
 		return
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	usedPorts, err := getUsedVirtualBoxPorts()
 	if err != nil {
@@ -202,14 +199,25 @@ func RevertToSnapshot(vmName string) error {
 	return err
 }
 
+func matchSnapshotName(snapshotName string, snapshotList string) bool {
+	snapshotRe := regexp.MustCompile(
+		fmt.Sprintf(`(?m)^Snapshot(Name|UUID)[^=]*="(%s)"\r?$`, regexp.QuoteMeta(snapshotName)),
+	)
+	snapshot := snapshotRe.FindStringSubmatch(snapshotList)
+	return snapshot != nil
+}
+
 func HasSnapshot(vmName string, snapshotName string) bool {
 	output, err := VBoxManage("snapshot", vmName, "list", "--machinereadable")
 	if err != nil {
 		return false
 	}
-	snapshotRe := regexp.MustCompile(fmt.Sprintf(`(?m)^Snapshot(Name|UUID)[^=]*="%s"$`, regexp.QuoteMeta(snapshotName)))
-	snapshot := snapshotRe.FindStringSubmatch(output)
-	return snapshot != nil
+	return matchSnapshotName(snapshotName, output)
+}
+
+func matchCurrentSnapshotName(snapshotList string) []string {
+	snapshotRe := regexp.MustCompile(`(?m)^CurrentSnapshotName="([^"]*)"\r?$`)
+	return snapshotRe.FindStringSubmatch(snapshotList)
 }
 
 func GetCurrentSnapshot(vmName string) (string, error) {
@@ -217,10 +225,9 @@ func GetCurrentSnapshot(vmName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	snapshotRe := regexp.MustCompile(`(?m)^CurrentSnapshotName="([^"]*)"$`)
-	snapshot := snapshotRe.FindStringSubmatch(output)
+	snapshot := matchCurrentSnapshotName(output)
 	if snapshot == nil {
-		return "", errors.New("Failed to match current snapshot name")
+		return "", errors.New("failed to match current snapshot name")
 	}
 	return snapshot[1], nil
 }

@@ -5,35 +5,34 @@ import (
 )
 
 type StandardResponse struct {
-	Status string 		`json:"status"`
-	Message string 		`json:"message"`
-	Body interface{} 	`json:"body,omitempty"`
+	Status  string      `json:"status"`
+	Message string      `json:"message"`
+	Body    interface{} `json:"body,omitempty"`
 }
-
 
 type RegistryVmResponse struct {
 	StandardResponse
-	Body                []VMListItem `json:"body"`
+	Body []VMListItem `json:"body"`
 }
 
 type ListVmResponse struct {
 	StandardResponse
-	Body 				[]VM         `json:"body"`
+	Body []VM `json:"body"`
 }
 
 type VMListItem struct {
-	Id      string `json:"id"`
-	Name	string `json:"name"`
+	Id   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type StartVmResponse struct {
 	StandardResponse
-	Body			    []string `json:"body"`
+	Body []string `json:"body"`
 }
 
 type GetVmResponse struct {
 	StandardResponse
-	Body 				VMStatus `json:"body"`
+	Body VMStatus `json:"body"`
 }
 
 type StartVMRequest struct {
@@ -45,15 +44,13 @@ type StartVMRequest struct {
 	Name               *string `json:"name_template,omitempty"`
 	Script             *string `json:"startup_script,omitempty"`
 	ScriptRunCondition *int    `json:"startup_script_condition,omitempty"`
-	Priority		   *int    `json:"priority,omitempty"`
-	GroupId 		   *string `json:"group_id,omitempty"`
-
+	Priority           *int    `json:"priority,omitempty"`
+	GroupId            *string `json:"group_id,omitempty"`
 }
 
 type TerminateVMRequest struct {
 	InstanceID string `json:"id"`
 }
-
 
 type InstanceState string
 
@@ -68,27 +65,25 @@ const (
 	StateError       = "Error"
 )
 
-
 type VM struct {
-	Id 		string `json:"instance_id"`
+	Id       string   `json:"instance_id"`
 	VmStatus VMStatus `json:"vm"`
 }
 
 type VMStatus struct {
-	State         InstanceState       `json:"instance_state"`
-	Message       string              `json:"message,omitempty"`
-	RegistryAddr  string              `json:"anka_registry"`
-	SourceVMID    string              `json:"vmid"`
-	Tag           *string             `json:"tag,omitempty"`
-	Version       *uint               `json:"version,omitempty"`
-	VMInfo        *VmInfo `json:"vminfo,omitempty"`
-	InFlightReqID *string             `json:"inflight_reqid,omitempty"`
-	Ts            time.Time           `json:"ts"`
-	CrTime        time.Time           `json:"cr_time"`
-	Progress      float32             `json:"progress"`
-	GroupId       string              `json:"group_id,omitempty"`
+	State         InstanceState `json:"instance_state"`
+	Message       string        `json:"message,omitempty"`
+	RegistryAddr  string        `json:"anka_registry"`
+	SourceVMID    string        `json:"vmid"`
+	Tag           *string       `json:"tag,omitempty"`
+	Version       *uint         `json:"version,omitempty"`
+	VMInfo        *VmInfo       `json:"vminfo,omitempty"`
+	InFlightReqID *string       `json:"inflight_reqid,omitempty"`
+	Ts            time.Time     `json:"ts"`
+	CrTime        time.Time     `json:"cr_time"`
+	Progress      float32       `json:"progress"`
+	GroupId       string        `json:"group_id,omitempty"`
 }
-
 
 type VmInfo struct {
 	Id                  string                `json:"uuid"`
@@ -99,7 +94,7 @@ type VmInfo struct {
 	NodeId              string                `json:"node_id,omitempty"`
 	HostIp              string                `json:"host_ip,omitempty"`
 	VmIp                string                `json:"ip"`
-	ImageId             string                `json:"image_id,omitempty"`
+	Template            string                `json:"image_id,omitempty"`
 	Tag                 string                `json:"tag,omitempty"`
 	VncPort             int                   `json:"vnc_port"`
 	VncConnectionString string                `json:"vnc_connection_string,omitempty"`
@@ -113,4 +108,3 @@ type PortForwardingRule struct {
 	Protocol string `json:"protocol"`
 	Name     string `json: "name"`
 }
-

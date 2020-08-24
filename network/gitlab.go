@@ -103,7 +103,13 @@ func (n *GitLabClient) getClient(credentials requestCredentials) (c *client, err
 	if n.clients == nil {
 		n.clients = make(map[string]*client)
 	}
-	key := fmt.Sprintf("%s_%s_%s_%s", credentials.GetURL(), credentials.GetToken(), credentials.GetTLSCAFile(), credentials.GetTLSCertFile())
+	key := fmt.Sprintf(
+		"%s_%s_%s_%s",
+		credentials.GetURL(),
+		credentials.GetToken(),
+		credentials.GetTLSCAFile(),
+		credentials.GetTLSCertFile(),
+	)
 	c = n.clients[key]
 	if c == nil {
 		c, err = newClient(credentials)
@@ -117,6 +123,7 @@ func (n *GitLabClient) getClient(credentials requestCredentials) (c *client, err
 }
 
 func (n *GitLabClient) getLastUpdate(credentials requestCredentials) (lu string) {
+
 	cli, err := n.getClient(credentials)
 	if err != nil {
 		return ""
@@ -135,11 +142,11 @@ func (n *GitLabClient) getRunnerVersion(config common.RunnerConfig) common.Versi
 		Shell:        config.Shell,
 	}
 
-	if executor := common.GetExecutor(config.Executor); executor != nil {
-		executor.GetFeatures(&info.Features)
+	if executorProvider := common.GetExecutorProvider(config.Executor); executorProvider != nil {
+		_ = executorProvider.GetFeatures(&info.Features)
 
 		if info.Shell == "" {
-			info.Shell = executor.GetDefaultShell()
+			info.Shell = executorProvider.GetDefaultShell()
 		}
 	}
 
@@ -150,8 +157,15 @@ func (n *GitLabClient) getRunnerVersion(config common.RunnerConfig) common.Versi
 	return info
 }
 
-func (n *GitLabClient) doRaw(credentials requestCredentials, method, uri string, request io.Reader, requestType string, headers http.Header) (res *http.Response, err error) {
+func (n *GitLabClient) doRaw(
+	credentials requestCredentials,
+	method, uri string,
+	request io.Reader,
+	requestType string,
+	headers http.Header,
+) (res *http.Response, err error) {
 	c, err := n.getClient(credentials)
+
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +173,13 @@ func (n *GitLabClient) doRaw(credentials requestCredentials, method, uri string,
 	return c.do(uri, method, request, requestType, headers)
 }
 
-func (n *GitLabClient) doJSON(credentials requestCredentials, method, uri string, statusCode int, request interface{}, response interface{}) (int, string, *http.Response) {
+func (n *GitLabClient) doJSON(
+	credentials requestCredentials,
+	method, uri string,
+	statusCode int,
+	request interface{},
+	response interface{},
+) (int, string, *http.Response) {
 	c, err := n.getClient(credentials)
 	if err != nil {
 		return clientError, err.Error(), nil
@@ -168,25 +188,41 @@ func (n *GitLabClient) doJSON(credentials requestCredentials, method, uri string
 	return c.doJSON(uri, method, statusCode, request, response)
 }
 
-func (n *GitLabClient) getResponseTLSData(credentials requestCredentials, response *http.Response) (ResponseTLSData, error) {
+func (n *GitLabClient) getResponseTLSData(
+	credentials requestCredentials,
+	response *http.Response,
+) (ResponseTLSData, error) {
 	c, err := n.getClient(credentials)
 	if err != nil {
-		return ResponseTLSData{}, fmt.Errorf("couldn't get client: %v", err)
+		return ResponseTLSData{}, fmt.Errorf("couldn't get client: %w", err)
 	}
 
 	return c.getResponseTLSData(response.TLS)
 }
 
-func (n *GitLabClient) RegisterRunner(runner common.RunnerCredentials, parameters common.RegisterRunnerParameters) *common.RegisterRunnerResponse {
+func (n *GitLabClient) RegisterRunner(
+	runner common.RunnerCredentials,
+	parameters common.RegisterRunnerParameters,
+) *common.RegisterRunnerResponse {
 	// TODO: pass executor
 	request := common.RegisterRunnerRequest{
 		RegisterRunnerParameters: parameters,
-		Token: runner.Token,
-		Info:  n.getRunnerVersion(common.RunnerConfig{}),
+		Token:                    runner.Token,
+		Info:                     n.getRunnerVersion(common.RunnerConfig{}),
 	}
 
 	var response common.RegisterRunnerResponse
-	result, statusText, _ := n.doJSON(&runner, "POST", "runners", http.StatusCreated, &request, &response)
+	result, statusText, resp := n.doJSON(
+		&runner,
+		http.MethodPost,
+		"runners",
+		http.StatusCreated,
+		&request,
+		&response,
+	)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 
 	switch result {
 	case http.StatusCreated:
@@ -209,7 +245,10 @@ func (n *GitLabClient) VerifyRunner(runner common.RunnerCredentials) bool {
 		Token: runner.Token,
 	}
 
-	result, statusText, _ := n.doJSON(&runner, "POST", "runners/verify", http.StatusOK, &request, nil)
+	result, statusText, resp := n.doJSON(&runner, http.MethodPost, "runners/verify", http.StatusOK, &request, nil)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 
 	switch result {
 	case http.StatusOK:
@@ -233,7 +272,10 @@ func (n *GitLabClient) UnregisterRunner(runner common.RunnerCredentials) bool {
 		Token: runner.Token,
 	}
 
-	result, statusText, _ := n.doJSON(&runner, "DELETE", "runners", http.StatusNoContent, &request, nil)
+	result, statusText, resp := n.doJSON(&runner, http.MethodDelete, "runners", http.StatusNoContent, &request, nil)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 
 	const baseLogText = "Unregistering runner from GitLab"
 	switch result {
@@ -266,11 +308,13 @@ func addTLSData(response *common.JobResponse, tlsData ResponseTLSData) {
 		if err == nil {
 			response.TLSAuthKey = string(data)
 		}
-
 	}
 }
 
-func (n *GitLabClient) RequestJob(config common.RunnerConfig, sessionInfo *common.SessionInfo) (*common.JobResponse, bool) {
+func (n *GitLabClient) RequestJob(
+	config common.RunnerConfig,
+	sessionInfo *common.SessionInfo,
+) (*common.JobResponse, bool) {
 	request := common.JobRequest{
 		Info:       n.getRunnerVersion(config),
 		Token:      config.Token,
@@ -279,7 +323,14 @@ func (n *GitLabClient) RequestJob(config common.RunnerConfig, sessionInfo *commo
 	}
 
 	var response common.JobResponse
-	result, statusText, httpResponse := n.doJSON(&config.RunnerCredentials, "POST", "jobs/request", http.StatusCreated, &request, &response)
+	result, statusText, httpResponse := n.doJSON(
+		&config.RunnerCredentials,
+		http.MethodPost,
+		"jobs/request",
+		http.StatusCreated,
+		&request,
+		&response,
+	)
 
 	n.requestsStatusesMap.Append(config.RunnerCredentials.ShortDescription(), APIEndpointRequestJob, result)
 
@@ -313,7 +364,11 @@ func (n *GitLabClient) RequestJob(config common.RunnerConfig, sessionInfo *commo
 	}
 }
 
-func (n *GitLabClient) UpdateJob(config common.RunnerConfig, jobCredentials *common.JobCredentials, jobInfo common.UpdateJobInfo) common.UpdateState {
+func (n *GitLabClient) UpdateJob(
+	config common.RunnerConfig,
+	jobCredentials *common.JobCredentials,
+	jobInfo common.UpdateJobInfo,
+) common.UpdateState {
 	request := common.UpdateJobRequest{
 		Info:          n.getRunnerVersion(config),
 		Token:         jobCredentials.Token,
@@ -321,7 +376,14 @@ func (n *GitLabClient) UpdateJob(config common.RunnerConfig, jobCredentials *com
 		FailureReason: jobInfo.FailureReason,
 	}
 
-	result, statusText, response := n.doJSON(&config.RunnerCredentials, "PUT", fmt.Sprintf("jobs/%d", jobInfo.ID), http.StatusOK, &request, nil)
+	result, statusText, response := n.doJSON(
+		&config.RunnerCredentials,
+		http.MethodPut,
+		fmt.Sprintf("jobs/%d", jobInfo.ID),
+		http.StatusOK,
+		&request,
+		nil,
+	)
 	n.requestsStatusesMap.Append(config.RunnerCredentials.ShortDescription(), APIEndpointUpdateJob, result)
 
 	remoteJobStateResponse := NewRemoteJobStateResponse(response)
@@ -339,7 +401,7 @@ func (n *GitLabClient) UpdateJob(config common.RunnerConfig, jobCredentials *com
 		log.Debugln("Submitting job to coordinator...", "ok")
 		return common.UpdateSucceeded
 	case result == http.StatusNotFound:
-		log.Warningln("Submitting job to coordinator...", "aborted")
+		log.Warningln("Submitting job to coordinator...", "aborted (status not found)")
 		return common.UpdateAbort
 	case result == http.StatusForbidden:
 		log.WithField("status", statusText).Errorln("Submitting job to coordinator...", "forbidden")
@@ -353,13 +415,18 @@ func (n *GitLabClient) UpdateJob(config common.RunnerConfig, jobCredentials *com
 	}
 }
 
-func (n *GitLabClient) PatchTrace(config common.RunnerConfig, jobCredentials *common.JobCredentials, content []byte, startOffset int) (int, common.UpdateState) {
+func (n *GitLabClient) PatchTrace(
+	config common.RunnerConfig,
+	jobCredentials *common.JobCredentials,
+	content []byte,
+	startOffset int,
+) common.PatchTraceResult {
 	id := jobCredentials.ID
 
 	baseLog := config.Log().WithField("job", id)
 	if len(content) == 0 {
 		baseLog.Debugln("Appending trace to coordinator...", "skipped due to empty patch")
-		return startOffset, common.UpdateSucceeded
+		return common.NewPatchTraceResult(startOffset, common.UpdateSucceeded, 0)
 	}
 
 	endOffset := startOffset + len(content)
@@ -375,42 +442,83 @@ func (n *GitLabClient) PatchTrace(config common.RunnerConfig, jobCredentials *co
 	response, err := n.doRaw(&config.RunnerCredentials, "PATCH", uri, request, "text/plain", headers)
 	if err != nil {
 		config.Log().Errorln("Appending trace to coordinator...", "error", err.Error())
-		return startOffset, common.UpdateFailed
+		return common.NewPatchTraceResult(startOffset, common.UpdateFailed, 0)
 	}
 
-	n.requestsStatusesMap.Append(config.RunnerCredentials.ShortDescription(), APIEndpointPatchTrace, response.StatusCode)
+	n.requestsStatusesMap.Append(
+		config.RunnerCredentials.ShortDescription(),
+		APIEndpointPatchTrace,
+		response.StatusCode,
+	)
 
-	defer response.Body.Close()
-	defer io.Copy(ioutil.Discard, response.Body)
+	defer func() {
+		_, _ = io.Copy(ioutil.Discard, response.Body)
+		_ = response.Body.Close()
+	}()
 
-	tracePatchResponse := NewTracePatchResponse(response)
+	tracePatchResponse := NewTracePatchResponse(response, baseLog)
 	log := baseLog.WithFields(logrus.Fields{
-		"sent-log":   contentRange,
-		"job-log":    tracePatchResponse.RemoteRange,
-		"job-status": tracePatchResponse.RemoteState,
-		"code":       response.StatusCode,
-		"status":     response.Status,
+		"sent-log":        contentRange,
+		"job-log":         tracePatchResponse.RemoteRange,
+		"job-status":      tracePatchResponse.RemoteState,
+		"code":            response.StatusCode,
+		"status":          response.Status,
+		"update-interval": tracePatchResponse.RemoteTraceUpdateInterval,
 	})
+
+	return n.createPatchTraceResult(startOffset, tracePatchResponse, response, endOffset, log)
+}
+
+func (n *GitLabClient) createPatchTraceResult(
+	startOffset int,
+	tracePatchResponse *TracePatchResponse,
+	response *http.Response,
+	endOffset int,
+	log *logrus.Entry,
+) common.PatchTraceResult {
+	result := common.PatchTraceResult{
+		SentOffset:        startOffset,
+		NewUpdateInterval: tracePatchResponse.RemoteTraceUpdateInterval,
+	}
 
 	switch {
 	case tracePatchResponse.IsAborted():
 		log.Warningln("Appending trace to coordinator...", "aborted")
-		return startOffset, common.UpdateAbort
+		result.State = common.UpdateAbort
+
+		return result
+
 	case response.StatusCode == http.StatusAccepted:
 		log.Debugln("Appending trace to coordinator...", "ok")
-		return endOffset, common.UpdateSucceeded
+		result.SentOffset = endOffset
+		result.State = common.UpdateSucceeded
+
+		return result
+
 	case response.StatusCode == http.StatusNotFound:
 		log.Warningln("Appending trace to coordinator...", "not-found")
-		return startOffset, common.UpdateNotFound
+		result.State = common.UpdateNotFound
+
+		return result
+
 	case response.StatusCode == http.StatusRequestedRangeNotSatisfiable:
 		log.Warningln("Appending trace to coordinator...", "range mismatch")
-		return tracePatchResponse.NewOffset(), common.UpdateRangeMismatch
+		result.SentOffset = tracePatchResponse.NewOffset()
+		result.State = common.UpdateRangeMismatch
+
+		return result
+
 	case response.StatusCode == clientError:
 		log.Errorln("Appending trace to coordinator...", "error")
-		return startOffset, common.UpdateAbort
+		result.State = common.UpdateAbort
+
+		return result
+
 	default:
 		log.Warningln("Appending trace to coordinator...", "failed")
-		return startOffset, common.UpdateFailed
+		result.State = common.UpdateFailed
+
+		return result
 	}
 }
 
@@ -445,18 +553,24 @@ func uploadRawArtifactsQuery(options common.ArtifactsOptions) url.Values {
 	return q
 }
 
-func (n *GitLabClient) UploadRawArtifacts(config common.JobCredentials, reader io.Reader, options common.ArtifactsOptions) common.UploadState {
+func (n *GitLabClient) UploadRawArtifacts(
+	config common.JobCredentials,
+	reader io.Reader,
+	options common.ArtifactsOptions,
+) common.UploadState {
 	pr, pw := io.Pipe()
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 
 	mpw := multipart.NewWriter(pw)
 
 	go func() {
-		defer pw.Close()
-		defer mpw.Close()
+		defer func() {
+			_ = mpw.Close()
+			_ = pw.Close()
+		}()
 		err := n.createArtifactsForm(mpw, reader, options.BaseName)
 		if err != nil {
-			pw.CloseWithError(err)
+			_ = pw.CloseWithError(err)
 		}
 	}()
 
@@ -464,7 +578,14 @@ func (n *GitLabClient) UploadRawArtifacts(config common.JobCredentials, reader i
 
 	headers := make(http.Header)
 	headers.Set("JOB-TOKEN", config.Token)
-	res, err := n.doRaw(&config, "POST", fmt.Sprintf("jobs/%d/artifacts?%s", config.ID, query.Encode()), pr, mpw.FormDataContentType(), headers)
+	res, err := n.doRaw(
+		&config,
+		http.MethodPost,
+		fmt.Sprintf("jobs/%d/artifacts?%s", config.ID, query.Encode()),
+		pr,
+		mpw.FormDataContentType(),
+		headers,
+	)
 
 	log := logrus.WithFields(logrus.Fields{
 		"id":    config.ID,
@@ -475,33 +596,63 @@ func (n *GitLabClient) UploadRawArtifacts(config common.JobCredentials, reader i
 		log = log.WithField("responseStatus", res.Status)
 	}
 
+	messagePrefix := "Uploading artifacts to coordinator..."
+	if options.Type != "" {
+		messagePrefix = fmt.Sprintf("Uploading artifacts as %q to coordinator...", options.Type)
+	}
+
 	if err != nil {
-		log.WithError(err).Errorln("Uploading artifacts to coordinator...", "error")
+		log.WithError(err).Errorln(messagePrefix, "error")
 		return common.UploadFailed
 	}
-	defer res.Body.Close()
-	defer io.Copy(ioutil.Discard, res.Body)
+	defer func() {
+		_, _ = io.Copy(ioutil.Discard, res.Body)
+		_ = res.Body.Close()
+	}()
 
-	switch res.StatusCode {
+	return n.determineUploadState(res.StatusCode, log, messagePrefix)
+}
+
+func (n *GitLabClient) determineUploadState(
+	statusCode int,
+	log *logrus.Entry,
+	messagePrefix string,
+) common.UploadState {
+	switch statusCode {
 	case http.StatusCreated:
-		log.Println("Uploading artifacts to coordinator...", "ok")
+		log.Println(messagePrefix, "ok")
 		return common.UploadSucceeded
 	case http.StatusForbidden:
-		log.WithField("status", res.Status).Errorln("Uploading artifacts to coordinator...", "forbidden")
+		log.WithField("status", statusCode).Errorln(messagePrefix, "forbidden")
 		return common.UploadForbidden
 	case http.StatusRequestEntityTooLarge:
-		log.WithField("status", res.Status).Errorln("Uploading artifacts to coordinator...", "too large archive")
+		log.WithField("status", statusCode).Errorln(messagePrefix, "too large archive")
 		return common.UploadTooLarge
+	case http.StatusServiceUnavailable:
+		log.WithField("status", statusCode).Errorln(messagePrefix, "service unavailable")
+		return common.UploadServiceUnavailable
 	default:
-		log.WithField("status", res.Status).Warningln("Uploading artifacts to coordinator...", "failed")
+		log.WithField("status", statusCode).Warningln(messagePrefix, "failed")
 		return common.UploadFailed
 	}
 }
 
-func (n *GitLabClient) DownloadArtifacts(config common.JobCredentials, artifactsFile string) common.DownloadState {
+func (n *GitLabClient) DownloadArtifacts(
+	config common.JobCredentials,
+	artifactsFile string,
+	directDownload *bool,
+) common.DownloadState {
+	query := url.Values{}
+
+	if directDownload != nil {
+		query.Set("direct_download", strconv.FormatBool(*directDownload))
+	}
+
 	headers := make(http.Header)
 	headers.Set("JOB-TOKEN", config.Token)
-	res, err := n.doRaw(&config, "GET", fmt.Sprintf("jobs/%d/artifacts", config.ID), nil, "", headers)
+	uri := fmt.Sprintf("jobs/%d/artifacts?%s", config.ID, query.Encode())
+
+	res, err := n.doRaw(&config, http.MethodGet, uri, nil, "", headers)
 
 	log := logrus.WithFields(logrus.Fields{
 		"id":    config.ID,
@@ -516,19 +667,21 @@ func (n *GitLabClient) DownloadArtifacts(config common.JobCredentials, artifacts
 		log.Errorln("Downloading artifacts from coordinator...", "error", err.Error())
 		return common.DownloadFailed
 	}
-	defer res.Body.Close()
-	defer io.Copy(ioutil.Discard, res.Body)
+	defer func() {
+		_, _ = io.Copy(ioutil.Discard, res.Body)
+		_ = res.Body.Close()
+	}()
 
 	switch res.StatusCode {
 	case http.StatusOK:
 		file, err := os.Create(artifactsFile)
 		if err == nil {
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			_, err = io.Copy(file, res.Body)
 		}
 		if err != nil {
-			file.Close()
-			os.Remove(file.Name())
+			_ = file.Close()
+			_ = os.Remove(file.Name())
 			log.WithError(err).Errorln("Downloading artifacts from coordinator...", "error")
 			return common.DownloadFailed
 		}
@@ -546,7 +699,10 @@ func (n *GitLabClient) DownloadArtifacts(config common.JobCredentials, artifacts
 	}
 }
 
-func (n *GitLabClient) ProcessJob(config common.RunnerConfig, jobCredentials *common.JobCredentials) (common.JobTrace, error) {
+func (n *GitLabClient) ProcessJob(
+	config common.RunnerConfig,
+	jobCredentials *common.JobCredentials,
+) (common.JobTrace, error) {
 	trace, err := newJobTrace(n, config, jobCredentials)
 	if err != nil {
 		return nil, err

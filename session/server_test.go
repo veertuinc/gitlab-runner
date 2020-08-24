@@ -97,8 +97,8 @@ func TestCertificate(t *testing.T) {
 	defer server.Close()
 
 	go func() {
-		err := server.Start()
-		require.NoError(t, err)
+		errStart := server.Start()
+		require.NoError(t, errStart)
 	}()
 
 	caCertPool := x509.NewCertPool()
@@ -117,6 +117,7 @@ func TestCertificate(t *testing.T) {
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
+	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	assert.True(t, requestSuccessful)

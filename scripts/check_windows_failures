@@ -19,6 +19,7 @@ windowsTestOutputPattern="${testOutputDir}/*.windows.${WINDOWS_VERSION}.output.t
 
 trackedFailuresFile="./ci/.test-failures.${WINDOWS_VERSION}.txt"
 if [[ ! -f "${trackedFailuresFile}" ]]; then
+    echo "${trackedFailuresFile} not found, creating empty file"
     touch "${trackedFailuresFile}"
 fi
 
@@ -90,8 +91,8 @@ if [[ ${newFailuresCount} -gt 0 ]]; then
     done
 
     echo
-    echo "  This is unacceptable! Fix the failures!"
-    echo "  This job will not pass untill it's done!"
+    echo "  Please fix the new failures detected."
+    echo "  This job will not pass until it's done."
     borderBottom
 
     exit 1

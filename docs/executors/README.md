@@ -32,6 +32,7 @@ you decide which executor to use.
 |:--------------------------------------------------|:----:|:-------:|:----------:|:---------:|:------:|:----------:|---------------:|
 | Clean build environment for every build           | ✗    | ✗       | ✓          | ✓         | ✓      | ✓          |conditional (4) |
 | Reuse previous clone if it exists                 | ✓    | ✓       | ✗          | ✗         | ✓      | ✗          |conditional (4) |
+| Runner file system access protected (5)           | ✓    | ✗       | ✓          | ✓         | ✓      | ✓           |conditional    |
 | Migrate runner machine                            | ✗    | ✗       | partial    | partial   | ✓      | ✓          |✓               |
 | Zero-configuration support for concurrent builds  | ✗    | ✗ (1)   | ✓          | ✓         | ✓      | ✓          |conditional (4) |
 | Complicated build environments                    | ✗    | ✗ (2)   | ✓ (3)      | ✓ (3)     | ✓      | ✓          |✓               |
@@ -40,9 +41,14 @@ you decide which executor to use.
 1. It's possible, but in most cases it is problematic if the build uses services
    installed on the build machine
 1. It requires to install all dependencies by hand
-1. For example using [Vagrant](https://www.vagrantup.com/docs/virtualbox/ "Vagrant documentation for VirtualBox")
+1. For example using [Vagrant](https://www.vagrantup.com/docs/providers/virtualbox "Vagrant documentation for VirtualBox")
 1. Dependent on what kind of environment you are provisioning. It can be
    completely isolated or shared between each build.
+1. When a Runner's file system access is not protected, jobs can access the entire
+   system including the Runner's token, and the cache and code of other jobs.
+   Executors marked ✓ don't allow Runner to access the file system by default.
+   However, security flaws or certain configurations could allow jobs
+   to break out of their container and access the file system hosting Runner.
 
 ### I am not sure
 
@@ -106,38 +112,41 @@ Supported features by different executors:
 |:---------------------------------------------|:----:|:-------:|:----------:|:---------:|:------:|:----------:|:------:|
 | Secure Variables                             | ✓    | ✓       | ✓          | ✓         | ✓      | ✓          | ✓      |
 | GitLab Runner Exec command                   | ✗    | ✓       | ✗          | ✗         | ✓      | ✓          | ✓      |
-| `gitlab-ci.yml`: image                       | ✗    | ✗       | ✗          | ✗         | ✓      | ✓          | ✗      |
+| `gitlab-ci.yml`: image                       | ✗    | ✗       | ✗          | ✗         | ✓      | ✓          | ✓ (via [`$CUSTOM_ENV_CI_JOB_IMAGE`](custom.md#stages)      |
 | `gitlab-ci.yml`: services                    | ✗    | ✗       | ✗          | ✗         | ✓      | ✓          | ✗      |
 | `gitlab-ci.yml`: cache                       | ✓    | ✓       | ✓          | ✓         | ✓      | ✓          | ✓      |
 | `gitlab-ci.yml`: artifacts                   | ✓    | ✓       | ✓          | ✓         | ✓      | ✓          | ✓      |
-| Absolute paths: caching, artifacts           | ✗    | ✗       | ✗          | ✗         | ✗      | ✓          | ✗      |
 | Passing artifacts between stages             | ✓    | ✓       | ✓          | ✓         | ✓      | ✓          | ✓      |
 | Use GitLab Container Registry private images | n/a  | n/a     | n/a        | n/a       | ✓      | ✓          | n/a    |
-| Interactive Web terminal                     | ✗    | ✓ (bash)| ✗          | ✗         | ✓      | ✓          | ✗      |
+| Interactive Web terminal                     | ✗    | ✓ (UNIX)| ✗          | ✗         | ✓      | ✓ (1)      | ✗      |
+
+1. Interactive web terminals are not yet supported by
+[`gitlab-runner` Helm chart](../install/kubernetes.md),
+but support [is planned](https://gitlab.com/gitlab-org/charts/gitlab-runner/-/issues/79).
 
 Supported systems by different shells:
 
-| Shells  | Bash        | Windows Batch | PowerShell |
-|:-------:|:-----------:|:-------------:|:----------:|
-| Windows | ✗ (4)       | ✓ (2)         | ✓ (3)      |
-| Linux   | ✓ (1)       | ✗             | ✗          |
-| macOS     | ✓ (1)       | ✗             | ✗          |
-| FreeBSD | ✓ (1)       | ✗             | ✗          |
+| Shells  | Bash        | PowerShell Desktop | PowerShell Core | Windows Batch (deprecated) |
+|:-------:|:-----------:|:------------------:|:---------------:|:--------------------------:|
+| Windows | ✗ (4)       | ✓ (3)              | ✓               | ✓ (2)                      |
+| Linux   | ✓ (1)       | ✗                  | ✓               | ✗                          |
+| macOS   | ✓ (1)       | ✗                  | ✓               | ✗                          |
+| FreeBSD | ✓ (1)       | ✗                  | ✗               | ✗                          |
 
 1. Default shell.
-1. Default shell if no
+1. Deprecated. Default shell if no
    [`shell`](../configuration/advanced-configuration.md#the-runners-section)
    is specified.
 1. Default shell when a new GitLab Runner is registered.
 1. Bash shell is currently not working on Windows out of the box due to
-   [this issue](https://gitlab.com/gitlab-org/gitlab-runner/issues/1515) but is intended
+   [this issue](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1515) but is intended
    to be supported again soon. See the issue for a workaround.
 
 Supported systems for interactive web terminals by different shells:
 
-| Shells  | Bash        | Windows Batch | PowerShell |
-|:-------:|:-----------:|:-------------:|:----------:|
-| Windows | ✗           | ✗             | ✗          |
-| Linux   | ✓           | ✗             | ✗          |
-| macOS     | ✓           | ✗             | ✗          |
-| FreeBSD | ✓           | ✗             | ✗          |
+| Shells  | Bash        | PowerShell Desktop    | PowerShell Core    | Windows Batch (deprecated) |
+|:-------:|:-----------:|:---------------------:|:------------------:|:--------------------------:|
+| Windows | ✗           | ✗                     | ✗                  | ✗                          |
+| Linux   | ✓           | ✗                     | ✗                  | ✗                          |
+| macOS   | ✓           | ✗                     | ✗                  | ✗                          |
+| FreeBSD | ✓           | ✗                     | ✗                  | ✗                          |

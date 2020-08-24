@@ -28,8 +28,8 @@ func TestCertificate(t *testing.T) {
 		Addr: tlsListener.Addr().String(),
 	}
 	go func() {
-		err := srv.Serve(tlsListener)
-		require.EqualError(t, err, "http: Server closed")
+		errServe := srv.Serve(tlsListener)
+		require.EqualError(t, errServe, "http: Server closed")
 	}()
 	defer srv.Close()
 
@@ -47,8 +47,9 @@ func TestCertificate(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "https://"+srv.Addr, nil)
 	require.NoError(t, err)
 
-	_, err = tlsClient.Do(req)
+	resp, err := tlsClient.Do(req)
 	assert.NoError(t, err)
+	defer resp.Body.Close()
 
 	// Client with no Root CA
 	client := &http.Client{}

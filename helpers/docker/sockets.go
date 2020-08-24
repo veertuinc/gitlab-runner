@@ -1,4 +1,4 @@
-package docker_helpers
+package docker
 
 import (
 	"net"
@@ -39,7 +39,7 @@ func configureTransport(tr *http.Transport, proto, addr string) error {
 		if err != nil {
 			return err
 		}
-		tr.Dial = dialer.Dial
+		tr.Dial = dialer.Dial // nolint:staticcheck
 	}
 	return nil
 }

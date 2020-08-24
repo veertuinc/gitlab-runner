@@ -4,8 +4,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/minio/minio-go"
-	"github.com/minio/minio-go/pkg/credentials"
+	"github.com/minio/minio-go/v6"
+	"github.com/minio/minio-go/v6/pkg/credentials"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 )
@@ -13,7 +13,12 @@ import (
 const DefaultAWSS3Server = "s3.amazonaws.com"
 
 type minioClient interface {
-	PresignedGetObject(bucketName string, objectName string, expires time.Duration, reqParams url.Values) (*url.URL, error)
+	PresignedGetObject(
+		bucketName string,
+		objectName string,
+		expires time.Duration,
+		reqParams url.Values,
+	) (*url.URL, error)
 	PresignedPutObject(bucketName string, objectName string, expires time.Duration) (*url.URL, error)
 }
 

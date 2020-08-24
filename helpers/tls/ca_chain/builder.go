@@ -31,7 +31,7 @@ func NewBuilder(logger logrus.FieldLogger) Builder {
 
 	return &defaultBuilder{
 		certificates:     make([]*x509.Certificate, 0),
-		seenCertificates: make(map[string]bool, 0),
+		seenCertificates: make(map[string]bool),
 		resolver: newChainResolver(
 			newURLResolver(logger),
 			newVerifyResolver(logger),
@@ -51,14 +51,14 @@ type defaultBuilder struct {
 	logger logrus.FieldLogger
 }
 
-func (b *defaultBuilder) BuildChainFromTLSConnectionState(TLS *tls.ConnectionState) error {
-	for _, verifiedChain := range TLS.VerifiedChains {
+func (b *defaultBuilder) BuildChainFromTLSConnectionState(tls *tls.ConnectionState) error {
+	for _, verifiedChain := range tls.VerifiedChains {
 		b.logger.
 			WithField("chain-leaf", fmt.Sprintf("%v", verifiedChain)).
 			Debug("Processing chain")
 		err := b.fetchCertificatesFromVerifiedChain(verifiedChain)
 		if err != nil {
-			return fmt.Errorf("error while fetching certificates into the CA Chain: %v", err)
+			return fmt.Errorf("error while fetching certificates into the CA Chain: %w", err)
 		}
 	}
 
@@ -74,7 +74,7 @@ func (b *defaultBuilder) fetchCertificatesFromVerifiedChain(verifiedChain []*x50
 
 	verifiedChain, err = b.resolver.Resolve(verifiedChain)
 	if err != nil {
-		return fmt.Errorf("couldn't resolve certificates chain from the leaf certificate: %v", err)
+		return fmt.Errorf("couldn't resolve certificates chain from the leaf certificate: %w", err)
 	}
 
 	for _, certificate := range verifiedChain {

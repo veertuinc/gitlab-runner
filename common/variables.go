@@ -14,6 +14,7 @@ type JobVariable struct {
 	Internal bool   `json:"-"`
 	File     bool   `json:"file"`
 	Masked   bool   `json:"masked"`
+	Raw      bool   `json:"raw"`
 }
 
 type JobVariables []JobVariable
@@ -57,9 +58,13 @@ func (b JobVariables) ExpandValue(value string) string {
 	return os.Expand(value, b.Get)
 }
 
-func (b JobVariables) Expand() (variables JobVariables) {
+func (b JobVariables) Expand() JobVariables {
+	var variables JobVariables
 	for _, variable := range b {
-		variable.Value = b.ExpandValue(variable.Value)
+		if !variable.Raw {
+			variable.Value = b.ExpandValue(variable.Value)
+		}
+
 		variables = append(variables, variable)
 	}
 	return variables

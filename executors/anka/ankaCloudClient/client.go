@@ -1,12 +1,19 @@
 package ankaCloudClient
 
 import (
+	"bytes"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"encoding/json"
-	"bytes"
+	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"time"
+
+	"gitlab.com/gitlab-org/gitlab-runner/common"
 )
 
 const JsonContentType = "application/json"
@@ -14,9 +21,12 @@ const JsonContentType = "application/json"
 const vmResourcePath = "/api/v1/vm"
 const vmRegistryResourcePath = "/api/v1/registry/vm"
 
-
 type AnkaClient struct {
-	controllerAddress string
+	controllerAddress   string
+	rootCaPath          *string
+	certPath            *string
+	keyPath             *string
+	skipTLSVerification bool
 }
 
 func (ankaClient *AnkaClient) GetVms() (error, *ListVmResponse) {
@@ -69,6 +79,7 @@ func (ankaClient *AnkaClient) TerminateVm(instanceId string) (error, *StandardRe
 }
 
 func (ankaClient *AnkaClient) doRequest(method string, path string, body interface{}, responseBody interface{}) error {
+
 	var buffer *bytes.Buffer
 	var err error
 	if body != nil {
@@ -82,13 +93,60 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 	}
 	relativePath, _ := url.ParseRequestURI(path)
 	urlObj, err := url.ParseRequestURI(ankaClient.controllerAddress)
+	if err != nil {
+		return err
+	}
 	urlObj = urlObj.ResolveReference(relativePath)
 	if err != nil {
 		return err
 	}
 	urlString := urlObj.String()
 	fmt.Println(urlString)
-	client := &http.Client{}
+
+	timeout := time.Duration(5 * time.Second)
+
+	caCertPool, _ := x509.SystemCertPool()
+	if caCertPool == nil {
+		caCertPool = x509.NewCertPool()
+	}
+	if ankaClient.rootCaPath != nil {
+		caCert, err := ioutil.ReadFile(*ankaClient.rootCaPath)
+		if err != nil {
+			return err
+		}
+		ok := caCertPool.AppendCertsFromPEM(caCert)
+		if !ok {
+			return fmt.Errorf("Could not add %v to Root Certificates", caCert)
+		}
+	}
+
+	tlsConfig := &tls.Config{
+		RootCAs:            caCertPool,
+		InsecureSkipVerify: ankaClient.skipTLSVerification,
+	}
+
+	client := &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			IdleConnTimeout: 2 * time.Second,
+			TLSClientConfig: tlsConfig,
+		},
+	}
+
+	if ankaClient.certPath != nil {
+		if ankaClient.keyPath != nil {
+			certs, err := tls.LoadX509KeyPair(*ankaClient.certPath, *ankaClient.keyPath)
+			if err != nil {
+				return err
+			}
+			tlsConfig.Certificates = []tls.Certificate{certs}
+		} else {
+			return errors.New("incomplete key pair... ensure both the cert and key are included")
+		}
+	}
+
+	// fmt.Printf("tlsConfig: %+v \n", tlsConfig)
+
 	var req *http.Request
 	if buffer != nil {
 		req, err = http.NewRequest(method, urlString, buffer)
@@ -98,26 +156,68 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", JsonContentType)
-	response, err := client.Do(req)
+
+	requestDump, err := httputil.DumpRequest(req, true)
 	if err != nil {
-		return err
+		fmt.Println(err)
 	}
-	if response.StatusCode != http.StatusOK {
-		return errors.New(fmt.Sprintf("%v %v", response.StatusCode, response.Body))
+	fmt.Printf("REQUEST TO CONTROLLER: \n %v\n", string(requestDump))
+
+	req.Header.Set("Content-Type", JsonContentType)
+
+	retryLimit := 6
+	for tries := 0; tries <= retryLimit; tries++ {
+		var response *http.Response
+		if tries > 0 {
+			time.Sleep(time.Duration(10*tries) * time.Second)
+		}
+		fmt.Printf("doRequest retries: %v\n", tries)
+		response, err = client.Do(req)
+		if err != nil {
+			fmt.Printf("client.Do(req) %v\n", err)
+			break
+		}
+		if response == nil || response.Body == nil || response.Status == "" { // If the controller connection fails or is overwhelmed, it will return null or empty values. We need to handle this so the job doesn't fail and orphan VMs.
+			if tries == retryLimit {
+				err = errors.New("unable to connect to controller... please check its status and cleanup any zombied/orphaned VMs on your Anka Nodes")
+				break
+			} else {
+				fmt.Printf("something caused the controller to return nill... retrying until we get a valid retry...")
+				continue
+			}
+		}
+		if err != nil {
+			fmt.Printf("%v\n", err)
+			break
+		}
+
+		s, _ := json.MarshalIndent(responseBody, "", "\t")
+
+		err = json.NewDecoder(response.Body).Decode(responseBody)
+		if response.StatusCode != http.StatusOK {
+			fmt.Printf("json Decode: %v\nResponse: %v\n", err, string(s))
+			break
+		}
+		break
 	}
 
-	err = json.NewDecoder(response.Body).Decode(responseBody)
-	fmt.Println("Response ", responseBody)
+	s, _ := json.MarshalIndent(responseBody, "", "\t")
+	fmt.Printf("RESPONSE FROM CONTROLLER: %v\n", string(s))
+
 	if err != nil {
-		return err
+		return fmt.Errorf("decoding response from controller: %v\nresponse: %v", err, string(s))
 	}
+
 	return nil
 
 }
 
-func MakeNewAnkaClient(ankaCloudControllerUrl string) *AnkaClient{
+func MakeNewAnkaClient(ankaConfig *common.AnkaConfig) *AnkaClient {
 	return &AnkaClient{
-		controllerAddress: ankaCloudControllerUrl,
+		controllerAddress:   ankaConfig.ControllerAddress,
+		rootCaPath:          ankaConfig.RootCaPath,
+		certPath:            ankaConfig.CertPath,
+		keyPath:             ankaConfig.KeyPath,
+		skipTLSVerification: ankaConfig.SkipTLSVerification,
 	}
 }

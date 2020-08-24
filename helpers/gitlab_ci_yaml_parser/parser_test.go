@@ -73,7 +73,7 @@ func prepareTestFile(t *testing.T, fileContent string) string {
 	require.NoError(t, err)
 	defer file.Close()
 
-	file.WriteString(fileContent)
+	_, _ = file.WriteString(fileContent)
 	return file.Name()
 }
 
@@ -122,7 +122,7 @@ func TestFileParsing(t *testing.T) {
 	assert.Equal(t, "global:image", jobResponse.Image.Name)
 
 	// file1 - job3
-	jobResponse = getJobResponse(t, testFile1, "job3", true)
+	_ = getJobResponse(t, testFile1, "job3", true)
 
 	// file1 - job4
 	jobResponse = getJobResponse(t, testFile1, "job4", false)

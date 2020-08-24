@@ -6,7 +6,7 @@ last_updated: 2019-01-17
 # GitLab Runner Docs
 
 GitLab Runner is the open source project that is used to run your jobs and
-send the results back to GitLab. It is used in conjunction with [GitLab CI](https://about.gitlab.com/product/continuous-integration/),
+send the results back to GitLab. It is used in conjunction with [GitLab CI/CD](https://about.gitlab.com/stages-devops-lifecycle/continuous-integration/),
 the open-source continuous integration service included with GitLab that
 coordinates the jobs.
 
@@ -24,10 +24,10 @@ GitLab Runner requires a minimum of Docker `v1.13.0`.
 
 ## Features
 
-- Allows to run:
-  - Multiple jobs concurrently.
-  - Use multiple tokens with multiple server (even per-project).
-  - Limit number of concurrent jobs per-token.
+- Allows:
+  - Running multiple jobs concurrently.
+  - Using multiple tokens with multiple servers (even per-project).
+  - Limiting number of concurrent jobs per-token.
 - Jobs can be run:
   - Locally.
   - Using Docker containers.
@@ -35,7 +35,7 @@ GitLab Runner requires a minimum of Docker `v1.13.0`.
   - Using Docker containers with autoscaling on different clouds and virtualization hypervisors.
   - Connecting to remote SSH server.
 - Is written in Go and distributed as single binary without any other requirements.
-- Supports Bash, Windows Batch, and Windows PowerShell.
+- Supports Bash and Windows PowerShell.
 - Works on GNU/Linux, macOS, and Windows (pretty much anywhere you can run Docker).
 - Allows customization of the job running environment.
 - Automatic configuration reload without restart.
@@ -43,6 +43,7 @@ GitLab Runner requires a minimum of Docker `v1.13.0`.
 - Enables caching of Docker containers.
 - Easy installation as a service for GNU/Linux, macOS, and Windows.
 - Embedded Prometheus metrics HTTP server.
+- Referee workers to monitor and pass Prometheus metrics and other job-specific data to GitLab.
 
 ## Compatibility with GitLab versions
 
@@ -50,7 +51,9 @@ The GitLab Runner version should be in sync with the GitLab version. While older
 Runners may still work with newer GitLab versions, and vice versa, in some cases,
 features may be not available or work properly if there's a version difference.
 
-Backward incompatibility is allowed only for major version updates.
+Backward compatibility is guaranteed between minor version updates,
+but be aware that minor version updates of GitLab can introduce new features
+which will require the Runner to be on the same minor version.
 
 ## Install GitLab Runner
 

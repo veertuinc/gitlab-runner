@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"strings"
@@ -78,12 +79,13 @@ func (s *Client) Connect() error {
 
 	methods, err := s.getSSHAuthMethods()
 	if err != nil {
-		return err
+		return fmt.Errorf("getSSHAuthMethods error: %w", err)
 	}
 
 	config := &ssh.ClientConfig{
-		User: s.User,
-		Auth: methods,
+		User:            s.User,
+		Auth:            methods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
 	connectRetries := s.ConnectRetries
@@ -94,13 +96,16 @@ func (s *Client) Connect() error {
 	var finalError error
 
 	for i := 0; i < connectRetries; i++ {
+
+		time.Sleep(60)
 		client, err := ssh.Dial("tcp", s.Host+":"+s.Port, config)
 		if err == nil {
 			s.client = client
 			return nil
 		}
+
 		time.Sleep(sshRetryInterval * time.Second)
-		finalError = err
+		finalError = fmt.Errorf("ssh Dial() error: %w", err)
 	}
 
 	return finalError
@@ -108,7 +113,7 @@ func (s *Client) Connect() error {
 
 func (s *Client) Exec(cmd string) error {
 	if s.client == nil {
-		return errors.New("Not connected")
+		return errors.New("not connected")
 	}
 
 	session, err := s.client.NewSession()
@@ -118,13 +123,12 @@ func (s *Client) Exec(cmd string) error {
 	session.Stdout = s.Stdout
 	session.Stderr = s.Stderr
 	err = session.Run(cmd)
-	session.Close()
+	_ = session.Close()
 	return err
 }
 
 func (s *Command) fullCommand() string {
 	var arguments []string
-	// TODO: This method is compatible only with Bjourne compatible shells
 	for _, part := range s.Command {
 		arguments = append(arguments, helpers.ShellEscape(part))
 	}
@@ -133,14 +137,14 @@ func (s *Command) fullCommand() string {
 
 func (s *Client) Run(ctx context.Context, cmd Command) error {
 	if s.client == nil {
-		return errors.New("Not connected")
+		return errors.New("not connected")
 	}
 
 	session, err := s.client.NewSession()
 	if err != nil {
 		return err
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	var envVariables bytes.Buffer
 	for _, keyValue := range cmd.Environment {
@@ -169,8 +173,8 @@ func (s *Client) Run(ctx context.Context, cmd Command) error {
 
 	select {
 	case <-ctx.Done():
-		session.Signal(ssh.SIGKILL)
-		session.Close()
+		_ = session.Signal(ssh.SIGKILL)
+		_ = session.Close()
 		return <-waitCh
 
 	case err := <-waitCh:
@@ -180,6 +184,6 @@ func (s *Client) Run(ctx context.Context, cmd Command) error {
 
 func (s *Client) Cleanup() {
 	if s.client != nil {
-		s.client.Close()
+		_ = s.client.Close()
 	}
 }

@@ -45,18 +45,18 @@ To open the report:
 
 1. At the end of the job's log, we should see a line like:
 
-   ```
+   ```plaintext
    ==> Download index file: https://gitlab-runner-downloads.s3.amazonaws.com/latest/index.html
    ```
 
-   Because when this job was triggered, and `v11.8.0` was also the `latest` release, we see  a link to the
+   Because when this job was triggered, and `v11.8.0` was also the `latest` release, we see a link to the
    `latest` version bucket. The problem with `latest` is that the content there changes when
    new stable/patch versions are released.
 
    Each pipeline also creates a deployment for a specific reference (a branch name
    or a tag name). Several lines above we can see:
 
-   ```
+   ```plaintext
    ==> Download index file: https://gitlab-runner-downloads.s3.amazonaws.com/v11.8.0/index.html
    ```
 
@@ -105,35 +105,51 @@ saved as job artifacts so they can be next passed to the release stage). There i
 time set on them. So when reviewing a change that executed its pipeline more than a week before, the report
 will be unavailable. But, a new pipeline execution, even without changes in the code, will resolve the problem.
 
-To open the report:
+To view a code coverage report for a merge request:
 
-1. Find the pipeline related to the
-   change that will be reviewed. For example, we can use <https://gitlab.com/gitlab-org/gitlab-runner/pipelines/50600305>.
-   It's a branch started from `master` at <https://gitlab.com/gitlab-org/gitlab-runner>. Normally we could just look
-   for the S3 deployment, but all pipelines started inside of <https://gitlab.com/gitlab-org/gitlab-runner> have
-   also stored the reports as jobs artifacts. In this case, I still have a time to click **keep**, so the future
-   readers of this documentation will be able to see the artifacts. ;)
+1. In the merge request's **Overview** tab, under the pipeline
+   result, click on **View exposed artifact** to expand the section.
+1. Click on **Code Coverage**.
+1. Use the artifact browser to navigate to the `out/coverage/`
+   directory. For example,
+   <https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/172824578/artifacts/browse/out/coverage/>.
+   This directory will always contain six files - three `.race.` files
+   and three `.regular.` files, as explained in the [S3 coverage report
+   strategy](#test-coverage-report-from-s3).
 
-1. In the pipeline, find the `test coverage report` job in the `coverage` stage. In our example it's available
-   at <https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/172824578>.
-
-1. On the job's page, let's use the **Browse** button (on the right panel) to open Artifacts Browser. The browser
-   for our example job is available at <https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/172824578/artifacts/browse>.
-
-1. In the browser, we need to navigate to the `out/coverage/` directory
-   (<https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/172824578/artifacts/browse/out/coverage/>). This directory
-   will contain the same six files - three with `.race.` and three similar with `.regular.` as it was described
-   in the S3 strategy.
-
-   For change reviewing, we're mostly interested in looking at the HTML report for `.regular.` type - the
-   `coverprofile.regular.html` file. As we can see, all files are visible as external links, so for our
-   example we'll open <https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/172824578/artifacts/file/out/coverage/coverprofile.regular.html>
-   link, which will next redirect us to <https://gitlab-org.gitlab.io/-/gitlab-runner/-/jobs/172824578/artifacts/out/coverage/coverprofile.regular.html>
-   where the report is being presented.
-
+   For reviewing changes, we're mostly interested in looking at the `.regular.` HTML
+   report (the `coverprofile.regular.html` file). As you can see, all files are visible
+   as external links, so for our example we will open
+   <https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/172824578/artifacts/file/out/coverage/coverprofile.regular.html>
+   which will redirect us to
+   <https://gitlab-org.gitlab.io/-/gitlab-runner/-/jobs/172824578/artifacts/out/coverage/coverprofile.regular.html>
+   where the report is stored.
 1. At this moment, we can see the same file browser with coverage details as we seen with the S3 source.
    We can do the same. The only difference is that it will disappear in maximum of 7 days.
 
-### Summary
+## Reviewing the Merge Request title
+
+Because we generate [`CHANGELOG.md`](https://gitlab.com/gitlab-org/gitlab-runner/-/blob/master/CHANGELOG.md) entries
+from the merge request titles, making sure that the title is valid and informative is a part
+of the reviewer and maintainer's responsibilities.
+
+Before merging a merge request, check the title and update it if you think it will not be clear in the
+`CHANGELOG.md` file. Keep in mind that the changelog will have only this one line, without the merge
+request description, discussion or diff that provide more context.
+
+As an example, look at <https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/1812> and compare:
+
+- `yml to yaml` - which is the original title and was added to changelog with our script,
+- `Fix values.yaml file name in documentation` - which is what I've updated it to in the changelog.
+
+What will `yml to yaml` tell a Runner administrator if they review the changelog before updating
+to a newer version? Does it show the risks behind the update, the implemented behavior changes, a new
+behavior/features that were added? Keep these questions in mind when reviewing the merge request and its title.
+
+Contributors may not be aware of the above information, and that their titles
+may not match our requirements. Try to educate the contributor about this.
+In the end, it's your responsibility to verify and update the title **before the merge request is merged**.
+
+## Summary
 
 Dear reviewer, you've got your sword. Now go fight with the dragons!

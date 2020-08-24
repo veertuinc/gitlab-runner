@@ -22,13 +22,13 @@ requested by their `coordinator`.
 
 Is it possible to run GitLab Runner in debug/verbose mode. From a terminal, run:
 
-```sh
+```shell
 gitlab-runner --debug run
 ```
 
 ### I'm seeing `x509: certificate signed by unknown authority`
 
-Please [See the self-signed certificates](../configuration/tls-self-signed.md)
+Please see [the self-signed certificates](../configuration/tls-self-signed.md).
 
 ### I get `Permission Denied` when accessing the `/var/run/docker.sock`
 
@@ -50,17 +50,17 @@ or this article about [control and configure with systemd](https://docs.docker.c
 
 ### I get 411 when uploading artifacts
 
-This happens due to fact that runner uses `Transfer-Encoding: chunked` which is broken on early version of Nginx (<https://serverfault.com/questions/164220/is-there-a-way-to-avoid-nginx-411-content-length-required-errors>).
+This happens due to fact that runner uses `Transfer-Encoding: chunked` which is broken on early version of NGINX (<https://serverfault.com/questions/164220/is-there-a-way-to-avoid-nginx-411-content-length-required-errors>).
 
-Upgrade your Nginx to newer version. For more information see this issue: <https://gitlab.com/gitlab-org/gitlab-runner/issues/1031>
+Upgrade your NGINX to newer version. For more information see this issue: <https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1031>
 
 ### `warning: You appear to have cloned an empty repository.`
 
 When running `git clone` using HTTP(s) (with GitLab Runner or manually for
 tests) and you see the following output:
 
-```bash
-git clone https://git.example.com/user/repo.git
+```shell
+$ git clone https://git.example.com/user/repo.git
 
 Cloning into 'repo'...
 warning: You appear to have cloned an empty repository.
@@ -74,30 +74,26 @@ its own configuration, make sure that GitLab requests are proxied to the
 Git protocol via HTTP(S) is resolved by the GitLab Workhorse, so this is the
 **main entrypoint** of GitLab.
 
-If you are using Omnibus GitLab, but don't want to use the bundled Nginx
-server, please read [using a non-bundled web-server][omnibus-ext-nginx].
+If you are using Omnibus GitLab, but don't want to use the bundled NGINX
+server, please read [using a non-bundled web-server](https://docs.gitlab.com/omnibus/settings/nginx.html#using-a-non-bundled-web-server).
 
 In the GitLab Recipes repository there are [web-server configuration
-examples][recipes] for Apache and Nginx.
+examples](https://gitlab.com/gitlab-org/gitlab-recipes/tree/master/web-server) for Apache and NGINX.
 
 If you are using GitLab installed from source, please also read the above
 documentation and examples, and make sure that all HTTP(S) traffic is going
 through the **GitLab Workhorse**.
 
-See [an example of a user issue][1105].
+See [an example of a user issue](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1105).
 
-[omnibus-ext-nginx]: http://doc.gitlab.com/omnibus/settings/nginx.html#using-a-non-bundled-web-server
-[recipes]: https://gitlab.com/gitlab-org/gitlab-recipes/tree/master/web-server
-[1105]: https://gitlab.com/gitlab-org/gitlab-runner/issues/1105
+### `zoneinfo.zip: no such file or directory` error when using `Timezone` or `OffPeakTimezone`
 
-### `zoneinfo.zip: no such file or directory` error when using `OffPeakTimezone`
-
-In `v1.11.0` we made it possible to configure the timezone in which `OffPeakPeriods`
+It's possible to configure the timezone in which `[[docker.machine.autoscaling]]` periods
 are described. This feature should work on most Unix systems out of the box. However on some
 Unix systems, and probably on most non-Unix systems (including Windows, for which we're providing
 Runner's binaries), when used, the Runner will crash at start with an error similar to:
 
-```text
+```plaintext
 Failed to load config Invalid OffPeakPeriods value: open /usr/local/go/lib/time/zoneinfo.zip: no such file or directory
 ```
 
@@ -105,15 +101,15 @@ The error is caused by the `time` package in Go. Go uses the IANA Time Zone data
 the configuration of the specified timezone. On most Unix systems, this database is already present on
 one of well-known paths (`/usr/share/zoneinfo`, `/usr/share/lib/zoneinfo`, `/usr/lib/locale/TZ/`).
 Go's `time` package looks for the Time Zone database in all those three paths. If it doesn't find any
-of them, but the machine has a configured Go development environment (with a proper `$GOPATH`
-present for Runner's process), then it will fallback to the `$GOROOT/lib/time/zoneinfo.zip` file.
+of them, but the machine has a configured Go development environment, then it will fallback to
+the `$GOROOT/lib/time/zoneinfo.zip` file.
 
 If none of those paths are present (for example on a production Windows host) the above error is thrown.
 
 In case your system has support for the IANA Time Zone database, but it's not available by default, you
 can try to install it. For Linux systems it can be done for example by:
 
-```bash
+```shell
 # on Debian/Ubuntu based systems
 sudo apt-get install tzdata
 
@@ -127,27 +123,27 @@ sudo apk add -U tzdata
 If your system doesn't provide this database in a _native_ way, then you can make `OffPeakTimezone`
 working by following the steps below:
 
-1. Downloading the [`zoneinfo.zip`][zoneinfo-file]. Starting with version v9.1.0 you can download
+1. Downloading the [`zoneinfo.zip`](https://gitlab-runner-downloads.s3.amazonaws.com/latest/zoneinfo.zip). Starting with version v9.1.0 you can download
    the file from a tagged path. In that case you should replace `latest` with the tag name (e.g., `v9.1.0`)
    in the `zoneinfo.zip` download URL.
 
 1. Store this file in a well known directory. We're suggesting to use the same directory where
    the `config.toml` file is present. So for example, if you're hosting Runner on Windows machine
-   and your config file is stored at `C:\gitlab-runner\config.toml`, then save the `zoneinfo.zip`
+   and your configuration file is stored at `C:\gitlab-runner\config.toml`, then save the `zoneinfo.zip`
    at `C:\gitlab-runner\zoneinfo.zip`.
 
 1. Set the `ZONEINFO` environment variable containing a full path to the `zoneinfo.zip` file. If you
    are starting the Runner using the `run` command, then you can do this with:
 
-   ```bash
-   ZONEINFO=/etc/gitlab-runner/zoneinfo.zip gitlab-runner run [other options ...]
+   ```shell
+   ZONEINFO=/etc/gitlab-runner/zoneinfo.zip gitlab-runner run <other options ...>
    ```
 
    or if using Windows:
 
    ```powershell
    C:\gitlab-runner> set ZONEINFO=C:\gitlab-runner\zoneinfo.zip
-   C:\gitlab-runner> gitlab-runner run [other options ...]
+   C:\gitlab-runner> gitlab-runner run <other options ...>
    ```
 
    If you are starting the Runner as a system service then you will need to update/override
@@ -159,11 +155,23 @@ working by following the steps below:
 
 You can, but not sharing the same `config.toml` file.
 
-Running multiple instances of Runner using the same config file can cause
+Running multiple instances of Runner using the same configuration file can cause
 unexpected and hard-to-debug behavior. In
-[GitLab Runner 12.2](https://gitlab.com/gitlab-org/gitlab-runner/issues/4407),
+[GitLab Runner 12.2](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/4407),
 only a single instance of Runner can use a specific `config.toml` file at
 one time.
+
+### `Job failed (system failure): preparing environment:`
+
+This error is often due to your shell [loading your
+profile](../shells/index.md#shell-profile-loading), and one of the scripts is
+causing the failure.
+
+Example of dotfiles that are known to cause failure:
+
+- `.bash_logout`
+- `.condarc`
+- `.rvmrc`
 
 ## Windows troubleshooting
 
@@ -187,19 +195,17 @@ The [NTFSSecurity](https://github.com/raandree/NTFSSecurity) PowerShell module p
 a *Remove-Item2* method which supports long paths. The GitLab CI Multi Runner will
 detect it if it is available and automatically make use of it.
 
-[zoneinfo-file]: https://gitlab-runner-downloads.s3.amazonaws.com/latest/zoneinfo.zip
-
 ### I can't run Windows BASH scripts; I'm getting `The system cannot find the batch label specified - buildscript`
 
-You need to prepend `call` to your batch file line in `.gitlab-ci.yml` so that it looks like `call C:\path\to\test.bat`. Here
+You need to prepend `call` to your Batch file line in `.gitlab-ci.yml` so that it looks like `call C:\path\to\test.bat`. Here
 is a more complete example:
 
-```
+```yaml
 before_script:
   - call C:\path\to\test.bat
 ```
 
-Additional info can be found under issue [#1025](https://gitlab.com/gitlab-org/gitlab-runner/issues/1025).
+Additional info can be found under issue [#1025](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1025).
 
 ### How can I get colored output on the web terminal?
 
@@ -220,14 +226,16 @@ them to win32 calls when running on a Windows system (example: [Colorama](https:
 
 If your program is doing the above, then you need to disable that conversion for the CI builds so that the ANSI codes remain in the string.
 
-See issue [#332](https://gitlab.com/gitlab-org/gitlab-runner/issues/332) for more information.
+See [GitLab CI YAML docs](https://docs.gitlab.com/ee/ci/yaml/#coloring-script-output)
+for an example using PowerShell and issue [#332](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/332)
+for more information.
 
 ### `The service did not start due to a logon failure` error when starting service
 
 When installing and starting the GitLab Runner service on Windows you can
 meet with such error:
 
-```sh
+```shell
 gitlab-runner install --password WINDOWS_MACHINE_PASSWORD
 gitlab-runner start
 FATA[0000] Failed to start GitLab Runner: The service did not start due to a logon failure.
@@ -262,7 +270,7 @@ You can add `SeServiceLogonRight` in two ways:
      path to system's `PATH` environment variable).
 
      > **Notice:** The tool was created in 2003 and was initially designed to use
-     > with Windows XP and Windows Server 2003. On [Microsoft sites][microsoft-ntrights-usage-on-win7](https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2008-R2-and-2008/dd548356(v=ws.10))
+     > with Windows XP and Windows Server 2003. On [Microsoft sites](https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2008-R2-and-2008/dd548356(v=ws.10))
      > you can find an example of usage `Ntrights.exe` that applies to Windows 7 and Windows Server 2008 R2.
      > This solution is not tested and because of the age of the software **it may not work
      > on newest Windows versions**.
@@ -270,6 +278,10 @@ You can add `SeServiceLogonRight` in two ways:
 After adding the `SeServiceLogonRight` for the user used in service configuration,
 the command `gitlab-runner start` should finish without failures
 and the service should be started properly.
+
+### Job marked as success and terminated midway using Kubernetes executor
+
+Please see [Job execution](../executors/kubernetes.md#job-execution).
 
 ## macOS troubleshooting
 
@@ -288,7 +300,7 @@ causes to why this happens:
 
 1. Make sure that your user can perform UI interactions:
 
-   ```bash
+   ```shell
    DevToolsSecurity -enable
    sudo security authorizationdb remove system.privilege.taskport is-developer
    ```
@@ -307,7 +319,7 @@ causes to why this happens:
    `SessionCreate`. However, in order to upgrade, you need to manually
    reinstall the `LaunchAgent` script:
 
-   ```sh
+   ```shell
    gitlab-runner uninstall
    gitlab-runner install
    gitlab-runner start
@@ -315,3 +327,12 @@ causes to why this happens:
 
    Then you can verify that `~/Library/LaunchAgents/gitlab-runner.plist` has
    `SessionCreate` set to `false`.
+
+### `fatal: unable to access 'https://path:3000/user/repo.git/': Failed to connect to path port 3000: Operation timed out` error in the job
+
+If one of the jobs fails with this error, make sure the Runner can connect to your GitLab instance. The connection could be blocked by things like:
+
+- firewalls
+- proxies
+- permissions
+- routing configurations

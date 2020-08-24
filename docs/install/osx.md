@@ -16,7 +16,7 @@ For documentation on GitLab Runner 9 and earlier, [visit this documentation](old
 
 1. Download the binary for your system:
 
-   ```bash
+   ```shell
    sudo curl --output /usr/local/bin/gitlab-runner https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-darwin-amd64
    ```
 
@@ -25,7 +25,7 @@ For documentation on GitLab Runner 9 and earlier, [visit this documentation](old
 
 1. Give it permissions to execute:
 
-   ```bash
+   ```shell
    sudo chmod +x /usr/local/bin/gitlab-runner
    ```
 
@@ -34,7 +34,7 @@ For documentation on GitLab Runner 9 and earlier, [visit this documentation](old
 1. [Register the Runner](../register/index.md)
 1. Install the Runner as service and start it:
 
-   ```bash
+   ```shell
    cd ~
    gitlab-runner install
    gitlab-runner start
@@ -53,13 +53,13 @@ To install GitLab Runner using Homebrew:
 
 1. Install the GitLab Runner.
 
-   ```bash
+   ```shell
    brew install gitlab-runner
    ```
 
 1. Install the Runner as a service and start it.
 
-   ```bash
+   ```shell
    brew services start gitlab-runner
    ```
 
@@ -90,17 +90,45 @@ You can verify that the Runner created the service configuration file after
 executing the `install` command, by checking the
 `~/Library/LaunchAgents/gitlab-runner.plist` file.
 
+If Homebrew was used to install `git`, it may have added a `/usr/local/etc/gitconfig` file
+containing:
+
+```ini
+[credential]
+        helper = osxkeychain
+```
+
+This tells Git to cache user credentials in the keychain, which may not be what you want
+and can cause fetches to hang. You can remove the line from the system `gitconfig`
+with:
+
+```shell
+git config --system --unset credential.helper
+```
+
+Alternatively, you can just disable `credential.helper` for the GitLab user:
+
+```shell
+git config --global --add credential.helper ''
+```
+
+You can check the status of the `credential.helper` with:
+
+```shell
+git config credential.helper
+```
+
 ## Manual update
 
 1. Stop the service:
 
-   ```bash
+   ```shell
    gitlab-runner stop
    ```
 
 1. Download the binary to replace the Runner's executable:
 
-   ```bash
+   ```shell
    sudo curl -o /usr/local/bin/gitlab-runner https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-darwin-amd64
    ```
 
@@ -109,13 +137,13 @@ executing the `install` command, by checking the
 
 1. Give it permissions to execute:
 
-   ```bash
+   ```shell
    sudo chmod +x /usr/local/bin/gitlab-runner
    ```
 
 1. Start the service:
 
-   ```bash
+   ```shell
    gitlab-runner start
    ```
 
@@ -127,8 +155,55 @@ some of the most common problems with GitLab Runner.
 In order to upgrade the `LaunchAgent` configuration, you need to uninstall and
 install the service:
 
-```bash
+```shell
 gitlab-runner uninstall
 gitlab-runner install
 gitlab-runner start
+```
+
+## Using codesign with the GitLab Runner Service
+
+If you installed `gitlab-runner` on macOS with homebrew and your build calls
+`codesign`, you may need to set `<key>SessionCreate</key><true/>` to have
+access to the user keychains. In the following example we run the builds as the `gitlab`
+user and want access to the signing certificates installed by that user for codesigning:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>SessionCreate</key><true/>
+    <key>KeepAlive</key>
+    <dict>
+      <key>SuccessfulExit</key>
+      <false/>
+    </dict>
+    <key>RunAtLoad</key><true/>
+    <key>Disabled</key><false/>
+    <key>Label</key>
+    <string>com.gitlab.gitlab-runner</string>
+    <key>UserName</key>
+    <string>gitlab</string>
+    <key>GroupName</key>
+    <string>staff</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/local/opt/gitlab-runner/bin/gitlab-runner</string>
+      <string>run</string>
+      <string>--working-directory</string>
+      <string>/Users/gitlab/gitlab-runner</string>
+      <string>--config</string>
+      <string>/Users/gitlab/gitlab-runner/config.toml</string>
+      <string>--service</string>
+      <string>gitlab-runner</string>
+      <string>--syslog</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+  </dict>
+</plist>
 ```

@@ -16,9 +16,11 @@ type fakeJobTrace struct {
 func (fjt *fakeJobTrace) Success()                                       {}
 func (fjt *fakeJobTrace) Fail(err error, failureReason JobFailureReason) {}
 func (fjt *fakeJobTrace) SetCancelFunc(cancelFunc context.CancelFunc)    {}
+func (fjt *fakeJobTrace) Cancel() bool                                   { return false }
 func (fjt *fakeJobTrace) SetFailuresCollector(fc FailuresCollector)      {}
 func (fjt *fakeJobTrace) SetMasked(masked []string)                      {}
 func (fjt *fakeJobTrace) IsStdout() bool                                 { return false }
+func (fjt *fakeJobTrace) IsJobSuccessful() bool                          { return false }
 
 func (fjt *fakeJobTrace) Write(p []byte) (n int, err error) {
 	return fjt.buffer.Write(p)
@@ -36,7 +38,7 @@ func newFakeJobTrace() *fakeJobTrace {
 	return fjt
 }
 
-func newBuildLogger(testName string, jt JobTrace) BuildLogger {
+func newBuildLogger(testName string, jt *fakeJobTrace) BuildLogger {
 	return BuildLogger{
 		log:   jt,
 		entry: logrus.WithField("test", testName),
@@ -70,7 +72,15 @@ func TestLogLineWithSecret(t *testing.T) {
 		l := newBuildLogger("log-line-with-secret", jt)
 
 		l.Errorln("Get http://localhost/?id=123&X-Amz-Signature=abcd1234&private_token=abcd1234")
-		assert.Contains(t, jt.Read(), `Get http://localhost/?id=123&X-Amz-Signature=[FILTERED]&private_token=[FILTERED]`)
-		assert.Contains(t, output.String(), `Get http://localhost/?id=123&X-Amz-Signature=abcd1234&private_token=abcd1234`)
+		assert.Contains(
+			t,
+			jt.Read(),
+			`Get http://localhost/?id=123&X-Amz-Signature=[FILTERED]&private_token=[FILTERED]`,
+		)
+		assert.Contains(
+			t,
+			output.String(),
+			`Get http://localhost/?id=123&X-Amz-Signature=abcd1234&private_token=abcd1234`,
+		)
 	})
 }

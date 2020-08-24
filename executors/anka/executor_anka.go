@@ -1,26 +1,28 @@
 package anka
 
 import (
-	"strconv"
 	"errors"
+	"fmt"
+	"strconv"
+
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
-
 )
 
 // anka-executor
 
 type executor struct {
 	executors.AbstractExecutor
-	sshClient                       ssh.Client 
-	vmConnectInfo 		            *AnkaVmConnectInfo
-	connector						*AnkaConnector
-
+	sshClient     ssh.Client
+	vmConnectInfo *AnkaVmConnectInfo
+	connector     *AnkaConnector
 }
-func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 
+func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	s.Debugln("Prepare Anka executor")
+
 	err := s.AbstractExecutor.Prepare(options)
 	if err != nil {
 		return err
@@ -42,41 +44,72 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		return errors.New("No Anka Cloud controller configured")
 	}
 
-	if s.Config.Anka.ImageId == "" {
+	if s.Config.Anka.TemplateUUID == "" {
 		s.Errorln("No Anka image id config")
-		return errors.New("Missing image_id from configuration")
+		return errors.New("Missing template_uuid from configuration")
 	}
 
-	s.connector = MakeNewAnkaCloudConnector(s.Config.Anka.ControllerAddress)
-	s.Println("Starting Anka VM from image ", s.Config.Anka.ImageId)
+	ankaTemplateUUIDENV := s.Build.Variables.Get("ANKA_TEMPLATE_UUID")
+	if ankaTemplateUUIDENV != "" { // OVERRIDE of default Template
+		s.Config.Anka.TemplateUUID = ankaTemplateUUIDENV
+	}
+
+	ankaTagNameENV := s.Build.Variables.Get("ANKA_TAG_NAME")
+	if ankaTagNameENV != "" { // OVERRIDE of default Tag
+		s.Config.Anka.Tag = &ankaTagNameENV
+	}
+
+	s.Println("Opening a connection to the Anka Cloud Controller:", s.Config.Anka.ControllerAddress)
+	s.connector = MakeNewAnkaCloudConnector(s.Config.Anka)
+
+	s.Println(fmt.Sprintf("%s%s%s", helpers.ANSI_BOLD_CYAN, "Starting Anka VM using:", helpers.ANSI_RESET))
+	s.Println("  - Template UUID:", s.Config.Anka.TemplateUUID)
 	if s.Config.Anka.Tag != nil {
-		s.Println("Tag ", s.Config.Anka.Tag)
+		s.Println("  - Tag:", *s.Config.Anka.Tag)
 	}
-	connectInfo, err := s.connector.StartInstance(s.Config.Anka)
+
+	s.Println("Please be patient...")
+	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
+
+	// Handle canceled jobs in the UI
+	done := false
+	go func() {
+		doneChannel := s.Context.Done()
+		<-doneChannel
+		done = true
+	}()
+
+	connectInfo, err := s.connector.StartInstance(s.Config.Anka, &done)
 	if err != nil {
 		return err
 	}
-	s.Debugln("Connect info: ", connectInfo)
+
 	s.vmConnectInfo = connectInfo
-	err = s.verifyMachine()
+	s.Println(fmt.Sprintf("Verifying connectivity to the VM - Host: %v Port: %v Instance UUID: %v ", s.vmConnectInfo.Host, s.vmConnectInfo.Port, s.vmConnectInfo.InstanceId))
+	err = s.verifyNode()
 	if err != nil {
-		s.Errorln("unable to verify VM!")
+		s.Errorln("SSH Error to VM:", err, s.vmConnectInfo)
 		return err
 	}
-	s.Println("Anka VM ", connectInfo.InstanceId, " is ready for work")
+
+	s.Println(fmt.Sprintf(" %sAnka VM %s is ready for work on %s:%v%s", helpers.ANSI_BOLD_GREEN, connectInfo.InstanceId, connectInfo.Host, connectInfo.Port, helpers.ANSI_RESET))
+
 	err = s.startSSHClient()
 	if err != nil {
 		s.Errorln(err.Error())
 		return err
 	}
-	
+
 	return nil
 }
 
-func (s *executor) verifyMachine() error {
-	s.startSSHClient()
+func (s *executor) verifyNode() error {
 	defer s.sshClient.Cleanup()
-	err := s.sshClient.Run(s.Context, ssh.Command{Command: []string{"exit"}})
+	err := s.startSSHClient()
+	if err != nil {
+		return err
+	}
+	err = s.sshClient.Run(s.Context, ssh.Command{Command: []string{"exit"}})
 	if err != nil {
 		return err
 	}
@@ -85,21 +118,30 @@ func (s *executor) verifyMachine() error {
 
 func (s *executor) startSSHClient() error {
 	s.sshClient = ssh.Client{
-		Config:  ssh.Config{
-			Host: s.vmConnectInfo.Host,
-			Port: strconv.Itoa(s.vmConnectInfo.Port),
-			User: s.Config.SSH.User,
-			Password: s.Config.SSH.Password,
+		Config: ssh.Config{
+			Host:         s.vmConnectInfo.Host,
+			Port:         strconv.Itoa(s.vmConnectInfo.Port),
+			User:         s.Config.SSH.User,
+			Password:     s.Config.SSH.Password,
 			IdentityFile: s.Config.SSH.IdentityFile,
 		},
 		Stdout:         s.Trace,
 		Stderr:         s.Trace,
-		ConnectRetries: 30,
+		ConnectRetries: 1,
 	}
-	return s.sshClient.Connect()
+	err := s.sshClient.Connect()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *executor) Run(cmd common.ExecutorCommand) error {
+	fmt.Println(ssh.Command{
+		Environment: s.BuildShell.Environment,
+		Command:     s.BuildShell.GetCommandWithArguments(),
+		Stdin:       cmd.Script,
+	})
 	err := s.sshClient.Run(cmd.Context, ssh.Command{
 		Environment: s.BuildShell.Environment,
 		Command:     s.BuildShell.GetCommandWithArguments(),
@@ -114,7 +156,7 @@ func (s *executor) Run(cmd common.ExecutorCommand) error {
 func (s *executor) Cleanup() {
 	s.sshClient.Cleanup()
 	if s.connector != nil && s.vmConnectInfo != nil {
-		if s.Trace.IsJobSuccesFull() || !s.Config.Anka.KeepAliveOnError {
+		if s.Trace.IsJobSuccessful() || !s.Config.Anka.KeepAliveOnError {
 			s.Println("Terminating Anka VM ", s.vmConnectInfo.InstanceId)
 			s.connector.TerminateInstance(s.vmConnectInfo.InstanceId)
 		}
@@ -122,17 +164,15 @@ func (s *executor) Cleanup() {
 	s.AbstractExecutor.Cleanup()
 }
 
-
-
 func init() {
 	options := executors.ExecutorOptions{
 		DefaultBuildsDir: "builds",
-		DefaultCacheDir: "cache",
+		DefaultCacheDir:  "cache",
 		SharedBuildsDir:  false,
 		Shell: common.ShellScriptInfo{
 			Shell:         "bash",
 			Type:          common.LoginShell,
-			RunnerCommand: "gitlab-runner",
+			RunnerCommand: "anka-gitlab-runner",
 		},
 		ShowHostname: true,
 	}
@@ -149,7 +189,7 @@ func init() {
 		features.Variables = true
 	}
 
-	common.RegisterExecutor("anka", executors.DefaultExecutorProvider{
+	common.RegisterExecutorProvider("anka", executors.DefaultExecutorProvider{
 		Creator:          creator,
 		FeaturesUpdater:  featuresUpdater,
 		DefaultShellName: options.Shell.Shell,

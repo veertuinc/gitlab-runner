@@ -14,7 +14,7 @@ func userModeWarning(withRun bool) {
 	}).Debugln("Checking runtime mode")
 
 	// everything is supported on windows
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osTypeWindows {
 		return
 	}
 
@@ -22,13 +22,13 @@ func userModeWarning(withRun bool) {
 
 	// We support services on Linux, Windows and Darwin
 	noServices :=
-		runtime.GOOS != "linux" &&
-			runtime.GOOS != "darwin"
+		runtime.GOOS != osTypeLinux &&
+			runtime.GOOS != osTypeDarwin
 
 	// We don't support services installed as an User on Linux
 	noUserService :=
 		!systemMode &&
-			runtime.GOOS == "linux"
+			runtime.GOOS == osTypeLinux
 
 	if systemMode {
 		logrus.Infoln("Running in system-mode.")
@@ -39,16 +39,16 @@ func userModeWarning(withRun bool) {
 	if withRun {
 		if noServices {
 			logrus.Warningln("You need to manually start builds processing:")
-			logrus.Warningln("$ gitlab-runner run")
+			logrus.Warningln("$ anka-gitlab-runner run")
 		} else if noUserService {
 			logrus.Warningln("The user-mode requires you to manually start builds processing:")
-			logrus.Warningln("$ gitlab-runner run")
+			logrus.Warningln("$ anka-gitlab-runner run")
 		}
 	}
 
 	if !systemMode {
 		logrus.Warningln("Use sudo for system-mode:")
-		logrus.Warningln("$ sudo gitlab-runner...")
+		logrus.Warningln("$ sudo anka-gitlab-runner...")
 	}
 	logrus.Infoln("")
 }
