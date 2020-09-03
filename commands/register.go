@@ -281,7 +281,11 @@ func (s *RegisterCommand) askSSHServer() {
 func (s *RegisterCommand) askAnkaSSHLogin() {
 	s.SSH.User = s.ask("ssh-user", "Please enter the SSH user for your Anka VM (e.g. anka):")
 	s.SSH.Password = s.ask("ssh-password", "Please enter the SSH password (e.g. admin):", true)
+	tildeCheck := regexp.MustCompile("^~/")
 	s.SSH.IdentityFile = s.ask("ssh-identity-file", "Please enter path to SSH identity file (e.g. /home/user/.ssh/id_rsa):", true)
+	if tildeCheck.MatchString(s.SSH.IdentityFile) == true {
+		logrus.Panicln("paths cannot contain tilde (~)")
+	}
 }
 
 func (s *RegisterCommand) addRunner(runner *common.RunnerConfig) {
