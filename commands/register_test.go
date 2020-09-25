@@ -140,6 +140,7 @@ func testRegisterCommandRun(
 	regCertPath := "/Users/testuser/gitlab-crt.pem"
 	regKeyPath := "/Users/testuser/gitlab-key.pem"
 	regSkipTLSVerification := true
+	nodeGroupName := "group-name"
 
 	args = append([]string{
 		"binary", "register",
@@ -157,6 +158,7 @@ func testRegisterCommandRun(
 		"--anka-root-ca-path", regRootCAPath,
 		"--anka-cert-path", regCertPath,
 		"--anka-key-path", regKeyPath,
+		"--anka-node-group", nodeGroupName,
 		fmt.Sprintf("--anka-skip-tls-verification=%v", regSkipTLSVerification),
 	}, args...)
 
@@ -180,6 +182,7 @@ func testRegisterCommandRun(
 	assert.Equal(t, regCertPath, *cmd.Anka.CertPath)
 	assert.Equal(t, regKeyPath, *cmd.Anka.KeyPath)
 	assert.Equal(t, regSkipTLSVerification, cmd.Anka.SkipTLSVerification)
+	assert.Equal(t, nodeGroupName, cmd.Anka.NodeGroup)
 	return string(fileContent), "", err
 }
 

@@ -144,7 +144,7 @@ type AnkaConfig struct {
 	Tag               *string `toml:"tag,omitempty" json:"tag" long:"tag" env:"TAG" description:"Specify the Tag to use"`
 	NodeID            *string `toml:"node_id,omitempty" json:"node_id" long:"node-id" env:"NODE_ID" description:"Specify the Node ID to run the job (you can find this in your Controller's Nodes page)"`
 	Priority          *int    `toml:"priority,omitzero" json:"priority" long:"priority" env:"PRIORITY" description:"Set the job priority"`
-	GroupId           *string `toml:"group_id,omitempty" json:"group_id" long:"group-id" env:"GROUP_ID" description:"Run on a specific Controller Node group"`
+	NodeGroup         *string `toml:"node_group,omitempty" json:"node_group" long:"node-group" env:"NODE_GROUP" description:"Limit jobs to a specific node group (accepts name or ID)"`
 	RootCaPath        *string `toml:"root_ca_path,omitempty" json:"root_ca_path" long:"root-ca-path" env:"ROOT_CA_PATH" description:"Specify the path to your Controller's Root CA certificate"`
 	CertPath          *string `toml:"cert_path,omitempty" json:"cert_path" long:"cert-path" env:"CERT_PATH" description:"Specify the path to the GitLab Certificate (used for connecting to the Controller) (requires you also specify the key)"`
 	KeyPath           *string `toml:"key_path,omitempty" json:"key_path" long:"key-path" env:"KEY_PATH" description:"Specify the path to your GitLab Certificate Key (used for connecting to the Controller)"`

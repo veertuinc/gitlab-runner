@@ -30,6 +30,18 @@ type StartVmResponse struct {
 	Body []string `json:"body"`
 }
 
+type GroupResponse struct {
+	StandardResponse
+	Body []Group `json:"body"`
+}
+
+type Group struct {
+	FallbackGroupId string  `json:"fallback_group_id"`
+	Description     string  `json:"description"`
+	Id              *string `json:"id"`
+	Name            *string `json: "name"`
+}
+
 type GetVmResponse struct {
 	StandardResponse
 	Body VMStatus `json:"body"`

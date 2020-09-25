@@ -222,6 +222,13 @@ func (s *RegisterCommand) askAnka() {
 		s.Anka.Tag = &tag
 	}
 
+	nodeGroup := s.ask("anka-node-group", "Please enter the Group ID or name you want this runner jobs to be limited to (Enterprise only feature) (leave empty if any node can handle the runner jobs)", true)
+	if nodeGroup == "" {
+		s.Anka.NodeGroup = nil
+	} else {
+		s.Anka.NodeGroup = &nodeGroup
+	}
+
 	if !s.NonInteractive {
 		fmt.Printf("%s%s%s\n", helpers.ANSI_BOLD_YELLOW, "Certificate paths cannot contain a tilde (example: '~/cert.pem')", helpers.ANSI_RESET)
 	}
