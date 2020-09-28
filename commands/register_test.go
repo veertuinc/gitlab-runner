@@ -182,7 +182,7 @@ func testRegisterCommandRun(
 	assert.Equal(t, regCertPath, *cmd.Anka.CertPath)
 	assert.Equal(t, regKeyPath, *cmd.Anka.KeyPath)
 	assert.Equal(t, regSkipTLSVerification, cmd.Anka.SkipTLSVerification)
-	assert.Equal(t, nodeGroupName, cmd.Anka.NodeGroup)
+	assert.Equal(t, nodeGroupName, *cmd.Anka.NodeGroup)
 	return string(fileContent), "", err
 }
 
