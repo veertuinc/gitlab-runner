@@ -37,18 +37,19 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig, don
 		}
 	}()
 
-	err, groupsResponse := connector.client.GetGroups(*ankaConfig.NodeGroup)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := 0; i < len(groupsResponse.Body); i++ { // Check each group for the GroupId the user set. If it matches the name, return the Id instead for StartVM
-		if *groupsResponse.Body[i].Id == *ankaConfig.NodeGroup || *groupsResponse.Body[i].Name == *ankaConfig.NodeGroup {
-			startVmRequest.GroupId = groupsResponse.Body[i].Id
+	if ankaConfig.NodeGroup != nil {
+		err, groupsResponse := connector.client.GetGroups(*ankaConfig.NodeGroup)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if startVmRequest.GroupId == nil {
-		return nil, errors.New("The node group ID or name you provided cannot be found")
+		for i := 0; i < len(groupsResponse.Body); i++ { // Check each group for the GroupId the user set. If it matches the name, return the Id instead for StartVM
+			if *groupsResponse.Body[i].Id == *ankaConfig.NodeGroup || *groupsResponse.Body[i].Name == *ankaConfig.NodeGroup {
+				startVmRequest.GroupId = groupsResponse.Body[i].Id
+			}
+		}
+		if startVmRequest.GroupId == nil {
+			return nil, errors.New("The node group ID or name you provided cannot be found")
+		}
 	}
 
 	err, createResponse := connector.client.StartVm(&startVmRequest)
