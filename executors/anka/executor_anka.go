@@ -78,12 +78,12 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		done = true
 	}()
 
+	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
+
 	connectInfo, err := s.connector.StartInstance(s.Config.Anka, &done)
 	if err != nil {
 		return err
 	}
-
-	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
 
 	s.vmConnectInfo = connectInfo
 	s.Println(fmt.Sprintf("Verifying connectivity to the VM - Host: %v Port: %v Instance UUID: %v ", s.vmConnectInfo.Host, s.vmConnectInfo.Port, s.vmConnectInfo.InstanceId))
