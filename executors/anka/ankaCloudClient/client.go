@@ -68,6 +68,15 @@ func (ankaClient *AnkaClient) StartVm(startVmRequest *StartVMRequest) (error, *S
 	return nil, &response
 }
 
+func (ankaClient *AnkaClient) GetGroups(nodeGroup string) (error, *GroupResponse) {
+	response := GroupResponse{}
+	err := ankaClient.doRequest("GET", "/api/v1/group", nil, &response)
+	if err != nil {
+		return err, nil
+	}
+	return nil, &response
+}
+
 func (ankaClient *AnkaClient) TerminateVm(instanceId string) (error, *StandardResponse) {
 	response := StandardResponse{}
 	requestBody := TerminateVMRequest{InstanceID: instanceId}

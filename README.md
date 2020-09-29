@@ -82,9 +82,7 @@ export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME
 ```
 
 ```bash
-rm -f ./out/binaries/anka-gitlab-runner; make runner-bin-host && \
-./out/binaries/anka-gitlab-runner stop && \
-$(./out/binaries/anka-gitlab-runner unregister -n "localhost shared runner" || true) && \
+./out/binaries/anka-gitlab-runner stop; ./out/binaries/anka-gitlab-runner unregister -n "localhost shared runner"; ./out/binaries/anka-gitlab-runner unregister -n "localhost specific runner"; rm -f ./out/binaries/anka-gitlab-runner; make runner-bin-host && \
 ./out/binaries/anka-gitlab-runner register --non-interactive \
 --url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT/" \
 --registration-token $SHARED_REGISTRATION_TOKEN \
@@ -97,7 +95,6 @@ $(./out/binaries/anka-gitlab-runner unregister -n "localhost shared runner" || t
 --executor anka \
 --clone-url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
 --tag-list "localhost-shared,localhost,iOS" && \
-$(./out/binaries/anka-gitlab-runner unregister -n "localhost specific runner" || true) && \
 ./out/binaries/anka-gitlab-runner register --non-interactive \
 --url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
 --registration-token $PROJECT_REGISTRATION_TOKEN \

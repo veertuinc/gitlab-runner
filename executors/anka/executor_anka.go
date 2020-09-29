@@ -69,7 +69,6 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	}
 
 	s.Println("Please be patient...")
-	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
 
 	// Handle canceled jobs in the UI
 	done := false
@@ -78,6 +77,8 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		<-doneChannel
 		done = true
 	}()
+
+	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
 
 	connectInfo, err := s.connector.StartInstance(s.Config.Anka, &done)
 	if err != nil {
