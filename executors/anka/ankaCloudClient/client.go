@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -24,11 +25,12 @@ const vmResourcePath = "/api/v1/vm"
 const vmRegistryResourcePath = "/api/v1/registry/vm"
 
 type AnkaClient struct {
-	controllerAddress   string
-	rootCaPath          *string
-	certPath            *string
-	keyPath             *string
-	skipTLSVerification bool
+	controllerAddress     string
+	rootCaPath            *string
+	certPath              *string
+	keyPath               *string
+	skipTLSVerification   bool
+	controllerHTTPHeaders *string
 }
 
 func (ankaClient *AnkaClient) GetVms() (error, *ListVmResponse) {
@@ -176,6 +178,28 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 		return err
 	}
 
+	if ankaClient.controllerHTTPHeaders != nil {
+		var HTTPHeaders map[string]interface{}
+		err := json.Unmarshal([]byte(*ankaClient.controllerHTTPHeaders), &HTTPHeaders)
+		if err != nil {
+			return errors.New("problem with controller http headers")
+		}
+		for k, v := range HTTPHeaders {
+			switch v := v.(type) {
+			case string:
+				if strings.EqualFold(k, "HOST") { // Can't set HOST in header: https://stackoverflow.com/a/41034588
+					req.Host = v
+				} else {
+					req.Header.Set(k, v)
+				}
+			default:
+				return errors.New("problem with controller http headers (bad JSON; keep it one dimension)")
+			}
+		}
+	}
+
+	req.Header.Set("Content-Type", JsonContentType)
+
 	requestDump, err := httputil.DumpRequest(req, true)
 	if err != nil {
 		logrus.Errorf("%v\n", err)
@@ -232,10 +256,11 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 
 func MakeNewAnkaClient(ankaConfig *common.AnkaConfig) *AnkaClient {
 	return &AnkaClient{
-		controllerAddress:   ankaConfig.ControllerAddress,
-		rootCaPath:          ankaConfig.RootCaPath,
-		certPath:            ankaConfig.CertPath,
-		keyPath:             ankaConfig.KeyPath,
-		skipTLSVerification: ankaConfig.SkipTLSVerification,
+		controllerAddress:     ankaConfig.ControllerAddress,
+		rootCaPath:            ankaConfig.RootCaPath,
+		certPath:              ankaConfig.CertPath,
+		controllerHTTPHeaders: ankaConfig.ControllerHTTPHeaders,
+		keyPath:               ankaConfig.KeyPath,
+		skipTLSVerification:   ankaConfig.SkipTLSVerification,
 	}
 }
