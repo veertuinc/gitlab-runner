@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -16,7 +15,6 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/timeperiod"
 	"gitlab.com/gitlab-org/gitlab-runner/referees"
 )
 
@@ -66,19 +64,6 @@ type AnkaConfig struct {
 	// Be sure to use *bool or else setting --anka-skip-tls-verification true will ignore anything after it when you're doing register --non-interactive
 	SkipTLSVerification bool `toml:"skip_tls_verification,omitzero" json:"skip_tls_verification" long:"skip-tls-verification" env:"SKIP_TLS_VERIFICATION" description:"Skip TLS Verification when connecting to your Controller"`
 	KeepAliveOnError    bool `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"Keep the VM alive for debugging job failures"`
-}
-
-func tryGetTomlValue(data map[string]interface{}, key string) (string, error) {
-	value, ok := data[key]
-	if !ok {
-		return "", nil
-	}
-
-	switch v := value.(type) {
-	case string:
-		return v, nil
-	}
-	return p, nil
 }
 
 type Service struct {

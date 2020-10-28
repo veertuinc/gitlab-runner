@@ -15,8 +15,7 @@ const (
 type TracePatchResponse struct {
 	*RemoteJobStateResponse
 
-	RemoteRange               string
-	RemoteTraceUpdateInterval time.Duration
+	RemoteRange string
 }
 
 func (p *TracePatchResponse) NewOffset() int {
