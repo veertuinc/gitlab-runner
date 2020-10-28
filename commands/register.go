@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -228,6 +229,23 @@ func (s *RegisterCommand) askAnka() {
 		logrus.Panicln("you must provide a boolean (true or false)")
 	}
 	s.Anka.SkipTLSVerification = tlsBool
+
+	controllerHTTPHeaders := s.ask("anka-controller-http-headers", "Specify any custom headers for HTTP requests to the controller", true)
+	if controllerHTTPHeaders == "" {
+		s.Anka.ControllerHTTPHeaders = nil
+	} else {
+		if isJSON(controllerHTTPHeaders) {
+			s.Anka.ControllerHTTPHeaders = &controllerHTTPHeaders
+		} else {
+			logrus.Panicln("you must escape quotes in JSON")
+		}
+	}
+
+}
+
+func isJSON(s string) bool {
+	var js map[string]interface{}
+	return json.Unmarshal([]byte(s), &js) == nil
 }
 
 func (s *RegisterCommand) askSSHServer() {

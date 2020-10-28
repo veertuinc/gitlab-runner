@@ -93,6 +93,7 @@ export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME
 --anka-template-uuid c0847bc9-5d2d-4dbc-ba6a-240f7ff08032 \
 --anka-tag base:port-forward-22:brew-git:gitlab \
 --executor anka \
+--anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Typee\": \"test\" }" \
 --clone-url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
 --tag-list "localhost-shared,localhost,iOS" && \
 ./out/binaries/anka-gitlab-runner register --non-interactive \
@@ -105,6 +106,7 @@ export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME
 --anka-template-uuid c0847bc9-5d2d-4dbc-ba6a-240f7ff08032 \
 --anka-tag base:port-forward-22:brew-git:gitlab \
 --executor anka \
+--anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Typee\": \"test\" }" \
 --clone-url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
 --tag-list "localhost-specific,localhost,iOS" && \
 ./out/binaries/anka-gitlab-runner stop && ./out/binaries/anka-gitlab-runner --debug --log-level debug run
