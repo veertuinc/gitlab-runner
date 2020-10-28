@@ -81,6 +81,7 @@ type RegisterCommand struct {
 	AccessLevel       string `long:"access-level" env:"REGISTER_ACCESS_LEVEL" description:"Set access_level of the runner to not_protected or ref_protected; defaults to not_protected"`
 	MaximumTimeout    int    `long:"maximum-timeout" env:"REGISTER_MAXIMUM_TIMEOUT" description:"What is the maximum timeout (in seconds) that will be set for job when using this Runner"`
 	Paused            bool   `long:"paused" env:"REGISTER_PAUSED" description:"Set Runner to be paused, defaults to 'false'"`
+
 	common.RunnerConfig
 }
 
@@ -244,6 +245,20 @@ func (s *RegisterCommand) askAnkaSSHLogin() {
 	}
 }
 
+func (s *RegisterCommand) askSSHLogin() {
+	s.SSH.User = s.ask("ssh-user", "Enter the SSH user (for example, root):")
+	s.SSH.Password = s.ask(
+		"ssh-password",
+		"Enter the SSH password (for example, docker.io):",
+		true,
+	)
+	s.SSH.IdentityFile = s.ask(
+		"ssh-identity-file",
+		"Enter the path to the SSH identity file (for example, /home/user/.ssh/id_rsa):",
+		true,
+	)
+}
+
 func (s *RegisterCommand) addRunner(runner *common.RunnerConfig) {
 	s.config.Runners = append(s.config.Runners, runner)
 }
@@ -303,6 +318,11 @@ func (s *RegisterCommand) askExecutorOptions() {
 			s.Anka = anka
 			s.askAnka()
 			s.askAnkaSSHLogin()
+		},
+		"ssh": func() {
+			s.SSH = ssh
+			s.askSSHServer()
+			s.askSSHLogin()
 		},
 	}
 

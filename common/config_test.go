@@ -1,14 +1,14 @@
 package common
 
 import (
-	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers"
+
 )
 
 func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -21,8 +20,6 @@ import (
 	clihelpers "gitlab.com/ayufan/golang-cli-helpers"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/docker/machine"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/kubernetes"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
 )
 
@@ -191,7 +188,6 @@ func TestAccessLevelSetting(t *testing.T) {
 func TestAskRunnerOverrideDefaultsForExecutors(t *testing.T) {
 	executors := []string{
 		"ssh",
-		"anka"
 	}
 	for _, executor := range executors {
 		t.Run(executor, func(t *testing.T) { testAskRunnerOverrideDefaultsForExecutor(t, executor) })
@@ -352,7 +348,7 @@ func testAskRunnerOverrideDefaultsForExecutor(t *testing.T, executor string) {
 
 			assert.NoError(t, err)
 			tc.validate(cmd)
-			assert.Contains(t, output, "Runner registered successfully.")
+			assert.Contains(t, output, "Feel free to start anka-gitlab-runner, but if it's running already the config should be automatically reloaded")
 		})
 	}
 }
@@ -363,9 +359,6 @@ func assertExecutorDefaultValues(t *testing.T, executor string, s *RegisterComma
 	assert.Equal(t, executor, s.RunnerSettings.Executor)
 
 	switch executor {
-	case "anka":
-		require.NotNil(t, s.RunnerSettings.Anka)
-		assert.Equal(t, "", s.RunnerSettings.Anka.Tag)
 	case "ssh":
 		assertDefaultSSHLogin(t, s.RunnerSettings.SSH)
 		assertDefaultSSHServer(t, s.RunnerSettings.SSH)
@@ -393,9 +386,6 @@ func assertExecutorOverridenValues(t *testing.T, executor string, s *RegisterCom
 	assert.Equal(t, executor, s.RunnerSettings.Executor)
 
 	switch executor {
-	case "anka":
-		require.NotNil(t, s.RunnerSettings.Anka)
-		assert.Equal(t, "", s.RunnerSettings.Anka.Tag)
 	case "ssh":
 		assertOverridenSSHLogin(t, s.RunnerSettings.SSH)
 		assertOverridenSSHServer(t, s.RunnerSettings.SSH)

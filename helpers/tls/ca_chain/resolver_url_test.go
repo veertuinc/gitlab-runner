@@ -201,7 +201,7 @@ func TestHTTPFetcher(t *testing.T) {
 			},
 			mockFetcher:         newHTTPFetcher(50 * time.Millisecond),
 			expectedData:        nil,
-			expectedErrorSubstr: "Get http://127.0.0.1:",
+			expectedErrorSubstr: "Get \"http://127.0.0.1:",
 		},
 	}
 
