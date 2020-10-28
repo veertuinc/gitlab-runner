@@ -257,10 +257,6 @@ func testAdapterOperation(
 		if tc.expectedError != "" {
 			message, err := hook.LastEntry().String()
 			require.NoError(t, err)
-			fmt.Println("===============================")
-			fmt.Printf("t: %+v\n", t)
-			fmt.Printf("message: %+v\n", message)
-			fmt.Printf("tc: %+v\n", tc.expectedError)
 			assert.Contains(t, message, tc.expectedError)
 			return
 		}
@@ -282,7 +278,7 @@ func TestAdapterOperation(t *testing.T) {
 		"invalid-URL-returned": {
 			returnedURL:   "://test",
 			returnedError: nil,
-			expectedError: "error while parsing generated URL: parse ://test: missing protocol scheme",
+			expectedError: "error while parsing generated URL: parse \\\"://test\\\": missing protocol scheme",
 		},
 		"valid-configuration": {
 			returnedURL:   "https://storage.googleapis.com/test/key?Expires=123456789&GoogleAccessId=test-access-id%40X.iam.gserviceaccount.com&Signature=XYZ",
