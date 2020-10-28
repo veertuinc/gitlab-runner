@@ -48,7 +48,7 @@ func TestAdvertisingAddress(t *testing.T) {
 				ListenAddress:    "0.0.0.0:0",
 				AdvertiseAddress: "%^*",
 			},
-			expectedError: errors.New(`parse "https://%^*": invalid URL escape "%^*"`),
+			expectedError: errors.New(`parse https://%^*: invalid URL escape "%^*"`),
 		},
 		{
 			name: "Advertising address already has https schema",

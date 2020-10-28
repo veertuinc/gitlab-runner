@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/sirupsen/logrus"
+
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
@@ -18,6 +20,13 @@ type executor struct {
 	sshClient     ssh.Client
 	vmConnectInfo *AnkaVmConnectInfo
 	connector     *AnkaConnector
+}
+
+func LogAndUIPrint(s *executor, options common.ExecutorPrepareOptions, input string) {
+	options.Config.Log().WithFields(logrus.Fields{
+		"job": options.Build.JobResponse.ID,
+	}).Println(input)
+	s.Println(input)
 }
 
 func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
@@ -89,15 +98,15 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	s.Println(fmt.Sprintf("Verifying connectivity to the VM - Host: %v Port: %v Instance UUID: %v ", s.vmConnectInfo.Host, s.vmConnectInfo.Port, s.vmConnectInfo.InstanceId))
 	err = s.verifyNode()
 	if err != nil {
-		s.Errorln("SSH Error to VM:", err, s.vmConnectInfo)
+		LogAndUIPrint(s, options, fmt.Sprint("SSH Error to VM:", err, s.vmConnectInfo))
 		return err
 	}
 
-	s.Println(fmt.Sprintf(" %sAnka VM %s is ready for work on %s:%v%s", helpers.ANSI_BOLD_GREEN, connectInfo.InstanceId, connectInfo.Host, connectInfo.Port, helpers.ANSI_RESET))
+	LogAndUIPrint(s, options, fmt.Sprintf("%sAnka VM %s, running on Node %s (%s), is ready for work (%s:%v%s)", helpers.ANSI_BOLD_GREEN, connectInfo.InstanceId, connectInfo.NodeName, connectInfo.NodeIP, connectInfo.Host, connectInfo.Port, helpers.ANSI_RESET))
 
 	err = s.startSSHClient()
 	if err != nil {
-		s.Errorln(err.Error())
+		LogAndUIPrint(s, options, fmt.Sprint(err.Error()))
 		return err
 	}
 
@@ -138,7 +147,7 @@ func (s *executor) startSSHClient() error {
 }
 
 func (s *executor) Run(cmd common.ExecutorCommand) error {
-	fmt.Println(ssh.Command{
+	logrus.Debugf("%+v\n", ssh.Command{
 		Environment: s.BuildShell.Environment,
 		Command:     s.BuildShell.GetCommandWithArguments(),
 		Stdin:       cmd.Script,

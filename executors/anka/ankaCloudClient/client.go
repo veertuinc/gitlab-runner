@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 )
 
@@ -38,13 +40,22 @@ func (ankaClient *AnkaClient) GetVms() (error, *ListVmResponse) {
 		return err, nil
 	}
 	return nil, &response
-
 }
 
 func (ankaClient *AnkaClient) GetVm(instanceId string) (error, *GetVmResponse) {
 	response := GetVmResponse{}
 	vmPath := vmResourcePath + "?id=" + instanceId
 	err := ankaClient.doRequest("GET", vmPath, nil, &response)
+	if err != nil {
+		return err, nil
+	}
+	return nil, &response
+}
+
+func (ankaClient *AnkaClient) GetNode(nodeID string) (error, *GetNodeResponse) {
+	response := GetNodeResponse{}
+	nodePath := "/api/v1/node" + "?id=" + nodeID
+	err := ankaClient.doRequest("GET", nodePath, nil, &response)
 	if err != nil {
 		return err, nil
 	}
@@ -58,7 +69,6 @@ func (ankaClient *AnkaClient) GetRegistryVms() (error, *RegistryVmResponse) {
 		return err, nil
 	}
 	return nil, &response
-
 }
 
 func (ankaClient *AnkaClient) StartVm(startVmRequest *StartVMRequest) (error, *StartVmResponse) {
@@ -112,7 +122,7 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 		return err
 	}
 	urlString := urlObj.String()
-	fmt.Println(urlString)
+	logrus.Debugf("urlString: %v\n", urlString)
 
 	timeout := time.Duration(5 * time.Second)
 
@@ -192,9 +202,11 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 
 	requestDump, err := httputil.DumpRequest(req, true)
 	if err != nil {
-		fmt.Println(err)
+		logrus.Errorf("%v\n", err)
 	}
-	fmt.Printf("REQUEST TO CONTROLLER: %v\n", string(requestDump))
+	logrus.Debugf("REQUEST TO CONTROLLER: \n %v\n", string(requestDump))
+
+	req.Header.Set("Content-Type", JsonContentType)
 
 	retryLimit := 6
 	for tries := 0; tries <= retryLimit; tries++ {
@@ -202,10 +214,10 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 		if tries > 0 {
 			time.Sleep(time.Duration(10*tries) * time.Second)
 		}
-		fmt.Printf("doRequest retries: %v\n", tries)
+		logrus.Debugf("doRequest retries: %v\n", tries)
 		response, err = client.Do(req)
 		if err != nil {
-			fmt.Printf("client.Do(req) %v\n", err)
+			logrus.Debugf("client.Do(req) %v\n", err)
 			break
 		}
 		if response == nil || response.Body == nil || response.Status == "" { // If the controller connection fails or is overwhelmed, it will return null or empty values. We need to handle this so the job doesn't fail and orphan VMs.
@@ -213,12 +225,12 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 				err = errors.New("unable to connect to controller... please check its status and cleanup any zombied/orphaned VMs on your Anka Nodes")
 				break
 			} else {
-				fmt.Printf("something caused the controller to return nill... retrying until we get a valid retry...")
+				logrus.Errorf("something caused the controller to return nil... retrying until we get a valid response..")
 				continue
 			}
 		}
 		if err != nil {
-			fmt.Printf("%v\n", err)
+			logrus.Errorf("%v\n", err)
 			break
 		}
 
@@ -226,21 +238,20 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 
 		err = json.NewDecoder(response.Body).Decode(responseBody)
 		if response.StatusCode != http.StatusOK {
-			fmt.Printf("json Decode: %v\nResponse: %v\n", err, string(s))
+			logrus.Debugf("json Decode: %v\nResponse: %v\n", err, string(s))
 			break
 		}
 		break
 	}
 
 	s, _ := json.MarshalIndent(responseBody, "", "\t")
-	fmt.Printf("RESPONSE FROM CONTROLLER: %v\n", string(s))
+	logrus.Debugf("RESPONSE FROM CONTROLLER: %v\n", string(s))
 
 	if err != nil {
 		return fmt.Errorf("decoding response from controller: %v\nresponse: %v", err, string(s))
 	}
 
 	return nil
-
 }
 
 func MakeNewAnkaClient(ankaConfig *common.AnkaConfig) *AnkaClient {

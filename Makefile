@@ -29,7 +29,7 @@ RPM_PLATFORMS ?= el/6 el/7 el/8 \
     fedora/30
 RPM_ARCHS ?= x86_64 i686 arm armhf arm64 aarch64 s390x
 
-PKG = gitlab.com/veertuinc/gitlab-runner
+PKG = gitlab.com/gitlab-org/gitlab-runner
 COMMON_PACKAGE_NAMESPACE=$(PKG)/common
 
 BUILD_DIR := $(CURDIR)
@@ -38,7 +38,7 @@ TARGET_DIR := $(BUILD_DIR)/out
 # Packages in vendor/ are included in ./...
 # https://github.com/golang/go/issues/11659
 export OUR_PACKAGES ?= $(subst _$(BUILD_DIR),$(PKG),$(shell go list ./... | grep -v '/vendor/'))
-export MAIN_PACKAGE ?= gitlab.com/veertuinc/gitlab-runner
+export MAIN_PACKAGE ?= gitlab.com/gitlab-org/gitlab-runner
 
 GO_LDFLAGS ?= -X $(COMMON_PACKAGE_NAMESPACE).NAME=$(PACKAGE_NAME) -X $(COMMON_PACKAGE_NAMESPACE).VERSION=$(VERSION) \
               -X $(COMMON_PACKAGE_NAMESPACE).REVISION=$(REVISION) -X $(COMMON_PACKAGE_NAMESPACE).BUILT=$(BUILT) \
