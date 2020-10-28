@@ -42,6 +42,37 @@ type Group struct {
 	Name            *string `json: "name"`
 }
 
+type GetNodeResponse struct {
+	StandardResponse
+	Body []Node `json:"body"`
+}
+
+type Node struct {
+	NodeID         string      `json:"node_id"`
+	NodeName       string      `json:"node_name"`
+	IPAddress      string      `json:"ip_address"`
+	CPU            uint        `json:"cpu_count,omitempty"`
+	RAM            uint        `json:"ram,omitempty"`
+	VMCount        uint        `json:"vm_count,omitempty"`
+	VCPUCount      uint        `json:"vcpu_count,omitempty"`
+	VRAM           uint        `json:"vram,omitempty"`
+	CPUUtilization float32     `json:"cpu_util,omitempty"`
+	RAMUtilization float32     `json:"ram_util,omitempty"`
+	FreeDiskSpace  uint        `json:"free_disk_space,omitempty"`
+	AnkaDiskUsage  uint        `json:"anka_disk_usage,omitempty"`
+	DiskSize       uint        `json:"disk_size,omitempty"`
+	State          string      `json:"state"`
+	Capacity       uint        `json:"capacity"`
+	Groups         []NodeGroup `json:"groups"`
+}
+
+type NodeGroup struct {
+	Id              string `json:"id"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	FallBackGroupId string `json:"fallback_group_id"`
+}
+
 type GetVmResponse struct {
 	StandardResponse
 	Body VMStatus `json:"body"`

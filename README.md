@@ -29,6 +29,8 @@ For a list of compatible versions between GitLab and GitLab Runner, see the [com
 --tag-list "localhost-shared,localhost,iOS"
 ```
 
+> Examples of the different log formats can be found [HERE](https://docs.gitlab.com/runner/configuration/advanced-configuration.html#log_format-examples-truncated)
+
 ## Example `gitlab-ci.yml`
 
 ```yaml

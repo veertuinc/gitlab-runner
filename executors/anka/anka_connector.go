@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors/anka/ankaCloudClient"
 )
@@ -29,7 +31,7 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig, don
 
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("Recovered in StartInstance", r)
+			logrus.Errorf("Recovered in StartInstance", r)
 			funcErr = fmt.Errorf("%v", r)
 			if connectInfo.InstanceId != "" {
 				connector.TerminateInstance(connectInfo.InstanceId)
@@ -69,15 +71,25 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig, don
 		InstanceId: instanceId,
 	}
 
+	// Start the VM and wait for it to pull, etc
 	now := time.Now()
 	waitForStartUntil := now.Add(connector.startingTimeWait)
-
 	vm, err := connector.waitForVMToStart(instanceId, waitForStartUntil, done)
 	if err != nil {
 		connector.client.TerminateVm(instanceId)
 		return nil, err
 	}
 
+	// Get Node Name
+	err, node := connector.client.GetNode(vm.VMInfo.NodeId)
+	if err != nil {
+		connector.client.TerminateVm(instanceId)
+		return nil, err
+	}
+	connectInfo.NodeName = node.Body[0].NodeName
+	connectInfo.NodeIP = node.Body[0].IPAddress
+
+	// Wait for the VM to get Networking
 	now = time.Now()
 	waitForNetworkUntil := now.Add(connector.netTimeToWait)
 	vm, err = connector.waitForVMToHaveNetwork(instanceId, waitForNetworkUntil, done)
@@ -260,4 +272,6 @@ type AnkaVmConnectInfo struct {
 	InstanceId string
 	Host       string
 	Port       int
+	NodeName   string
+	NodeIP     string
 }
