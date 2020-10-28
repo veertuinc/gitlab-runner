@@ -18,8 +18,6 @@ import (
 	clihelpers "gitlab.com/ayufan/golang-cli-helpers"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/docker/machine"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/kubernetes"
 )
 
 func getLogrusOutput(t *testing.T, hook *test.Hook) string {

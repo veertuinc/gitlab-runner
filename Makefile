@@ -315,7 +315,6 @@ update_feature_flags_docs:
 
 development_setup:
 	test -d tmp/gitlab-test || git clone https://gitlab.com/gitlab-org/ci-cd/tests/gitlab-test.git tmp/gitlab-test
-	if prlctl --version ; then $(MAKE) -C tests/ubuntu parallels ; fi
 
 check_modules:
 	# Check if there is any difference in vendor/

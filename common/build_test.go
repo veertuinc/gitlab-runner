@@ -20,7 +20,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 	"gitlab.com/gitlab-org/gitlab-runner/session"
 	"gitlab.com/gitlab-org/gitlab-runner/session/terminal"
@@ -213,19 +212,17 @@ func TestJobImageExposed(t *testing.T) {
 }
 
 func TestBuildRunNoModifyConfig(t *testing.T) {
-	expectHostAddr := "10.0.0.1"
+	expectHostAddr := "http://10.0.0.1"
 	p, assertFn := setupSuccessfulMockExecutor(t, func(options ExecutorPrepareOptions) error {
-		options.Config.Docker.Credentials.Host = "10.0.0.2"
+		options.Config.Anka.ControllerAddress = expectHostAddr
 		return nil
 	})
 	defer assertFn()
 
 	rc := &RunnerConfig{
 		RunnerSettings: RunnerSettings{
-			Docker: &DockerConfig{
-				Credentials: docker.Credentials{
-					Host: expectHostAddr,
-				},
+			Anka: &AnkaConfig{
+				ControllerAddress: expectHostAddr,
 			},
 		},
 	}
@@ -233,7 +230,7 @@ func TestBuildRunNoModifyConfig(t *testing.T) {
 
 	err := build.Run(&Config{}, &Trace{Writer: os.Stdout})
 	assert.NoError(t, err)
-	assert.Equal(t, expectHostAddr, rc.Docker.Credentials.Host)
+	assert.Equal(t, expectHostAddr, rc.Anka.ControllerAddress)
 }
 
 func TestRetryPrepare(t *testing.T) {

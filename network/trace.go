@@ -9,10 +9,6 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/trace"
 )
 
-const (
-	emptyRemoteTraceUpdateInterval = 0
-)
-
 type clientJobTrace struct {
 	client         common.Network
 	config         common.RunnerConfig
@@ -136,13 +132,6 @@ func (c *clientJobTrace) SetFailuresCollector(fc common.FailuresCollector) {
 }
 
 func (c *clientJobTrace) IsStdout() bool {
-	return false
-}
-
-func (c *clientJobTrace) IsJobSuccessful() bool {
-	if c.state == common.Success {
-		return true
-	}
 	return false
 }
 
@@ -407,4 +396,11 @@ func newJobTrace(
 		updateInterval:    common.DefaultUpdateInterval,
 		forceSendInterval: common.TraceForceSendInterval,
 	}, nil
+}
+
+func (c *clientJobTrace) IsJobSuccessful() bool {
+	if c.state == common.Success {
+		return true
+	}
+	return false
 }

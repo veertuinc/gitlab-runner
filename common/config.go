@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -16,7 +15,6 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/timeperiod"
 	"gitlab.com/gitlab-org/gitlab-runner/referees"
 )
 
@@ -69,7 +67,6 @@ type AnkaConfig struct {
 	KeepAliveOnError    bool `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"Keep the VM alive for debugging job failures"`
 }
 
-
 func tryGetTomlValue(data map[string]interface{}, key string) (string, error) {
 	value, ok := data[key]
 	if !ok {
@@ -80,28 +77,8 @@ func tryGetTomlValue(data map[string]interface{}, key string) (string, error) {
 	case string:
 		return v, nil
 	}
-	return p, nil
-}
 
-type NodeSelector struct {
-	NodeSelectorTerms []NodeSelectorTerm `toml:"node_selector_terms" json:"node_selector_terms"`
-}
-
-type PreferredSchedulingTerm struct {
-	Weight     int32            `toml:"weight" json:"weight"`
-	Preference NodeSelectorTerm `toml:"preference" json:"preference"`
-}
-
-type NodeSelectorTerm struct {
-	MatchExpressions []NodeSelectorRequirement `toml:"match_expressions,omitempty" json:"match_expressions"`
-	MatchFields      []NodeSelectorRequirement `toml:"match_fields,omitempty" json:"match_fields"`
-}
-
-//nolint:lll
-type NodeSelectorRequirement struct {
-	Key      string   `toml:"key,omitempty" json:"key"`
-	Operator string   `toml:"operator,omitempty" json:"operator"`
-	Values   []string `toml:"values,omitempty" json:"values"`
+	return "", fmt.Errorf("toml: cannot load TOML value of type %T into a Go string", value)
 }
 
 type Service struct {
@@ -146,6 +123,19 @@ type CacheS3Config struct {
 	BucketName     string `toml:"BucketName,omitempty" long:"bucket-name" env:"CACHE_S3_BUCKET_NAME" description:"Name of the bucket where cache will be stored"`
 	BucketLocation string `toml:"BucketLocation,omitempty" long:"bucket-location" env:"CACHE_S3_BUCKET_LOCATION" description:"Name of S3 region"`
 	Insecure       bool   `toml:"Insecure,omitempty" long:"insecure" env:"CACHE_S3_INSECURE" description:"Use insecure mode (without https)"`
+}
+
+//nolint:lll
+type CacheAzureCredentials struct {
+	AccountName string `toml:"AccountName,omitempty" long:"account-name" env:"CACHE_AZURE_ACCOUNT_NAME" description:"Account name for Azure Blob Storage"`
+	AccountKey  string `toml:"AccountKey,omitempty" long:"account-key" env:"CACHE_AZURE_ACCOUNT_KEY" description:"Access key for Azure Blob Storage"`
+}
+
+//nolint:lll
+type CacheAzureConfig struct {
+	CacheAzureCredentials
+	ContainerName string `toml:"ContainerName,omitempty" long:"container-name" env:"CACHE_AZURE_CONTAINER_NAME" description:"Name of the Azure container where cache will be stored"`
+	StorageDomain string `toml:"StorageDomain,omitempty" long:"storage-domain" env:"CACHE_AZURE_STORAGE_DOMAIN" description:"Domain name of the Azure storage (e.g. blob.core.windows.net)"`
 }
 
 //nolint:lll
@@ -359,18 +349,6 @@ func (c *Config) LoadConfig(configFile string) error {
 
 	if _, err = toml.DecodeFile(configFile, c); err != nil {
 		return err
-	}
-
-	for _, runner := range c.Runners {
-		if runner.Machine == nil {
-			continue
-		}
-
-		err := runner.Machine.CompilePeriods()
-		if err != nil {
-			return err
-		}
-		runner.Machine.logDeprecationWarning()
 	}
 
 	c.ModTime = info.ModTime()

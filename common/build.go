@@ -715,13 +715,11 @@ func (b *Build) retryCreateExecutor(
 		} else if options.Context.Err() != nil {
 			return nil, b.handleError(options.Context.Err())
 		}
-		if (tries + 1) <= Retries {
-			logger.SoftErrorln("Preparation failed:", err)
-			logger.Infoln("-------------------")
-			secondsToSleep := PreparationRetryInterval * (tries + 1) // Exponential
-			logger.Infoln("Will be retried in", secondsToSleep, "seconds...")
-			time.Sleep(time.Duration(secondsToSleep) * time.Second)
-		}
+
+		logger.SoftErrorln("Preparation failed:", err)
+		logger.Infoln("-------------------")
+		logger.Infoln("Will be retried in", PreparationRetryInterval, "...")
+		time.Sleep(PreparationRetryInterval)
 	}
 
 	return nil, err
@@ -911,12 +909,6 @@ func (b *Build) resolveSecrets() error {
 
 	b.Secrets.expandVariables(b.GetAllVariables())
 
-func (b *Build) executeBuildSection(
-	executor Executor,
-	options ExecutorPrepareOptions,
-	provider ExecutorProvider,
-) (Executor, error) {
-	var err error
 	section := helpers.BuildSection{
 		Name:        string(BuildStageResolveSecrets),
 		SkipMetrics: !b.JobResponse.Features.TraceSections,

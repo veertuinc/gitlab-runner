@@ -257,6 +257,10 @@ func testAdapterOperation(
 		if tc.expectedError != "" {
 			message, err := hook.LastEntry().String()
 			require.NoError(t, err)
+			fmt.Println("===============================")
+			fmt.Printf("t: %+v\n", t)
+			fmt.Printf("message: %+v\n", message)
+			fmt.Printf("tc: %+v\n", tc.expectedError)
 			assert.Contains(t, message, tc.expectedError)
 			return
 		}

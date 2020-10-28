@@ -28,14 +28,14 @@ const DefaultSessionTimeout = 30 * time.Minute
 const WaitForBuildFinishTimeout = 5 * time.Minute
 
 const (
-	DefaultTraceOutputLimit    = 4 * 1024 * 1024 // in bytes
-	DefaultTracePatchLimit     = 1024 * 1024     // in bytes
-	DefaultTraceUpdateInterval = 3 * time.Second
-	TraceFinishRetryInterval   = 3 * time.Second
-	TraceForceSendInterval     = 10 * time.Second
+	DefaultTraceOutputLimit = 4 * 1024 * 1024 // in bytes
+	DefaultTracePatchLimit  = 1024 * 1024     // in bytes
+	DefaultUpdateInterval   = 3 * time.Second
+	MaxUpdateInterval       = 3 * time.Minute
+	TraceForceSendInterval  = 30 * time.Second
 )
 
-var PreparationRetryInterval = 10
+var PreparationRetryInterval = 3 * time.Second
 
 const (
 	TestAlpineImage       = "alpine:3.12.0"
