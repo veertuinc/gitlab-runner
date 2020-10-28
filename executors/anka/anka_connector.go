@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors/anka/ankaCloudClient"
 )
@@ -31,7 +29,7 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig, don
 
 	defer func() {
 		if r := recover(); r != nil {
-			logrus.Errorf("Recovered in StartInstance", r)
+			fmt.Println("Recovered in StartInstance", r)
 			funcErr = fmt.Errorf("%v", r)
 			if connectInfo.InstanceId != "" {
 				connector.TerminateInstance(connectInfo.InstanceId)
