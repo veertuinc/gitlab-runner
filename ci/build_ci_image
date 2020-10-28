@@ -1,0 +1,56 @@
+#!/bin/bash
+
+set -eo pipefail
+
+GIT_ROOT=$(cd "${BASH_SOURCE%/*}" && git rev-parse --show-toplevel)
+
+registry_credentials_available() {
+    echo "Checking registry credentials"
+    [[ -n "${CI_REGISTRY_USER}" ]] && [[ -n "${CI_REGISTRY_PASSWORD}" ]] && return 0
+    return 1
+}
+
+login() {
+    echo "Logging into registry"
+    registry_credentials_available || return 0
+    echo "${CI_REGISTRY_PASSWORD}" | docker login --username "${CI_REGISTRY_USER}" --password-stdin "${CI_REGISTRY}"
+}
+
+logout() {
+    echo "Logging out of registry"
+    docker logout "${CI_REGISTRY}"
+}
+
+pull () {
+    echo "Pulling base image"
+    registry_credentials_available || return 0
+    docker pull "${BUILD_IMAGE}" || echo "${BUILD_IMAGE} image is not available. Will not use cache."
+}
+
+push () {
+    echo "Pushing image"
+    registry_credentials_available || return 0
+    docker push "${BUILD_IMAGE}"
+}
+
+
+build() {
+    echo "Building image: ${BUILD_IMAGE}"
+    docker build \
+           --cache-from "${BUILD_IMAGE}" \
+           --build-arg DOCKER_VERSION="${DOCKER_VERSION}" \
+           --build-arg BUILDX_VERSION="${BUILDX_VERSION}" \
+           --build-arg PWSH_VERSION="${PWSH_VERSION}" \
+           --build-arg GIT_LFS_VERSION="${GIT_LFS_VERSION}" \
+           --build-arg GIT_LFS_256_CHECKSUM="${GIT_LFS_256_CHECKSUM}" \
+           --build-arg KUBECTL_VERSION="${KUBECTL_VERSION}" \
+           -t "${BUILD_IMAGE}" \
+           -f "${BUILD_DOCKERFILE}" \
+           "${GIT_ROOT}"
+}
+
+login
+pull
+build
+push
+logout

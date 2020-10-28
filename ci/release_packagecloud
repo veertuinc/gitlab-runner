@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+target=$(echo "${1}" | cut -f 1 -d ' ')
+case "${target}" in
+    bleeding)
+        make packagecloud PACKAGE_CLOUD="runner/unstable" \
+                          DEB_PLATFORMS="debian/jessie debian/stretch debian/buster ubuntu/xenial ubuntu/bionic ubuntu/eoan ubuntu/focal" \
+                          RPM_PLATFORMS="el/7 el/8 fedora/30"
+        ;;
+    stable)
+        make packagecloud
+        ;;
+    *)
+        echo "Unknown packagecloud upload target: '${target}'"
+        exit 1
+        ;;
+esac
