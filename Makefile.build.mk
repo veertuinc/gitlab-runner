@@ -10,7 +10,7 @@ runner-bin-host: ARCH := $(shell uname -m | sed s/x86_64/amd64/ | sed s/i386/386
 runner-bin-host:
 	# Building $(NAME) in version $(VERSION) for host platform
 	$(MAKE) runner-bin BUILD_PLATFORMS="-osarch=$(OS)/$(ARCH)"
-	cp -f "out/binaries/$(NAME)-$(OS)-$(ARCH)" out/binaries/gitlab-runner
+	cp -f "out/binaries/$(NAME)-$(OS)-$(ARCH)" out/binaries/anka-gitlab-runner
 
 runner-bin-linux: OS := 'linux'
 runner-bin-linux:

@@ -1,0 +1,29 @@
+builds:
+  - id: darwin-386 
+    binary: anka-gitlab-runner-darwin-386
+    goos:
+      - darwin
+    goarch:
+      - "386"
+  - id: darwin-amd64
+    binary: anka-gitlab-runner-darwin-amd64
+    goos:
+      - darwin
+    goarch:
+      - amd64
+  - id: linux-386
+    binary: anka-gitlab-runner-linux-386
+    goos:
+      - linux
+    goarch:
+      - "386"
+  - id: linux-amd64
+    binary: anka-gitlab-runner-linux-amd64
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+
+
+

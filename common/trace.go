@@ -79,3 +79,7 @@ func (s *Trace) SetFailuresCollector(fc FailuresCollector) {}
 func (s *Trace) IsStdout() bool {
 	return true
 }
+
+func (s *Trace) IsJobSuccessful() bool {
+	return true
+}

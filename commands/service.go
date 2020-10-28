@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	defaultServiceName = "gitlab-runner"
-	defaultDescription = "GitLab Runner"
+	defaultServiceName = "anka-gitlab-runner"
+	defaultDescription = "Anka GitLab Runner"
 )
 
 type NullService struct {
@@ -38,6 +38,7 @@ func runServiceInstall(s service.Service, c *cli.Context) error {
 	if configFile := c.String("config"); configFile != "" {
 		// try to load existing config
 		config := common.NewConfig()
+
 		err := config.LoadConfig(configFile)
 		if err != nil {
 			return err
@@ -147,6 +148,12 @@ func RunServiceControl(c *cli.Context) {
 
 	if err != nil {
 		logrus.Fatal(err)
+	}
+
+	if c.Command.Name == "uninstall" || c.Command.Name == "install" {
+		logrus.Println("success")
+	} else {
+		logrus.Println("executed")
 	}
 }
 

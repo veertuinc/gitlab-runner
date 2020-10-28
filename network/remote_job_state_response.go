@@ -17,6 +17,13 @@ const (
 	statusFailed    = "failed"
 )
 
+const (
+	remoteStateHeader = "Job-Status"
+
+	statusCanceled = "canceled"
+	statusFailed   = "failed"
+)
+
 type RemoteJobStateResponse struct {
 	StatusCode           int
 	RemoteState          string

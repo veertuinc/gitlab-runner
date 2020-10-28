@@ -514,6 +514,21 @@ type JobTrace interface {
 	SetFailuresCollector(fc FailuresCollector)
 	SetMasked(values []string)
 	IsStdout() bool
+	IsJobSuccessful() bool
+}
+
+type PatchTraceResult struct {
+	SentOffset        int
+	State             UpdateState
+	NewUpdateInterval time.Duration
+}
+
+func NewPatchTraceResult(sentOffset int, state UpdateState, newUpdateInterval int) PatchTraceResult {
+	return PatchTraceResult{
+		SentOffset:        sentOffset,
+		State:             state,
+		NewUpdateInterval: time.Duration(newUpdateInterval) * time.Second,
+	}
 }
 
 type UpdateJobResult struct {

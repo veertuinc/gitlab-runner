@@ -3,7 +3,6 @@ package executors
 import (
 	"context"
 	"os"
-	"sync"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/session/proxy"
@@ -29,8 +28,6 @@ type AbstractExecutor struct {
 	currentStage common.ExecutorStage
 	Context      context.Context
 	ProxyPool    proxy.Pool
-
-	stageLock sync.RWMutex
 }
 
 func (e *AbstractExecutor) updateShell() error {
@@ -105,7 +102,7 @@ func (e *AbstractExecutor) Prepare(options common.ExecutorPrepareOptions) error 
 }
 
 func (e *AbstractExecutor) PrepareConfiguration(options common.ExecutorPrepareOptions) {
-	e.SetCurrentStage(common.ExecutorStagePrepare)
+	e.currentStage = common.ExecutorStagePrepare
 	e.Context = options.Context
 	e.Config = *options.Config
 	e.Build = options.Build
@@ -133,23 +130,17 @@ func (e *AbstractExecutor) PrepareBuildAndShell() error {
 }
 
 func (e *AbstractExecutor) Finish(err error) {
-	e.SetCurrentStage(common.ExecutorStageFinish)
+	e.currentStage = common.ExecutorStageFinish
 }
 
 func (e *AbstractExecutor) Cleanup() {
-	e.SetCurrentStage(common.ExecutorStageCleanup)
+	e.currentStage = common.ExecutorStageCleanup
 }
 
 func (e *AbstractExecutor) GetCurrentStage() common.ExecutorStage {
-	e.stageLock.RLock()
-	defer e.stageLock.RUnlock()
-
 	return e.currentStage
 }
 
 func (e *AbstractExecutor) SetCurrentStage(stage common.ExecutorStage) {
-	e.stageLock.Lock()
-	defer e.stageLock.Unlock()
-
 	e.currentStage = stage
 }

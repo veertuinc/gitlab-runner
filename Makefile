@@ -1,10 +1,10 @@
-NAME ?= gitlab-runner
+NAME ?= anka-gitlab-runner
 export PACKAGE_NAME ?= $(NAME)
 export VERSION := $(shell ./ci/version)
 REVISION := $(shell git rev-parse --short=8 HEAD || echo unknown)
 BRANCH := $(shell git show-ref | grep "$(REVISION)" | grep -v HEAD | awk '{print $$2}' | sed 's|refs/remotes/origin/||' | sed 's|refs/heads/||' | sort | head -n 1)
 BUILT := $(shell date -u +%Y-%m-%dT%H:%M:%S%z)
-export TESTFLAGS ?= -cover
+export TESTFLAGS ?= -cover 1
 
 LATEST_STABLE_TAG := $(shell git -c versionsort.prereleaseSuffix="-rc" -c versionsort.prereleaseSuffix="-RC" tag -l "v*.*.*" --sort=-v:refname | awk '!/rc/' | head -n 1)
 export IS_LATEST :=
@@ -15,7 +15,7 @@ endif
 PACKAGE_CLOUD ?= ayufan/gitlab-ci-multi-runner
 PACKAGE_CLOUD_URL ?= https://packagecloud.io/
 BUILD_ARCHS ?= -arch '386' -arch 'arm' -arch 'amd64' -arch 'arm64' -arch 's390x'
-BUILD_PLATFORMS ?= -osarch 'darwin/amd64' -os 'linux' -os 'freebsd' -os 'windows' ${BUILD_ARCHS}
+BUILD_PLATFORMS ?= -osarch 'darwin/amd64' -os 'linux' -os '!freebsd' -os '!windows' ${BUILD_ARCHS}
 S3_UPLOAD_PATH ?= master
 
 # Keep in sync with docs/install/linux-repository.md
@@ -29,8 +29,8 @@ RPM_PLATFORMS ?= el/6 el/7 el/8 \
     fedora/30
 RPM_ARCHS ?= x86_64 i686 arm armhf arm64 aarch64 s390x
 
-PKG = gitlab.com/gitlab-org/$(PACKAGE_NAME)
-COMMON_PACKAGE_NAMESPACE = $(PKG)/common
+PKG = gitlab.com/veertuinc/gitlab-runner
+COMMON_PACKAGE_NAMESPACE=$(PKG)/common
 
 BUILD_DIR := $(CURDIR)
 TARGET_DIR := $(BUILD_DIR)/out
@@ -38,7 +38,7 @@ TARGET_DIR := $(BUILD_DIR)/out
 # Packages in vendor/ are included in ./...
 # https://github.com/golang/go/issues/11659
 export OUR_PACKAGES ?= $(subst _$(BUILD_DIR),$(PKG),$(shell go list ./... | grep -v '/vendor/'))
-export MAIN_PACKAGE ?= gitlab.com/gitlab-org/gitlab-runner
+export MAIN_PACKAGE ?= gitlab.com/veertuinc/gitlab-runner
 
 GO_LDFLAGS ?= -X $(COMMON_PACKAGE_NAMESPACE).NAME=$(PACKAGE_NAME) -X $(COMMON_PACKAGE_NAMESPACE).VERSION=$(VERSION) \
               -X $(COMMON_PACKAGE_NAMESPACE).REVISION=$(REVISION) -X $(COMMON_PACKAGE_NAMESPACE).BUILT=$(BUILT) \
@@ -206,7 +206,7 @@ build-and-deploy-binary: ARCH ?= amd64
 build-and-deploy-binary:
 	$(MAKE) runner-bin BUILD_PLATFORMS="-osarch=linux/$(ARCH)"
 	@[ -z "$(SERVER)" ] && echo "SERVER variable not specified!" && exit 1
-	scp out/binaries/$(PACKAGE_NAME)-linux-$(ARCH) $(SERVER):/usr/bin/gitlab-runner
+	scp out/binaries/$(PACKAGE_NAME)-linux-$(ARCH) $(SERVER):/usr/bin/anka-gitlab-runner
 
 .PHONY: packagecloud
 packagecloud: packagecloud-deps packagecloud-deb packagecloud-rpm
@@ -260,15 +260,15 @@ release_packagecloud:
 	# Releasing to https://packages.gitlab.com/runner/
 	@./ci/release_packagecloud "$$CI_JOB_NAME"
 
-release_s3: prepare_windows_zip prepare_zoneinfo prepare_index
+release_s3: copy_helper_binaries prepare_windows_zip prepare_zoneinfo prepare_index
 	# Releasing to S3
 	@./ci/release_s3
 
-out/binaries/gitlab-runner-windows-%.zip: out/binaries/gitlab-runner-windows-%.exe
+out/binaries/gitlab-runner-windows-%.zip: out/binaries/anka-gitlab-runner-windows-%.exe
 	zip --junk-paths $@ $<
 	cd out/ && zip -r ../$@ helper-images
 
-prepare_windows_zip: out/binaries/gitlab-runner-windows-386.zip out/binaries/gitlab-runner-windows-amd64.zip
+prepare_windows_zip: out/binaries/anka-gitlab-runner-windows-386.zip out/binaries/anka-gitlab-runner-windows-amd64.zip
 
 prepare_zoneinfo:
 	# preparing the zoneinfo file
@@ -315,8 +315,6 @@ update_feature_flags_docs:
 
 development_setup:
 	test -d tmp/gitlab-test || git clone https://gitlab.com/gitlab-org/ci-cd/tests/gitlab-test.git tmp/gitlab-test
-	if prlctl --version ; then $(MAKE) -C tests/ubuntu parallels ; fi
-	if vboxmanage --version ; then $(MAKE) -C tests/ubuntu virtualbox ; fi
 
 check_modules:
 	# Check if there is any difference in vendor/

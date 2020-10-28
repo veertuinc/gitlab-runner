@@ -92,6 +92,7 @@ func (r *RunSingleCommand) processBuild(data common.ExecutorData, abortSignal ch
 	}
 
 	config := common.NewConfig()
+
 	newBuild, err := common.NewBuild(*jobData, &r.RunnerConfig, abortSignal, data)
 	if err != nil {
 		return err

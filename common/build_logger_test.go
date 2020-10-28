@@ -22,6 +22,7 @@ func (fjt *fakeJobTrace) Abort() bool                                    { retur
 func (fjt *fakeJobTrace) SetFailuresCollector(fc FailuresCollector)      {}
 func (fjt *fakeJobTrace) SetMasked(masked []string)                      {}
 func (fjt *fakeJobTrace) IsStdout() bool                                 { return false }
+func (fjt *fakeJobTrace) IsJobSuccessful() bool                          { return false }
 
 func (fjt *fakeJobTrace) Write(p []byte) (n int, err error) {
 	return fjt.buffer.Write(p)
@@ -39,7 +40,7 @@ func newFakeJobTrace() *fakeJobTrace {
 	return fjt
 }
 
-func newBuildLogger(testName string, jt JobTrace) BuildLogger {
+func newBuildLogger(testName string, jt *fakeJobTrace) BuildLogger {
 	return BuildLogger{
 		log:   jt,
 		entry: logrus.WithField("test", testName),

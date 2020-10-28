@@ -19,8 +19,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 	"gitlab.com/gitlab-org/gitlab-runner/session"
 	"gitlab.com/gitlab-org/gitlab-runner/session/terminal"
@@ -196,7 +194,6 @@ func TestJobImageExposed(t *testing.T) {
 				options.Build.Variables = append(options.Build.Variables, tt.vars...)
 				return options.Build.StartBuild("/root/dir", "/cache/dir", false, false)
 			})
-
 			actualVarExists := false
 			for _, v := range build.GetAllVariables() {
 				if v.Key == "CI_JOB_IMAGE" {
@@ -205,7 +202,6 @@ func TestJobImageExposed(t *testing.T) {
 				}
 			}
 			assert.Equal(t, tt.expectVarExists, actualVarExists, "CI_JOB_IMAGE exported?")
-
 			if tt.expectVarExists {
 				actualJobImage := build.GetAllVariables().Get("CI_JOB_IMAGE")
 				assert.Equal(t, tt.expectImageName, actualJobImage)
@@ -215,19 +211,17 @@ func TestJobImageExposed(t *testing.T) {
 }
 
 func TestBuildRunNoModifyConfig(t *testing.T) {
-	expectHostAddr := "10.0.0.1"
+	expectHostAddr := "http://10.0.0.1"
 	p, assertFn := setupSuccessfulMockExecutor(t, func(options ExecutorPrepareOptions) error {
-		options.Config.Docker.Credentials.Host = "10.0.0.2"
+		options.Config.Anka.ControllerAddress = expectHostAddr
 		return nil
 	})
 	defer assertFn()
 
 	rc := &RunnerConfig{
 		RunnerSettings: RunnerSettings{
-			Docker: &DockerConfig{
-				Credentials: docker.Credentials{
-					Host: expectHostAddr,
-				},
+			Anka: &AnkaConfig{
+				ControllerAddress: expectHostAddr,
 			},
 		},
 	}
@@ -235,10 +229,11 @@ func TestBuildRunNoModifyConfig(t *testing.T) {
 
 	err := build.Run(&Config{}, &Trace{Writer: os.Stdout})
 	assert.NoError(t, err)
-	assert.Equal(t, expectHostAddr, rc.Docker.Credentials.Host)
+	assert.Equal(t, expectHostAddr, rc.Anka.ControllerAddress)
 }
 
 func TestRetryPrepare(t *testing.T) {
+	PreparationRetries = 2
 	PreparationRetryInterval = 0
 
 	e := MockExecutor{}
@@ -272,6 +267,7 @@ func TestRetryPrepare(t *testing.T) {
 }
 
 func TestPrepareFailure(t *testing.T) {
+	PreparationRetries = 2
 	PreparationRetryInterval = 0
 
 	e := MockExecutor{}

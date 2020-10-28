@@ -27,7 +27,7 @@ func TestProcessRunner_BuildLimit(t *testing.T) {
 		Limit:              2,
 		RequestConcurrency: 10,
 		RunnerSettings: common.RunnerSettings{
-			Executor: "multi-runner-build-limit",
+			Executor: "anka",
 		},
 	}
 
@@ -82,7 +82,7 @@ func TestProcessRunner_BuildLimit(t *testing.T) {
 	p.On("GetFeatures", mock.Anything).Return(nil)
 	p.On("Create").Return(&e)
 
-	common.RegisterExecutorProvider("multi-runner-build-limit", &p)
+	common.RegisterExecutorProvider("anka", &p)
 
 	cmd := RunCommand{
 		network:      &mNetwork,

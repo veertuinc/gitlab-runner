@@ -123,6 +123,7 @@ func (n *GitLabClient) getClient(credentials requestCredentials) (c *client, err
 }
 
 func (n *GitLabClient) getLastUpdate(credentials requestCredentials) (lu string) {
+
 	cli, err := n.getClient(credentials)
 	if err != nil {
 		return ""
@@ -173,6 +174,7 @@ func (n *GitLabClient) doRaw(
 	headers http.Header,
 ) (res *http.Response, err error) {
 	c, err := n.getClient(credentials)
+
 	if err != nil {
 		return nil, err
 	}
