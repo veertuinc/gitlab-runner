@@ -68,7 +68,7 @@ make runner-and-helper-bin-host
 
 Test your changes manually with `anka-gitlab-runner --debug --log-level debug run`:
 
-> Using https://github.com/veertuinc/getting-started scripts to setup Gitlab locally
+> Try out our https://github.com/veertuinc/getting-started scripts to setup Gitlab locally
 
 > The gitlab-rails will take a few minutes to do the query. Be patient.
 
