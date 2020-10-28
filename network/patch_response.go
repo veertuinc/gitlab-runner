@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	rangeHeader               = "Range"
-	traceUpdateIntervalHeader = "X-GitLab-Trace-Update-Interval"
+	rangeHeader = "Range"
 )
 
 type TracePatchResponse struct {
@@ -32,28 +31,13 @@ func (p *TracePatchResponse) NewOffset() int {
 }
 
 func NewTracePatchResponse(response *http.Response, logger logrus.FieldLogger) *TracePatchResponse {
-	if response == nil {
-		return new(TracePatchResponse)
+	result := &TracePatchResponse{
+		RemoteJobStateResponse: NewRemoteJobStateResponse(response, logger),
 	}
 
-	var (
-		err                       error
-		remoteTraceUpdateInterval int
-	)
-	updateIntervalRaw := response.Header.Get(traceUpdateIntervalHeader)
-	if updateIntervalRaw != "" {
-		remoteTraceUpdateInterval, err = strconv.Atoi(updateIntervalRaw)
-		if err != nil {
-			remoteTraceUpdateInterval = emptyRemoteTraceUpdateInterval
-			logger.WithError(err).
-				WithField("header-value", updateIntervalRaw).
-				Warningf("Failed to parse %q header", traceUpdateIntervalHeader)
-		}
+	if response != nil {
+		result.RemoteRange = response.Header.Get(rangeHeader)
 	}
 
-	return &TracePatchResponse{
-		RemoteJobStateResponse:    NewRemoteJobStateResponse(response),
-		RemoteRange:               response.Header.Get(rangeHeader),
-		RemoteTraceUpdateInterval: time.Duration(remoteTraceUpdateInterval) * time.Second,
-	}
+	return result
 }

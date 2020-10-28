@@ -18,13 +18,6 @@ runner-bin-linux:
 
 runner-and-helper-bin-host: runner-bin-host helper-bin-host helper-dockerarchive-host
 
-# build_simple:
-# 	# Building $(NAME) in version $(VERSION) for current platform
-# 	go build \
-# 		-ldflags "$(GO_LDFLAGS)" \
-# 		-o "out/binaries/$(NAME)" \
-# 		$(PKG)
-
 runner-and-helper-bin-linux: runner-bin-linux helper-dockerarchive
 
 runner-and-helper-bin: runner-bin helper-bin helper-dockerarchive

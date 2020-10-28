@@ -83,9 +83,6 @@ type RegisterCommand struct {
 	MaximumTimeout    int    `long:"maximum-timeout" env:"REGISTER_MAXIMUM_TIMEOUT" description:"What is the maximum timeout (in seconds) that will be set for job when using this Runner"`
 	Paused            bool   `long:"paused" env:"REGISTER_PAUSED" description:"Set Runner to be paused, defaults to 'false'"`
 
-	// TODO: Remove in 13.0 https://gitlab.com/gitlab-org/gitlab-runner/issues/6404
-	// DockerServices []string `long:"docker-services" json:"docker-services" env:"DOCKER_SERVICES" description:"DEPRECATED will be remove in 13.0: Add service that is started with container from main register command"`
-
 	common.RunnerConfig
 }
 
@@ -167,47 +164,6 @@ func (s *RegisterCommand) askExecutor() {
 		}
 	}
 }
-
-// func (s *RegisterCommand) askDocker() {
-// 	s.askBasicDocker("ruby:2.6")
-
-// 	for _, volume := range s.Docker.Volumes {
-// 		parts := strings.Split(volume, ":")
-// 		if parts[len(parts)-1] == "/cache" {
-// 			return
-// 		}
-// 	}
-// 	s.Docker.Volumes = append(s.Docker.Volumes, "/cache")
-// }
-
-// func (s *RegisterCommand) askDockerWindows() {
-// 	s.askBasicDocker("mcr.microsoft.com/windows/servercore:1809")
-
-// 	for _, volume := range s.Docker.Volumes {
-// 		// This does not cover all the possibilities since we don't have access
-// 		// to volume parsing package since it's internal.
-// 		if strings.Contains(volume, defaultDockerWindowCacheDir) {
-// 			return
-// 		}
-// 	}
-// 	s.Docker.Volumes = append(s.Docker.Volumes, defaultDockerWindowCacheDir)
-// }
-
-// func (s *RegisterCommand) askBasicDocker(exampleHelperImage string) {
-// 	if s.Docker == nil {
-// 		s.Docker = &common.DockerConfig{}
-// 	}
-
-// 	s.Docker.Image = s.ask("docker-image", fmt.Sprintf("Please enter the default Docker image (e.g. %s):", exampleHelperImage))
-// }
-
-// func (s *RegisterCommand) askParallels() {
-// 	s.Parallels.BaseName = s.ask("parallels-base-name", "Please enter the Parallels VM (e.g. my-vm):")
-// }
-
-// func (s *RegisterCommand) askVirtualBox() {
-// 	s.VirtualBox.BaseName = s.ask("virtualbox-base-name", "Please enter the VirtualBox VM (e.g. my-vm):")
-// }
 
 func (s *RegisterCommand) askAnka() {
 	httpCheck := regexp.MustCompile(`^(http|https)://`)
@@ -367,60 +323,6 @@ func (s *RegisterCommand) askExecutorOptions() {
 	s.Referees = nil
 
 	executorFns := map[string]func(){
-		// "kubernetes": func() {
-		// 	s.Kubernetes = kubernetes
-		// },
-		// "docker+machine": func() {
-		// 	s.Machine = machine
-		// 	s.Docker = docker
-		// 	s.askDocker()
-		// },
-		// "docker-ssh+machine": func() {
-		// 	s.Machine = machine
-		// 	s.Docker = docker
-		// 	s.SSH = ssh
-		// 	s.askDocker()
-		// 	s.askSSHLogin()
-		// },
-		// "docker": func() {
-		// 	s.Docker = docker
-		// 	s.askDocker()
-		// },
-		// "docker-windows": func() {
-		// 	s.Docker = docker
-		// 	s.askDockerWindows()
-		// },
-		// "docker-ssh": func() {
-		// 	s.Docker = docker
-		// 	s.SSH = ssh
-		// 	s.askDocker()
-		// 	s.askSSHLogin()
-		// },
-		// "ssh": func() {
-		// 	s.SSH = ssh
-		// 	s.askSSHServer()
-		// 	s.askSSHLogin()
-		// },
-		// "parallels": func() {
-		// 	s.SSH = ssh
-		// 	s.Parallels = parallels
-		// 	s.askParallels()
-		// 	s.askSSHServer()
-		// },
-		// "virtualbox": func() {
-		// 	s.SSH = ssh
-		// 	s.VirtualBox = virtualbox
-		// 	s.askVirtualBox()
-		// 	s.askSSHLogin()
-		// },
-		// "shell": func() {
-		// 	if runtime.GOOS == "windows" && s.RunnerConfig.Shell == "" {
-		// 		s.Shell = "powershell"
-		// 	}
-		// },
-		// "custom": func() {
-		// 	s.Custom = custom
-		// },
 		"anka": func() {
 			s.SSH = ssh
 			s.Anka = anka
@@ -505,25 +407,6 @@ func (s *RegisterCommand) unregisterRunner() func() {
 		}
 	}
 }
-
-// TODO: Remove in 13.0 https://gitlab.com/gitlab-org/gitlab-runner/issues/6404
-//
-// transformDockerServices will take the value from `DockerServices`
-// and convert the value of each entry into a `common.DockerService` definition.
-//
-// This is to keep backward compatibility when the user passes
-// `--docker-services alpine:3.11 --docker-services ruby:3.10` we parse this
-// correctly and create the service definition.
-// func (s *RegisterCommand) transformDockerServices(services []string) {
-// 	for _, service := range services {
-// 		s.Docker.Services = append(
-// 			s.Docker.Services,
-// 			&common.DockerService{
-// 				Service: common.Service{Name: service},
-// 			},
-// 		)
-// 	}
-// }
 
 func (s *RegisterCommand) mergeTemplate() {
 	if !s.ConfigTemplate.Enabled() {

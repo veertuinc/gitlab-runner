@@ -11,6 +11,7 @@ const (
 	UseDirectDownload                    string = "FF_USE_DIRECT_DOWNLOAD"
 	SkipNoOpBuildStages                  string = "FF_SKIP_NOOP_BUILD_STAGES"
 	ShellExecutorUseLegacyProcessKill    string = "FF_SHELL_EXECUTOR_USE_LEGACY_PROCESS_KILL"
+	ResetHelperImageEntrypoint           string = "FF_RESET_HELPER_IMAGE_ENTRYPOINT"
 )
 
 type FeatureFlag struct {
@@ -84,11 +85,13 @@ var flags = []FeatureFlag{
 			" was sent",
 	},
 	{
-		Name:            UseLegacyKubernetesExecutionStrategy,
+		Name:            ResetHelperImageEntrypoint,
 		DefaultValue:    "true",
-		Deprecated:      false,
-		ToBeRemovedWith: "",
-		Description:     "When set to `false` disables execution of remote Kubernetes commands through `exec` in favor of `attach` to solve problems like [#4119](https://gitlab.com/gitlab-org/gitlab-runner/issues/4119)",
+		Deprecated:      true,
+		ToBeRemovedWith: "14.0",
+		Description: "Enables adding an ENTRYPOINT layer for Helper images imported from local Docker archives " +
+			"by the `docker` executor, in order to enable [importing of user certificate roots]" +
+			"(./tls-self-signed.md#trusting-the-certificate-for-the-other-cicd-stages)",
 	},
 }
 
