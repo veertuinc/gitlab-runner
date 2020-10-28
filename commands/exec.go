@@ -11,14 +11,8 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/gitlab_ci_yaml_parser"
-
-	// Force to load all executors, executes init() on them
-	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/custom"
-	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/docker"
-	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/parallels"
-	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/shell"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/ssh"
-	// _ "gitlab.com/gitlab-org/gitlab-runner/executors/virtualbox"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/anka"
 )
 
 type ExecCommand struct {
@@ -117,12 +111,6 @@ func (c *ExecCommand) Execute(context *cli.Context) {
 	doneSignal := make(chan int, 1)
 
 	go waitForInterrupts(nil, abortSignal, doneSignal, nil)
-
-	// // Add self-volume to docker
-	// if c.RunnerSettings.Docker == nil {
-	// 	c.RunnerSettings.Docker = &common.DockerConfig{}
-	// }
-	// c.RunnerSettings.Docker.Volumes = append(c.RunnerSettings.Docker.Volumes, wd+":"+wd+":ro")
 
 	// Create build
 	build, err := c.createBuild(wd, abortSignal)

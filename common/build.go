@@ -701,7 +701,7 @@ func (b *Build) retryCreateExecutor(
 		Retries = options.Config.RunnerSettings.PreparationRetries
 	}
 	for tries := 0; tries <= Retries; tries++ {
-		executor = provider.Create()
+		executor := provider.Create()
 		if executor == nil {
 			return nil, errors.New("failed to create executor")
 		}
@@ -721,9 +721,8 @@ func (b *Build) retryCreateExecutor(
 		if (tries + 1) <= Retries {
 			logger.SoftErrorln("Preparation failed:", err)
 			logger.Infoln("-------------------")
-			secondsToSleep := PreparationRetryInterval * (tries + 1) // Exponential
-			logger.Infoln("Will be retried in", secondsToSleep, "seconds...")
-			time.Sleep(time.Duration(secondsToSleep) * time.Second)
+			logger.Infoln("Will be retried in", PreparationRetryInterval, "...")
+			time.Sleep(PreparationRetryInterval)
 		}
 	}
 
