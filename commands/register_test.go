@@ -141,6 +141,7 @@ func testRegisterCommandRun(
 	regKeyPath := "/Users/testuser/gitlab-key.pem"
 	regSkipTLSVerification := true
 	nodeGroupName := "group-name"
+	controllerHTTPHeader := "{ \"HOST\": \"testing123.com\", \"Content_TYPE\": \"test123\" }"
 
 	args = append([]string{
 		"binary", "register",
@@ -159,12 +160,14 @@ func testRegisterCommandRun(
 		"--anka-cert-path", regCertPath,
 		"--anka-key-path", regKeyPath,
 		"--anka-node-group", nodeGroupName,
+		"--anka-controller-http-headers", controllerHTTPHeader,
 		fmt.Sprintf("--anka-skip-tls-verification=%v", regSkipTLSVerification),
 	}, args...)
 
 	comandErr := app.Run(args)
 
 	fileContent, err := ioutil.ReadFile(configFile.Name())
+	fmt.Println(fileContent)
 	require.NoError(t, err)
 
 	err = comandErr
@@ -183,6 +186,8 @@ func testRegisterCommandRun(
 	assert.Equal(t, regKeyPath, *cmd.Anka.KeyPath)
 	assert.Equal(t, regSkipTLSVerification, cmd.Anka.SkipTLSVerification)
 	assert.Equal(t, nodeGroupName, *cmd.Anka.NodeGroup)
+	assert.Equal(t, controllerHTTPHeader, *cmd.Anka.ControllerHTTPHeaders)
+
 	return string(fileContent), "", err
 }
 
@@ -473,7 +478,6 @@ var (
   executor = "anka"
 	clone_url = "http://anka-gitlab-ce:8084"
 	preparation_retries = 1`
-
 	configTemplateMergeToAdditionalConfiguration = `
 [[runners]]
   [runners.custom_build_dir]
