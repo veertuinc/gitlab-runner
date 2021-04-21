@@ -1,5 +1,5 @@
-NAME ?= gitlab-runner
-export PACKAGE_NAME ?= $(NAME)
+NAME ?= anka-gitlab-runner
+export PACKAGE_NAME ?= gitlab-runner
 export VERSION := $(shell ./ci/version)
 REVISION := $(shell git rev-parse --short=8 HEAD || echo unknown)
 BRANCH := $(shell git show-ref | grep "$(REVISION)" | grep -v HEAD | awk '{print $$2}' | sed 's|refs/remotes/origin/||' | sed 's|refs/heads/||' | sort | head -n 1)
@@ -336,8 +336,6 @@ update_feature_flags_docs:
 
 development_setup:
 	test -d tmp/gitlab-test || git clone https://gitlab.com/gitlab-org/ci-cd/tests/gitlab-test.git tmp/gitlab-test
-	if prlctl --version ; then $(MAKE) -C tests/ubuntu parallels ; fi
-	if vboxmanage --version ; then $(MAKE) -C tests/ubuntu virtualbox ; fi
 
 check_modules:
 	# Check if there is any difference in vendor/

@@ -20,7 +20,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 	"gitlab.com/gitlab-org/gitlab-runner/session"
 	"gitlab.com/gitlab-org/gitlab-runner/session/terminal"
@@ -165,69 +164,18 @@ func TestBuildPanic(t *testing.T) {
 	}
 }
 
-func TestJobImageExposed(t *testing.T) {
-	tests := map[string]struct {
-		image           string
-		vars            []JobVariable
-		expectVarExists bool
-		expectImageName string
-	}{
-		"normal image exposed": {
-			image:           "alpine:3.11",
-			expectVarExists: true,
-			expectImageName: "alpine:3.11",
-		},
-		"image with variable expansion": {
-			image:           "${IMAGE}:3.11",
-			vars:            []JobVariable{{Key: "IMAGE", Value: "alpine", Public: true}},
-			expectVarExists: true,
-			expectImageName: "alpine:3.11",
-		},
-		"no image specified": {
-			image:           "",
-			expectVarExists: false,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			build := runSuccessfulMockBuild(t, func(options ExecutorPrepareOptions) error {
-				options.Build.Image.Name = tt.image
-				options.Build.Variables = append(options.Build.Variables, tt.vars...)
-				return options.Build.StartBuild("/root/dir", "/cache/dir", false, false)
-			})
-
-			actualVarExists := false
-			for _, v := range build.GetAllVariables() {
-				if v.Key == "CI_JOB_IMAGE" {
-					actualVarExists = true
-					break
-				}
-			}
-			assert.Equal(t, tt.expectVarExists, actualVarExists, "CI_JOB_IMAGE exported?")
-
-			if tt.expectVarExists {
-				actualJobImage := build.GetAllVariables().Get("CI_JOB_IMAGE")
-				assert.Equal(t, tt.expectImageName, actualJobImage)
-			}
-		})
-	}
-}
-
 func TestBuildRunNoModifyConfig(t *testing.T) {
 	expectHostAddr := "10.0.0.1"
 	p, assertFn := setupSuccessfulMockExecutor(t, func(options ExecutorPrepareOptions) error {
-		options.Config.Docker.Credentials.Host = "10.0.0.2"
+		options.Config.Anka.ControllerAddress = "10.0.0.2"
 		return nil
 	})
 	defer assertFn()
 
 	rc := &RunnerConfig{
 		RunnerSettings: RunnerSettings{
-			Docker: &DockerConfig{
-				Credentials: docker.Credentials{
-					Host: expectHostAddr,
-				},
+			Anka: &AnkaConfig{
+				ControllerAddress: expectHostAddr,
 			},
 		},
 	}
@@ -235,10 +183,11 @@ func TestBuildRunNoModifyConfig(t *testing.T) {
 
 	err := build.Run(&Config{}, &Trace{Writer: os.Stdout})
 	assert.NoError(t, err)
-	assert.Equal(t, expectHostAddr, rc.Docker.Credentials.Host)
+	assert.Equal(t, expectHostAddr, rc.Anka.ControllerAddress)
 }
 
 func TestRetryPrepare(t *testing.T) {
+	PreparationRetries = 2
 	PreparationRetryInterval = 0
 
 	e := MockExecutor{}
@@ -272,6 +221,7 @@ func TestRetryPrepare(t *testing.T) {
 }
 
 func TestPrepareFailure(t *testing.T) {
+	PreparationRetries = 2
 	PreparationRetryInterval = 0
 
 	e := MockExecutor{}

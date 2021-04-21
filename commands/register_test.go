@@ -3,7 +3,6 @@ package commands
 import (
 	"bufio"
 	"bytes"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -22,68 +21,8 @@ import (
 	clihelpers "gitlab.com/ayufan/golang-cli-helpers"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/docker/machine"
-	_ "gitlab.com/gitlab-org/gitlab-runner/executors/kubernetes"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
 )
-
-func setupDockerRegisterCommand(dockerConfig *common.DockerConfig) *RegisterCommand {
-	fs := flag.NewFlagSet("", flag.ExitOnError)
-	ctx := cli.NewContext(cli.NewApp(), fs, nil)
-	fs.String("docker-image", "ruby:2.6", "")
-
-	s := &RegisterCommand{
-		context:        ctx,
-		NonInteractive: true,
-	}
-	s.Docker = dockerConfig
-
-	return s
-}
-
-func TestRegisterDefaultDockerCacheVolume(t *testing.T) {
-	s := setupDockerRegisterCommand(&common.DockerConfig{
-		Volumes: []string{},
-	})
-
-	s.askDocker()
-
-	assert.Equal(t, 1, len(s.Docker.Volumes))
-	assert.Equal(t, "/cache", s.Docker.Volumes[0])
-}
-
-func TestDoNotRegisterDefaultDockerCacheVolumeWhenDisableCache(t *testing.T) {
-	s := setupDockerRegisterCommand(&common.DockerConfig{
-		Volumes:      []string{},
-		DisableCache: true,
-	})
-
-	s.askDocker()
-
-	assert.Len(t, s.Docker.Volumes, 0)
-}
-
-func TestRegisterCustomDockerCacheVolume(t *testing.T) {
-	s := setupDockerRegisterCommand(&common.DockerConfig{
-		Volumes: []string{"/cache"},
-	})
-
-	s.askDocker()
-
-	assert.Equal(t, 1, len(s.Docker.Volumes))
-	assert.Equal(t, "/cache", s.Docker.Volumes[0])
-}
-
-func TestRegisterCustomMappedDockerCacheVolume(t *testing.T) {
-	s := setupDockerRegisterCommand(&common.DockerConfig{
-		Volumes: []string{"/my/cache:/cache"},
-	})
-
-	s.askDocker()
-
-	assert.Equal(t, 1, len(s.Docker.Volumes))
-	assert.Equal(t, "/my/cache:/cache", s.Docker.Volumes[0])
-}
 
 func getLogrusOutput(t *testing.T, hook *test.Hook) string {
 	buf := &bytes.Buffer{}
@@ -396,45 +335,9 @@ func assertExecutorDefaultValues(t *testing.T, executor string, s *RegisterComma
 	assert.Equal(t, executor, s.RunnerSettings.Executor)
 
 	switch executor {
-	case "kubernetes":
-		assert.NotNil(t, s.RunnerSettings.Kubernetes)
-	case "custom":
-		assert.NotNil(t, s.RunnerSettings.Custom)
-	case "shell":
-		assert.NotNil(t, s.RunnerSettings.Shell)
-		if runtime.GOOS == osTypeWindows && s.RunnerConfig.Shell == "" {
-			assert.Equal(t, "powershell", s.RunnerSettings.Shell)
-		}
-	case "docker":
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "busybox:latest", s.RunnerSettings.Docker.Image)
-	case "docker-windows":
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "mcr.microsoft.com/windows/servercore:1809", s.RunnerSettings.Docker.Image)
-	case "docker+machine":
-		assert.NotNil(t, s.RunnerSettings.Machine)
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "busybox:latest", s.RunnerSettings.Docker.Image)
-	case "docker-ssh":
-		assertDefaultSSHLogin(t, s.RunnerSettings.SSH)
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "busybox:latest", s.RunnerSettings.Docker.Image)
-	case "docker-ssh+machine":
-		assert.NotNil(t, s.RunnerSettings.Machine)
-		assertDefaultSSHLogin(t, s.RunnerSettings.SSH)
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "busybox:latest", s.RunnerSettings.Docker.Image)
 	case "ssh":
 		assertDefaultSSHLogin(t, s.RunnerSettings.SSH)
 		assertDefaultSSHServer(t, s.RunnerSettings.SSH)
-	case "parallels":
-		assertDefaultSSHServer(t, s.RunnerSettings.SSH)
-		require.NotNil(t, s.RunnerSettings.Parallels)
-		assert.Equal(t, executor+"-vm-name", s.RunnerSettings.Parallels.BaseName)
-	case "virtualbox":
-		assertDefaultSSHLogin(t, s.RunnerSettings.SSH)
-		require.NotNil(t, s.RunnerSettings.VirtualBox)
-		assert.Equal(t, executor+"-vm-name", s.RunnerSettings.VirtualBox.BaseName)
 	default:
 		assert.FailNow(t, "no assertions found for executor", executor)
 	}
@@ -459,45 +362,9 @@ func assertExecutorOverridenValues(t *testing.T, executor string, s *RegisterCom
 	assert.Equal(t, executor, s.RunnerSettings.Executor)
 
 	switch executor {
-	case "kubernetes":
-		assert.NotNil(t, s.RunnerSettings.Kubernetes)
-	case "custom":
-		assert.NotNil(t, s.RunnerSettings.Custom)
-	case "shell":
-		assert.NotNil(t, s.RunnerSettings.Shell)
-		if runtime.GOOS == osTypeWindows && s.RunnerConfig.Shell == "" {
-			assert.Equal(t, "powershell", s.RunnerSettings.Shell)
-		}
-	case "docker":
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "nginx:latest", s.RunnerSettings.Docker.Image)
-	case "docker-windows":
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "mcr.microsoft.com/windows/servercore:1903", s.RunnerSettings.Docker.Image)
-	case "docker+machine":
-		assert.NotNil(t, s.RunnerSettings.Machine)
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "nginx:latest", s.RunnerSettings.Docker.Image)
-	case "docker-ssh":
-		assertOverridenSSHLogin(t, s.RunnerSettings.SSH)
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "nginx:latest", s.RunnerSettings.Docker.Image)
-	case "docker-ssh+machine":
-		assert.NotNil(t, s.Machine)
-		assertOverridenSSHLogin(t, s.RunnerSettings.SSH)
-		require.NotNil(t, s.RunnerSettings.Docker)
-		assert.Equal(t, "nginx:latest", s.RunnerSettings.Docker.Image)
 	case "ssh":
 		assertOverridenSSHLogin(t, s.RunnerSettings.SSH)
 		assertOverridenSSHServer(t, s.RunnerSettings.SSH)
-	case "parallels":
-		assertOverridenSSHServer(t, s.RunnerSettings.SSH)
-		require.NotNil(t, s.RunnerSettings.Parallels)
-		assert.Equal(t, "override-"+executor+"-vm-name", s.RunnerSettings.Parallels.BaseName)
-	case "virtualbox":
-		assertOverridenSSHLogin(t, s.RunnerSettings.SSH)
-		require.NotNil(t, s.RunnerSettings.VirtualBox)
-		assert.Equal(t, "override-"+executor+"-vm-name", s.RunnerSettings.VirtualBox.BaseName)
 	default:
 		assert.FailNow(t, "no assertions found for executor", executor)
 	}
@@ -540,17 +407,7 @@ func executorAnswers(t *testing.T, executor string) []string {
 
 func executorOverrideAnswers(t *testing.T, executor string) []string {
 	values := map[string][]string{
-		"kubernetes":         {""},
-		"custom":             {""},
-		"shell":              {""},
-		"docker":             {"nginx:latest"},
-		"docker-windows":     {"mcr.microsoft.com/windows/servercore:1903"},
-		"docker+machine":     {"nginx:latest"},
-		"docker-ssh":         {"nginx:latest", "root", "admin", "/root/.ssh/id_rsa"},
-		"docker-ssh+machine": {"nginx:latest", "root", "admin", "/root/.ssh/id_rsa"},
-		"ssh":                {"ssh.gitlab.example.com", "8822", "root", "admin", "/root/.ssh/id_rsa"},
-		"parallels":          {"override-parallels-vm-name", "ssh.gitlab.example.com", "8822"},
-		"virtualbox":         {"override-virtualbox-vm-name", "root", "admin", "/root/.ssh/id_rsa"},
+		"ssh": {"ssh.gitlab.example.com", "8822", "root", "admin", "/root/.ssh/id_rsa"},
 	}
 
 	answers, ok := values[executor]
@@ -562,34 +419,9 @@ func executorOverrideAnswers(t *testing.T, executor string) []string {
 
 func executorCmdLineArgs(t *testing.T, executor string) []string {
 	values := map[string][]string{
-		"kubernetes":     {"--executor", executor},
-		"custom":         {"--executor", executor},
-		"shell":          {"--executor", executor},
-		"docker":         {"--executor", executor, "--docker-image", "busybox:latest"},
-		"docker-windows": {"--executor", executor, "--docker-image", "mcr.microsoft.com/windows/servercore:1809"},
-		"docker+machine": {"--executor", executor, "--docker-image", "busybox:latest"},
-		"docker-ssh": {
-			"--executor", executor, "--docker-image", "busybox:latest", "--ssh-user", "user",
-			"--ssh-password", "password",
-			"--ssh-identity-file", "/home/user/.ssh/id_rsa",
-		},
-		"docker-ssh+machine": {
-			"--executor", executor, "--docker-image", "busybox:latest", "--ssh-user", "user",
-			"--ssh-password", "password",
-			"--ssh-identity-file", "/home/user/.ssh/id_rsa",
-		},
 		"ssh": {
 			"--executor", executor, "--ssh-host", "gitlab.example.com", "--ssh-port", "22", "--ssh-user", "user",
 			"--ssh-password", "password", "--ssh-identity-file", "/home/user/.ssh/id_rsa",
-		},
-		"parallels": {
-			"--executor", executor, "--ssh-host", "gitlab.example.com", "--ssh-port", "22",
-			"--parallels-base-name", "parallels-vm-name",
-		},
-		"virtualbox": {
-			"--executor", executor, "--ssh-host", "gitlab.example.com", "--ssh-user", "user",
-			"--ssh-password", "password", "--ssh-identity-file", "/home/user/.ssh/id_rsa",
-			"--virtualbox-base-name", "virtualbox-vm-name",
 		},
 	}
 
@@ -653,25 +485,37 @@ var (
 
 	configTemplateMergeToOverwritingConfiguration = `
 [[runners]]
-  token = "different_token"
-  executor = "docker"
-  limit = 100`
-
+  name = "localhost-shared"
+  url = "http://anka-gitlab-ce:8084/"
+  token = "test-registration-token"
+  executor = "anka"
+	clone_url = "http://anka-gitlab-ce:8084"
+	preparation_retries = 1`
 	configTemplateMergeToAdditionalConfiguration = `
 [[runners]]
-  [runners.kubernetes]
-    [runners.kubernetes.volumes]
-      [[runners.kubernetes.volumes.empty_dir]]
-        name = "empty_dir"
-	    mount_path = "/path/to/empty_dir"
-	    medium = "Memory"`
+  [runners.custom_build_dir]
+  [runners.cache]
+    [runners.cache.s3]
+    [runners.cache.gcs]
+  [runners.ssh]
+    user = "anka"
+    password = "admin"
+  [runners.anka]
+    controller_address = "https://127.0.0.1:8080/"
+    template_uuid = "c0847bc9-5d2d-4dbc-ba6a-240f7ff08032"
+    tag = "base:port-forward-22:brew-git:gitlab"
+    root_ca_path = "/Users/testUser/anka-ca-crt.pem"
+    cert_path = "/Users/testUser/gitlab-crt.pem"
+    key_path = "/Users/testUser/gitlab-key.pem"
+		keep_alive_on_error = false
+		skip_tls_verification = false`
 
 	configTemplateMergeToBaseConfiguration = &common.RunnerConfig{
 		RunnerCredentials: common.RunnerCredentials{
-			Token: "test-runner-token",
+			Token: "test-registration-token",
 		},
 		RunnerSettings: common.RunnerSettings{
-			Executor: "shell",
+			Executor: "anka",
 		},
 	}
 )
@@ -714,16 +558,13 @@ func TestConfigTemplate_MergeTo(t *testing.T) {
 			templateContent: configTemplateMergeToAdditionalConfiguration,
 			config:          configTemplateMergeToBaseConfiguration,
 			assertConfiguration: func(t *testing.T, config *common.RunnerConfig) {
-				k8s := config.RunnerSettings.Kubernetes
+				anka := config.RunnerSettings.Anka
 
-				require.NotNil(t, k8s)
-				require.NotEmpty(t, k8s.Volumes.EmptyDirs)
-				assert.Len(t, k8s.Volumes.EmptyDirs, 1)
-
-				emptyDir := k8s.Volumes.EmptyDirs[0]
-				assert.Equal(t, "empty_dir", emptyDir.Name)
-				assert.Equal(t, "/path/to/empty_dir", emptyDir.MountPath)
-				assert.Equal(t, "Memory", emptyDir.Medium)
+				require.NotNil(t, anka)
+				require.NotEmpty(t, anka.ControllerAddress)
+				assert.Equal(t, "c0847bc9-5d2d-4dbc-ba6a-240f7ff08032", anka.TemplateUUID)
+				assert.Equal(t, "base:port-forward-22:brew-git:gitlab", anka.Tag)
+				assert.Equal(t, "/Users/testUser/gitlab-crt.pem", anka.CertPath)
 			},
 			expectedError: nil,
 		},

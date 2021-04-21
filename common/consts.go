@@ -11,7 +11,9 @@ const HealthyChecks = 3
 const HealthCheckInterval = 3600
 const DefaultWaitForServicesTimeout = 30
 const ShutdownTimeout = 30
-const PreparationRetries = 3
+
+var PreparationRetries = 0
+
 const DefaultGetSourcesAttempts = 1
 const DefaultArtifactDownloadAttempts = 1
 const DefaultRestoreCacheAttempts = 1
