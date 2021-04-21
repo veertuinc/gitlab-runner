@@ -16,6 +16,7 @@ import (
 	_ "gitlab.com/gitlab-org/gitlab-runner/cache/s3"
 	_ "gitlab.com/gitlab-org/gitlab-runner/commands"
 	_ "gitlab.com/gitlab-org/gitlab-runner/commands/helpers"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/anka"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/custom"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/docker"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/docker/machine"
@@ -41,13 +42,17 @@ func main() {
 
 	app := cli.NewApp()
 	app.Name = filepath.Base(os.Args[0])
-	app.Usage = "a GitLab Runner"
+	app.Usage = "the Anka GitLab Runner"
 	app.Version = common.AppVersion.ShortLine()
 	cli.VersionPrinter = common.AppVersion.Printer
 	app.Authors = []cli.Author{
 		{
 			Name:  "GitLab Inc.",
 			Email: "support@gitlab.com",
+		},
+		{
+			Name:  "Veertu Inc",
+			Email: "support@veertu.com",
 		},
 	}
 	app.Commands = common.GetCommands()

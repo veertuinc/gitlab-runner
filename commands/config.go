@@ -14,7 +14,7 @@ import (
 )
 
 func getDefaultConfigFile() string {
-	return filepath.Join(getDefaultConfigDirectory(), "config.toml")
+	return filepath.Join(getDefaultConfigDirectory(), "anka-config.toml")
 }
 
 func getDefaultCertificateDirectory() string {

@@ -1,5 +1,5 @@
-NAME ?= gitlab-runner
-export PACKAGE_NAME ?= $(NAME)
+NAME ?= anka-gitlab-runner
+export PACKAGE_NAME ?= gitlab-runner
 export VERSION := $(shell ./ci/version)
 REVISION := $(shell git rev-parse --short=8 HEAD || echo unknown)
 BRANCH := $(shell git show-ref | grep "$(REVISION)" | grep -v HEAD | awk '{print $$2}' | sed 's|refs/remotes/origin/||' | sed 's|refs/heads/||' | sort | head -n 1)

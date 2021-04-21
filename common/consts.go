@@ -11,7 +11,9 @@ const HealthyChecks = 3
 const HealthCheckInterval = 3600
 const DefaultWaitForServicesTimeout = 30
 const ShutdownTimeout = 30
-const PreparationRetries = 3
+
+var PreparationRetries = 0
+
 const DefaultGetSourcesAttempts = 1
 const DefaultArtifactDownloadAttempts = 1
 const DefaultRestoreCacheAttempts = 1
@@ -30,7 +32,7 @@ const (
 	DefaultTracePatchLimit  = 1024 * 1024     // in bytes
 	DefaultUpdateInterval   = 3 * time.Second
 	MaxUpdateInterval       = 3 * time.Minute
-	TraceForceSendInterval  = 30 * time.Second
+	TraceForceSendInterval  = 10 * time.Second
 )
 
 var PreparationRetryInterval = 3 * time.Second

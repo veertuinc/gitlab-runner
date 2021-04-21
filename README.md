@@ -1,108 +1,168 @@
-# GitLab Runner
+# Anka GitLab Runner
 
-This is the repository of the official GitLab Runner written in Go.
-It runs tests and sends the results to GitLab.
-[GitLab CI](https://about.gitlab.com/gitlab-ci) is the open-source
-continuous integration service included with GitLab that coordinates the testing.
-The old name of this project was GitLab CI Multi Runner but please use "GitLab Runner" (without CI) from now on.
+### [Official Anka GitLab Runner Usage Guide](https://ankadocs.veertu.com/docs/ci-plugins-and-integrations/gitlab/)
 
-[![Pipeline Status](https://gitlab.com/gitlab-org/gitlab-runner/badges/master/pipeline.svg)](https://gitlab.com/gitlab-org/gitlab-runner/commits/master)
-[![Go Report Card](https://goreportcard.com/badge/gitlab.com/gitlab-org/gitlab-runner)](https://goreportcard.com/report/gitlab.com/gitlab-org/gitlab-runner)
+For a list of compatible versions between GitLab and GitLab Runner, see the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
 
-## Runner and GitLab CE/EE compatibility
+> This is a stripped down and modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner/tree/13-2-stable) (version 13.5-stable).
 
-For a list of compatible versions between GitLab and GitLab Runner, consult
-the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
+## Anka GitLab Runner Registration Example
 
-## Release process
+[Official GitLab Runner Documentation](https://docs.gitlab.com/runner/)
 
-The description of release process of GitLab Runner project can be found in the [release documentation](docs/release_process/README.md).
+```bash
+./anka-gitlab-runner-darwin-amd64 register --non-interactive \
+--url "http://anka.gitlab:8093" \
+--registration-token 48EZAzxiF92TsqAVmkph \
+--ssh-host host.docker.internal \
+--ssh-user anka \
+--ssh-password admin \
+--name "localhost shared runner" \
+--anka-controller-address "https://anka.controller:8090/" \
+--anka-template-uuid d09f2a1a-e621-463d-8dfd-8ce9ba9f4160 \
+--anka-tag base:port-forward-22:brew-git:gitlab \
+--executor anka \
+--anka-root-ca-path /Users/hostUser/anka-ca-crt.pem \
+--anka-cert-path /Users/hostUser/anka-gitlab-crt.pem \
+--anka-key-path /Users/hostUser/anka-gitlab-key.pem \
+--clone-url "http://anka.gitlab:8093" \
+--tag-list "localhost-shared,localhost,iOS"
+```
 
-## Contributing
+## Example `gitlab-ci.yml`
 
-Contributions are welcome, see [`CONTRIBUTING.md`](CONTRIBUTING.md) for more details.
+```yaml
+test:
+  tags:
+    - localhost-shared
+  stage: test
+  variables:
+    # Only use these variables to override the defaults you set when you register the runner.
+    ANKA_TEMPLATE_UUID: "c0847bc9-5d2d-4dbc-ba6a-240f7ff08032"
+    ANKA_TAG_NAME: "base"
+  script:
+    - hostname
+    - echo "Echo from inside of the VM!"
+```
 
-### Closing issues
+## Development Setup and Details
 
-GitLab is growing very fast and we have limited resources to deal with
-issues opened by community volunteers. We appreciate all the
-contributions coming from our community, but we need to create some
-closing policy to help all of us with issue management.
+```bash
+brew install xz
+go get gitlab.com/gitlab-org/gitlab-runner
+make deps
+export PATH="$PATH:$HOME/go/bin" # To load in gox
+make development_setup
 
-The issue tracker is not used for support or configuration questions. We
-have dedicated [channels](https://about.gitlab.com/support/) for these
-kinds of questions. The issue tracker should only be used for feature
-requests, bug reports, and other tasks that need to be done for the
-Runner project.
+# Run all tests
+make simple-test
 
-It is up to a project maintainer to decide if an issue is actually a
-support/configuration question. Before closing the issue the maintainer
-should leave a reason why this is a support/configuration question, to make
-it clear to the issue author. They should also leave a comment using
-[our template](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/PROCESS.md#support-requests-and-configuration-questions)
-before closing the issue. The issue author has every right to disagree and
-reopen the issue for further discussion.
+# Build a single binary for testing
+make runner-bin-host
 
-### Contributing to documentation
+# Build all binaries for linux and darwin (make sure docker daemon experimental = true)
+make runner-and-helper-bin-host
+```
 
-If your contribution contains only documentation changes, you can speed up the CI process
-by following some branch naming conventions, as described in <https://docs.gitlab.com/ce/development/documentation/index.html#branch-naming>
+Test your changes manually with `anka-gitlab-runner --debug --log-level debug run`:
 
-## Documentation
+> Try our https://github.com/veertuinc/getting-started scripts to run Gitlab locally inside of a docker container
 
-The documentation source files can be found under the [docs/](docs/) directory. You can
-read the documentation online at <https://docs.gitlab.com/runner/>.
+```bash
+export GITLAB_DOCKER_CONTAINER_NAME="anka.gitlab"
+export GITLAB_PORT="8093"
+export GITLAB_ROOT_PASSWORD="rootpassword"
+export GITLAB_EXAMPLE_PROJECT_NAME="gitlab-examples"
+export GITLAB_ACCESS_TOKEN=$(curl -s --request POST --data "grant_type=password&username=root&password=$GITLAB_ROOT_PASSWORD" http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT/oauth/token | jq -r '.access_token')
+export GITLAB_EXAMPLE_PROJECT_ID=$(curl -s --request GET -H "Authorization: Bearer $GITLAB_ACCESS_TOKEN" "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT/api/v4/projects" | jq -r ".[] | select(.name==\"$GITLAB_EXAMPLE_PROJECT_NAME\") | .id")
+export SHARED_REGISTRATION_TOKEN="$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME bash -c "gitlab-rails runner -e production \"puts Gitlab::CurrentSettings.current_application_settings.runners_registration_token\"")"
+export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME bash -c "gitlab-rails runner -e production \"puts Project.find_by_id($GITLAB_EXAMPLE_PROJECT_ID).runners_token\"")
+```
 
-## Requirements
+> The gitlab-rails will take a few minutes to do the query. Be patient.
 
-[Read about the requirements of GitLab Runner.](https://docs.gitlab.com/runner/#requirements)
+```bash
+./out/binaries/anka-gitlab-runner stop; ./out/binaries/anka-gitlab-runner unregister -n "localhost shared runner"; ./out/binaries/anka-gitlab-runner unregister -n "localhost specific runner"; rm -f ./out/binaries/anka-gitlab-runner; make runner-bin-host && \
+./out/binaries/anka-gitlab-runner register --non-interactive \
+--url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT/" \
+--registration-token $SHARED_REGISTRATION_TOKEN \
+--ssh-user anka \
+--ssh-password admin \
+--name "localhost shared runner" \
+--anka-controller-address "http://anka.controller:8090/" \
+--anka-template-uuid c0847bc9-5d2d-4dbc-ba6a-240f7ff08032 \
+--anka-tag base:port-forward-22:brew-git:gitlab \
+--executor anka \
+--anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Typee\": \"test\" }" \
+--clone-url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
+--tag-list "localhost-shared,localhost,iOS" && \
+./out/binaries/anka-gitlab-runner register --non-interactive \
+--url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
+--registration-token $PROJECT_REGISTRATION_TOKEN \
+--ssh-user anka \
+--ssh-password admin \
+--name "localhost specific runner" \
+--anka-controller-address "http://anka.controller:8090/" \
+--anka-template-uuid c0847bc9-5d2d-4dbc-ba6a-240f7ff08032 \
+--anka-tag base:port-forward-22:brew-git:gitlab \
+--executor anka \
+--anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Typee\": \"test\" }" \
+--clone-url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
+--tag-list "localhost-specific,localhost,iOS" && \
+./out/binaries/anka-gitlab-runner stop && ./out/binaries/anka-gitlab-runner --debug --log-level debug run
+```
 
-## Features
+> When adding new options/flags, add them to `testRegisterCommandRun`
 
-[Read about the features of GitLab Runner.](https://docs.gitlab.com/runner/#features)
+### Change Log
 
-## Executors compatibility chart
+Changes we made from the offical gitlab-runner repo:
 
-[Read about what options each executor can offer.](https://docs.gitlab.com/runner/executors/#compatibility-chart)
-
-## Install GitLab Runner
-
-Visit the [installation documentation](https://docs.gitlab.com/runner/install/).
-
-## Use GitLab Runner
-
-See [https://docs.gitlab.com/runner/#using-gitlab-runner](https://docs.gitlab.com/runner/#using-gitlab-runner).
-
-## Select executor
-
-See [https://docs.gitlab.com/runner/executors/#selecting-the-executor](https://docs.gitlab.com/runner/executors/#selecting-the-executor).
-
-## Troubleshooting
-
-Read the [FAQ](https://docs.gitlab.com/runner/faq/).
-
-## Advanced Configuration
-
-See [https://docs.gitlab.com/runner/#advanced-configuration](https://docs.gitlab.com/runner/#advanced-configuration).
-
-## Building and development
-
-See [https://docs.gitlab.com/runner/development/](https://docs.gitlab.com/runner/development/).
-
-## Changelog
-
-Visit the [Changelog](CHANGELOG.md) to view recent changes.
-
-## The future
-
-- Please see the [GitLab Direction page](https://about.gitlab.com/direction/).
-- Feel free submit issues with feature proposals on the issue tracker.
-
-## Author
-
-- 2014 - 2015   : [Kamil Trzciński](mailto:ayufan@ayufan.eu)
-- 2015 - now    : GitLab Inc. team and contributors
-
-## License
-
-This code is distributed under the MIT license, see the [LICENSE](LICENSE) file.
+  - `executors/anka`
+  - `common/version.go`
+      - `var NAME` -> anka-gitlab-runner
+      - prometheus `Name` -> anka_gitlab...
+  - `main.go`: 
+      - Added anka executor import
+      - Added Veertu as author and changed Usage
+  - `commands/exec.go`: 
+      - Added anka executor import
+  - `network/trace.go` + `common/trace.go` + `common/network.go`: 
+      - Added `IsJobSuccessful` function
+  - `common/config.go`: 
+      - Added `AnkaConfig` struct
+      - Added `Anka` and `PreparationRetries` to RunnerSettings struct
+  - `commands/config.go`:
+      - `getDefaultConfigFile`: `config.toml` -> `anka-config.toml` (allows multiple gitlab-runners on same host)
+  - `Makefile`: 
+      - Modified `NAME` ENV in  to be `anka-gitlab-runner`
+      - Fixed `PKG = ` so it doesn't try to use anka-gitlab-runner as the repo name
+  - `commands/register.go`:
+      - Added several imports
+      - We duplicated `askSSHLogin`, renamed it to `askAnkaSSHLogin`, then added it to the `exectorFns` so it prompts
+      - Added askAnka
+      - Updated the description for s.Name, Token, TagList to remove any confusion as to what they're for (they're for gitlab, not anka executor)
+      - Changed `Invalid executor specified` message/Paniclns to include the executor name
+  - `commands/service_test.go`
+      - gitlab-runner -> anka-gitlab-runner
+  - `commands/service.go`:
+      - Updated `defaultServiceName` + `defaultDescription` with anka name
+      - `runServiceInstall` Fatal message update: anka-gitlab-runner
+      - Printing a message to `RunServiceControl` when a command is successful
+  - `commands/unregister.go`: 
+      - Added a failure if you don't specify the runner to unregister
+      - Disabled all-runners
+  - `commands/user_mode_warning.go`: 
+      - gitlab-runner -> anka-gitlab-runner
+  - `common/build.go`
+      - Added Retries logic to support the new --preparation-retries option
+  - `common/const.go`
+      - PreparationRetries = 0
+      - const PreparationRetries -> var
+      - shortened TraceForceSendInterval for when users cancel jobs in the UI to 10s
+  - `VERSION`
+      - Added {gitlab runner version}/{anka executor version}
+  - `ci/version`
+      - Modified echo to just show version
+  - `build-and*` script for building, tagging, and pushing to veertu/ dockerhub
+  - `docs` deleted

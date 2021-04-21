@@ -410,3 +410,7 @@ func newJobTrace(
 		forceSendInterval: common.TraceForceSendInterval,
 	}, nil
 }
+
+func (c *clientJobTrace) IsJobSuccessful() bool {
+	return c.state == common.Success
+}

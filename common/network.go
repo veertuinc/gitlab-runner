@@ -531,6 +531,7 @@ type JobTrace interface {
 	SetFailuresCollector(fc FailuresCollector)
 	SetMasked(values []string)
 	IsStdout() bool
+	IsJobSuccessful() bool
 }
 
 type UpdateJobResult struct {

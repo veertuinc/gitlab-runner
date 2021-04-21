@@ -578,6 +578,9 @@ type RunnerSettings struct {
 	Machine    *DockerMachine    `toml:"machine,omitempty" json:"machine" group:"docker machine provider" namespace:"machine"`
 	Kubernetes *KubernetesConfig `toml:"kubernetes,omitempty" json:"kubernetes" group:"kubernetes executor" namespace:"kubernetes"`
 	Custom     *CustomConfig     `toml:"custom,omitempty" json:"custom" group:"custom executor" namespace:"custom"`
+
+	PreparationRetries int         `toml:"preparation_retries,omitzero" json:"preparation_retries" long:"preparation-retries" env:"PREPARATION_RETRIES" description:"Set the amount of preparation retries for a job"`
+	Anka               *AnkaConfig `toml:"anka,omitempty" json:"anka" group:"anka executor" namespace:"anka"`
 }
 
 //nolint:lll
@@ -1152,4 +1155,20 @@ func (c *Config) GetCheckInterval() time.Duration {
 		return time.Duration(c.CheckInterval) * time.Second
 	}
 	return CheckInterval
+}
+
+type AnkaConfig struct {
+	ControllerAddress     string  `toml:"controller_address" json:"controller_address" long:"controller-address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud Controller address (example: http://anka-controller.mydomain.net[:8090])"`
+	TemplateUUID          string  `toml:"template_uuid" json:"template_uuid" long:"template-uuid" env:"TEMPLATE_UUID" description:"Specify the VM Template UUID"`
+	Tag                   *string `toml:"tag,omitempty" json:"tag" long:"tag" env:"TAG" description:"Specify the Tag to use"`
+	NodeID                *string `toml:"node_id,omitempty" json:"node_id" long:"node-id" env:"NODE_ID" description:"Specify the Node ID to run the job (you can find this in your Controller's Nodes page)"`
+	Priority              *int    `toml:"priority,omitzero" json:"priority" long:"priority" env:"PRIORITY" description:"Set the job priority"`
+	NodeGroup             *string `toml:"node_group,omitempty" json:"node_group" long:"node-group" env:"NODE_GROUP" description:"Limit jobs to a specific node group (accepts name or ID)"`
+	RootCaPath            *string `toml:"root_ca_path,omitempty" json:"root_ca_path" long:"root-ca-path" env:"ROOT_CA_PATH" description:"Specify the path to your Controller's Root CA certificate"`
+	CertPath              *string `toml:"cert_path,omitempty" json:"cert_path" long:"cert-path" env:"CERT_PATH" description:"Specify the path to the GitLab Certificate (used for connecting to the Controller) (requires you also specify the key)"`
+	KeyPath               *string `toml:"key_path,omitempty" json:"key_path" long:"key-path" env:"KEY_PATH" description:"Specify the path to your GitLab Certificate Key (used for connecting to the Controller)"`
+	ControllerHTTPHeaders *string `toml:"controller_http_headers,omitempty" json:"controller_http_headers" long:"controller-http-headers" env:"CONTROLLER_HTTP_HEADERS" description:"In JSON format, specify headers to set for the HTTP requests to the controller (quotes must be escaped) (example: \"{ \"HOST\": \"testing123.com\", \"CustomHeaderName\": \"test123\" }\")"`
+	// Be sure to use *bool or else setting --anka-skip-tls-verification true will ignore anything after it when you're doing register --non-interactive
+	SkipTLSVerification bool `toml:"skip_tls_verification,omitzero" json:"skip_tls_verification" long:"skip-tls-verification" env:"SKIP_TLS_VERIFICATION" description:"Skip TLS Verification when connecting to your Controller"`
+	KeepAliveOnError    bool `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"Keep the VM alive for debugging job failures"`
 }
