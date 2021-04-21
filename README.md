@@ -53,10 +53,6 @@ brew install xz
 go get gitlab.com/gitlab-org/gitlab-runner
 make deps
 export PATH="$PATH:$HOME/go/bin" # To load in gox
-make development_setup
-
-# Run all tests
-make simple-test
 
 # Build a single binary for testing
 make runner-bin-host
