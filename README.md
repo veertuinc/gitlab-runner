@@ -165,4 +165,3 @@ Changes we made from the offical gitlab-runner repo:
   - `ci/version`
       - Modified echo to just show version
   - `build-and*` script for building, tagging, and pushing to veertu/ dockerhub
-  - `docs` deleted
