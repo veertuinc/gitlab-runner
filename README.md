@@ -40,6 +40,7 @@ test:
     # Only use these variables to override the defaults you set when you register the runner.
     ANKA_TEMPLATE_UUID: "c0847bc9-5d2d-4dbc-ba6a-240f7ff08032"
     ANKA_TAG_NAME: "base"
+    ANKA_NODE_GROUP: "larger-vm-pool"
   script:
     - hostname
     - echo "Echo from inside of the VM!"

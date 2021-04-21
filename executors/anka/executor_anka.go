@@ -68,6 +68,11 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		s.Config.Anka.Tag = &ankaTagNameENV
 	}
 
+	ankaGroupENV := s.Build.Variables.Get("ANKA_NODE_GROUP")
+	if ankaGroupENV != "" {
+		s.Config.Anka.NodeGroup = &ankaGroupENV
+	}
+
 	s.Println("Opening a connection to the Anka Cloud Controller:", s.Config.Anka.ControllerAddress)
 	s.connector = MakeNewAnkaCloudConnector(s.Config.Anka)
 
