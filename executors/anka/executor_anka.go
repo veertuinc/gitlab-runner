@@ -81,6 +81,9 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	if s.Config.Anka.Tag != nil {
 		s.Println("  - Tag:", *s.Config.Anka.Tag)
 	}
+	if s.Config.Anka.NodeGroup != nil {
+		s.Println("  - Node Group:", *s.Config.Anka.NodeGroup)
+	}
 
 	s.Println("Please be patient...")
 
