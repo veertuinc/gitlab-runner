@@ -6,7 +6,7 @@ cd $ROOT_DIR
 # Build binaries
 echo "Building binaries..."
 make runner-bin
-for arch in linux-amd64 linux-386 darwin-amd64; do
+for arch in linux-amd64 linux-386; do # notarization handles the archive for darwin
   mkdir -p $ROOT_DIR/out/archived_binaries
   cp $ROOT_DIR/out/binaries/anka-gitlab-runner-$arch $ROOT_DIR/out/archived_binaries/
   pushd $ROOT_DIR/out/archived_binaries
