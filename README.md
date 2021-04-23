@@ -134,6 +134,7 @@ Changes we made from the offical gitlab-runner repo:
   - `Makefile`: 
       - Modified `NAME` ENV in  to be `anka-gitlab-runner`
       - Fixed `PKG = ` so it doesn't try to use anka-gitlab-runner as the repo name
+      - Removed platforms and archs we don't build for
   - `commands/register.go`:
       - Added several imports
       - We duplicated `askSSHLogin`, renamed it to `askAnkaSSHLogin`, then added it to the `exectorFns` so it prompts
