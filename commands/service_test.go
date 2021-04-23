@@ -45,7 +45,7 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", helpers.GetCurrentWorkingDirectory(),
 				"--config", getDefaultConfigFile(),
-				"--service", "anka-gitlab-runner",
+				"--service", "gitlab-runner",
 				"--syslog",
 			},
 		},
@@ -56,7 +56,7 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", helpers.GetCurrentWorkingDirectory(),
 				"--config", "/tmp/config.toml",
-				"--service", "anka-gitlab-runner",
+				"--service", "gitlab-runner",
 				"--syslog",
 			},
 		},
@@ -67,7 +67,7 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", "/tmp",
 				"--config", getDefaultConfigFile(),
-				"--service", "anka-gitlab-runner",
+				"--service", "gitlab-runner",
 				"--syslog",
 			},
 		},
@@ -89,7 +89,7 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", helpers.GetCurrentWorkingDirectory(),
 				"--config", getDefaultConfigFile(),
-				"--service", "anka-gitlab-runner",
+				"--service", "gitlab-runner",
 				"--syslog",
 			},
 		},
@@ -100,7 +100,7 @@ func TestGetServiceArguments(t *testing.T) {
 			expectedArgs: []string{
 				"--working-directory", helpers.GetCurrentWorkingDirectory(),
 				"--config", getDefaultConfigFile(),
-				"--service", "anka-gitlab-runner",
+				"--service", "gitlab-runner",
 			},
 		},
 	}

@@ -1,12 +1,12 @@
 NAME ?= anka-gitlab-runner
-export PACKAGE_NAME ?= $(NAME)
-export VERSION := $(shell cat VERSION)
+export PACKAGE_NAME ?= gitlab-runner
+export VERSION := $(shell ./ci/version)
 REVISION := $(shell git rev-parse --short=8 HEAD || echo unknown)
 BRANCH := $(shell git show-ref | grep "$(REVISION)" | grep -v HEAD | awk '{print $$2}' | sed 's|refs/remotes/origin/||' | sed 's|refs/heads/||' | sort | head -n 1)
 BUILT := $(shell date -u +%Y-%m-%dT%H:%M:%S%z)
-export TESTFLAGS ?= -cover 1
+export TESTFLAGS ?= -cover
 
-LATEST_STABLE_TAG := $(shell git -c versionsort.prereleaseSuffix="-rc" -c versionsort.prereleaseSuffix="-RC" tag -l "v*.*.*" --sort=-v:refname | awk '!/rc/' | head -n 1)
+LATEST_STABLE_TAG := $(shell git -c versionsort.prereleaseSuffix="-rc" -c versionsort.prereleaseSuffix="-RC" tag -l "v*.*.*" | sort -rV | awk '!/rc/' | head -n 1)
 export IS_LATEST :=
 ifeq ($(shell git describe --exact-match --match $(LATEST_STABLE_TAG) >/dev/null 2>&1; echo $$?), 0)
 export IS_LATEST := true
@@ -15,7 +15,7 @@ endif
 PACKAGE_CLOUD ?= ayufan/gitlab-ci-multi-runner
 PACKAGE_CLOUD_URL ?= https://packagecloud.io/
 BUILD_ARCHS ?= -arch '386' -arch 'arm' -arch 'amd64' -arch 'arm64' -arch 's390x'
-BUILD_PLATFORMS ?= -osarch 'darwin/amd64' -os 'linux' -os '!freebsd' -os '!windows' ${BUILD_ARCHS}
+BUILD_PLATFORMS ?= -osarch 'darwin/amd64' -os 'linux' -os 'freebsd' -os 'windows' ${BUILD_ARCHS}
 S3_UPLOAD_PATH ?= master
 
 # Keep in sync with docs/install/linux-repository.md
@@ -29,26 +29,25 @@ RPM_PLATFORMS ?= el/6 el/7 el/8 \
     fedora/30
 RPM_ARCHS ?= x86_64 i686 arm armhf arm64 aarch64 s390x
 
-PKG = gitlab.com/gitlab-org/gitlab-runner
-COMMON_PACKAGE_NAMESPACE=$(PKG)/common
+PKG = gitlab.com/gitlab-org/$(PACKAGE_NAME)
+COMMON_PACKAGE_NAMESPACE = $(PKG)/common
 
 BUILD_DIR := $(CURDIR)
 TARGET_DIR := $(BUILD_DIR)/out
 
-# Packages in vendor/ are included in ./...
-# https://github.com/golang/go/issues/11659
-export OUR_PACKAGES ?= $(subst _$(BUILD_DIR),$(PKG),$(shell go list ./... | grep -v '/vendor/'))
 export MAIN_PACKAGE ?= gitlab.com/gitlab-org/gitlab-runner
 
 GO_LDFLAGS ?= -X $(COMMON_PACKAGE_NAMESPACE).NAME=$(PACKAGE_NAME) -X $(COMMON_PACKAGE_NAMESPACE).VERSION=$(VERSION) \
               -X $(COMMON_PACKAGE_NAMESPACE).REVISION=$(REVISION) -X $(COMMON_PACKAGE_NAMESPACE).BUILT=$(BUILT) \
               -X $(COMMON_PACKAGE_NAMESPACE).BRANCH=$(BRANCH) \
-              -s -w
+              -w
 GO_FILES ?= $(shell find . -name '*.go')
 export CGO_ENABLED ?= 0
 
 
 # Development Tools
+GOCOVER_COBERTURA = gocover-cobertura
+
 GOX = gox
 
 MOCKERY_VERSION ?= 1.1.0
@@ -83,8 +82,11 @@ help:
 	# make development_setup - setup needed environment for tests
 	# make runner-bin-host - build executable for your arch and OS
 	# make runner-and-helper-bin-host - build executable for your arch and OS, including docker dependencies
+	# make runner-and-helper-bin-linux - build executable for all supported architectures for linux OS, including docker dependencies
 	# make runner-and-helper-bin - build executable for all supported platforms, including docker dependencies
+	# make runner-and-helper-docker-host - build Alpine and Ubuntu Docker images with the runner executable and helper
 	# make helper-dockerarchive - build Runner Helper docker dependencies for all supported platforms
+	# make helper-dockerarchive-host - build Runner Helper docker dependencies for your oarch and OS
 	#
 	# Testing commands:
 	# make test - run project tests
@@ -122,13 +124,26 @@ lint-docs:
 	@scripts/lint-docs
 
 check_race_conditions:
-	@./scripts/check_race_conditions $(OUR_PACKAGES)
+	@./scripts/check_race_conditions
 
 .PHONY: test
 test: helper-dockerarchive-host development_setup simple-test
 
+simple-test: TEST_PKG ?= $(shell go list ./...)
 simple-test:
-	go test $(OUR_PACKAGES) $(TESTFLAGS) -ldflags "$(GO_LDFLAGS)"
+	go test $(TEST_PKG) $(TESTFLAGS) -ldflags "$(GO_LDFLAGS)"
+
+git1.8-test: export TEST_PKG = gitlab.com/gitlab-org/gitlab-runner/executors/shell gitlab.com/gitlab-org/gitlab-runner/shells
+git1.8-test:
+	$(MAKE) simple-test
+
+cobertura_report: $(GOCOVER_COBERTURA)
+	mkdir -p out/cobertura
+	$(GOCOVER_COBERTURA) < out/coverage/coverprofile.regular.source.txt > out/cobertura/cobertura-coverage-raw.xml
+	@ # NOTE: Remove package paths.
+	@ # See https://gitlab.com/gitlab-org/gitlab/-/issues/217664
+	sed 's;filename=\"gitlab.com/gitlab-org/gitlab-runner/;filename=\";g' out/cobertura/cobertura-coverage-raw.xml > \
+	  out/cobertura/cobertura-coverage.xml
 
 parallel_test_prepare:
 	# Preparing test commands
@@ -206,7 +221,7 @@ build-and-deploy-binary: ARCH ?= amd64
 build-and-deploy-binary:
 	$(MAKE) runner-bin BUILD_PLATFORMS="-osarch=linux/$(ARCH)"
 	@[ -z "$(SERVER)" ] && echo "SERVER variable not specified!" && exit 1
-	scp out/binaries/$(PACKAGE_NAME)-linux-$(ARCH) $(SERVER):/usr/bin/anka-gitlab-runner
+	scp out/binaries/$(PACKAGE_NAME)-linux-$(ARCH) $(SERVER):/usr/bin/gitlab-runner
 
 .PHONY: packagecloud
 packagecloud: packagecloud-deps packagecloud-deb packagecloud-rpm
@@ -218,13 +233,19 @@ packagecloud-deps:
 packagecloud-deb:
 	# Sending Debian compatible packages...
 	-for DIST in $(DEB_PLATFORMS); do \
-		package_cloud push --url $(PACKAGE_CLOUD_URL) $(PACKAGE_CLOUD)/$$DIST out/deb/*.deb; \
+		echo "===================="; \
+		echo "$$DIST"; \
+		echo "====================" ;\
+		package_cloud push --verbose --url $(PACKAGE_CLOUD_URL) $(PACKAGE_CLOUD)/$$DIST out/deb/*.deb; \
 	done
 
 packagecloud-rpm:
 	# Sending RedHat compatible packages...
 	-for DIST in $(RPM_PLATFORMS); do \
-		package_cloud push --url $(PACKAGE_CLOUD_URL) $(PACKAGE_CLOUD)/$$DIST out/rpm/*.rpm; \
+		echo "===================="; \
+		echo "$$DIST"; \
+		echo "====================" ;\
+		package_cloud push --verbose --url $(PACKAGE_CLOUD_URL) $(PACKAGE_CLOUD)/$$DIST out/rpm/*.rpm; \
 	done
 
 packagecloud-yank:
@@ -260,15 +281,15 @@ release_packagecloud:
 	# Releasing to https://packages.gitlab.com/runner/
 	@./ci/release_packagecloud "$$CI_JOB_NAME"
 
-release_s3: copy_helper_binaries prepare_windows_zip prepare_zoneinfo prepare_index
+release_s3: prepare_windows_zip prepare_zoneinfo prepare_index
 	# Releasing to S3
 	@./ci/release_s3
 
-out/binaries/gitlab-runner-windows-%.zip: out/binaries/anka-gitlab-runner-windows-%.exe
+out/binaries/gitlab-runner-windows-%.zip: out/binaries/gitlab-runner-windows-%.exe
 	zip --junk-paths $@ $<
 	cd out/ && zip -r ../$@ helper-images
 
-prepare_windows_zip: out/binaries/anka-gitlab-runner-windows-386.zip out/binaries/anka-gitlab-runner-windows-amd64.zip
+prepare_windows_zip: out/binaries/gitlab-runner-windows-386.zip out/binaries/gitlab-runner-windows-amd64.zip
 
 prepare_zoneinfo:
 	# preparing the zoneinfo file
@@ -315,21 +336,29 @@ update_feature_flags_docs:
 
 development_setup:
 	test -d tmp/gitlab-test || git clone https://gitlab.com/gitlab-org/ci-cd/tests/gitlab-test.git tmp/gitlab-test
+	if prlctl --version ; then $(MAKE) -C tests/ubuntu parallels ; fi
+	if vboxmanage --version ; then $(MAKE) -C tests/ubuntu virtualbox ; fi
 
 check_modules:
 	# Check if there is any difference in vendor/
+	@git checkout HEAD -- vendor/*
 	@git status -sb vendor/ > /tmp/vendor-$${CI_JOB_ID}-before
 	@go mod vendor
 	@git status -sb vendor/ > /tmp/vendor-$${CI_JOB_ID}-after
 	@diff -U0 /tmp/vendor-$${CI_JOB_ID}-before /tmp/vendor-$${CI_JOB_ID}-after
 
 	# check go.sum
+	@git checkout HEAD -- go.sum
 	@git diff go.sum > /tmp/gosum-$${CI_JOB_ID}-before
 	@go mod tidy
 	@git diff go.sum > /tmp/gosum-$${CI_JOB_ID}-after
 	@diff -U0 /tmp/gosum-$${CI_JOB_ID}-before /tmp/gosum-$${CI_JOB_ID}-after
 
+
 # development tools
+$(GOCOVER_COBERTURA):
+	go get github.com/boumenot/gocover-cobertura
+
 $(GOX):
 	go get github.com/mitchellh/gox
 

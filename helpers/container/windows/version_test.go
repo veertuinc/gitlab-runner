@@ -1,7 +1,6 @@
 package windows
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,6 +33,11 @@ func TestVersion(t *testing.T) {
 			expectedErr:     nil,
 		},
 		{
+			operatingSystem: "Windows 10 Pro Version 2004 (OS Build 19041.329)",
+			expectedVersion: V2004,
+			expectedErr:     nil,
+		},
+		{
 			operatingSystem: "some random string",
 			expectedErr:     NewUnsupportedWindowsVersionError("some random string"),
 		},
@@ -44,7 +48,7 @@ func TestVersion(t *testing.T) {
 			version, err := Version(tt.operatingSystem)
 
 			assert.Equal(t, tt.expectedVersion, version)
-			assert.True(t, errors.Is(err, tt.expectedErr), "expected err %T, but got %T", tt.expectedErr, err)
+			assert.ErrorIs(t, err, tt.expectedErr)
 		})
 	}
 }

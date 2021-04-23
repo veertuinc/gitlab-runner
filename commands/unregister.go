@@ -17,17 +17,17 @@ type UnregisterCommand struct {
 	// AllRunners bool   `toml:"all_runners" json:"all-runners" long:"all-runners" description:"Unregister all runners"`
 }
 
-func (c *UnregisterCommand) unregisterAllRunners() (runners []*common.RunnerConfig) {
-	logrus.Warningln("Unregistering all runners")
-	for _, r := range c.config.Runners {
-		if !c.network.UnregisterRunner(r.RunnerCredentials) {
-			logrus.Errorln("Failed to unregister runner", r.Name)
-			// If unregister fails, leave the runner in the config
-			runners = append(runners, r)
-		}
-	}
-	return
-}
+// func (c *UnregisterCommand) unregisterAllRunners() (runners []*common.RunnerConfig) {
+// 	logrus.Warningln("Unregistering all runners")
+// 	for _, r := range c.config.Runners {
+// 		if !c.network.UnregisterRunner(r.RunnerCredentials) {
+// 			logrus.Errorln("Failed to unregister runner", r.Name)
+// 			// If unregister fails, leave the runner in the config
+// 			runners = append(runners, r)
+// 		}
+// 	}
+// 	return
+// }
 
 func (c *UnregisterCommand) unregisterSingleRunner() []*common.RunnerConfig {
 	if len(c.Name) > 0 { // Unregister when given a name

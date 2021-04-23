@@ -1,9 +1,12 @@
 package network
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -525,7 +528,7 @@ func TestRequestJob(t *testing.T) {
 
 	c := NewGitLabClient()
 
-	res, ok := c.RequestJob(validToken, nil)
+	res, ok := c.RequestJob(context.Background(), validToken, nil)
 	if assert.NotNil(t, res) {
 		assert.NotEmpty(t, res.ID)
 	}
@@ -549,16 +552,16 @@ func TestRequestJob(t *testing.T) {
 	assert.True(t, res.Variables[0].Raw)
 
 	assert.Empty(t, c.getLastUpdate(&noJobsToken.RunnerCredentials), "Last-Update should not be set")
-	res, ok = c.RequestJob(noJobsToken, nil)
+	res, ok = c.RequestJob(context.Background(), noJobsToken, nil)
 	assert.Nil(t, res)
 	assert.True(t, ok, "If no jobs, runner is healthy")
 	assert.Equal(t, "a nice timestamp", c.getLastUpdate(&noJobsToken.RunnerCredentials), "Last-Update should be set")
 
-	res, ok = c.RequestJob(invalidToken, nil)
+	res, ok = c.RequestJob(context.Background(), invalidToken, nil)
 	assert.Nil(t, res)
 	assert.False(t, ok, "If token is invalid, the runner is unhealthy")
 
-	res, ok = c.RequestJob(brokenConfig, nil)
+	res, ok = c.RequestJob(context.Background(), brokenConfig, nil)
 	assert.Nil(t, res)
 	assert.False(t, ok)
 }
@@ -1485,6 +1488,18 @@ func testArtifactsDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(bytes.NewBufferString("Artifact: direct_download=false").Bytes())
 }
 
+type nopWriteCloser struct {
+	w io.Writer
+}
+
+func (wc *nopWriteCloser) Write(p []byte) (int, error) {
+	return wc.w.Write(p)
+}
+
+func (wc *nopWriteCloser) Close() error {
+	return nil
+}
+
 func TestArtifactsDownload(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		testArtifactsDownloadHandler(w, r)
@@ -1556,16 +1571,22 @@ func TestArtifactsDownload(t *testing.T) {
 			defer os.Remove(tempDir)
 
 			artifactsFileName := filepath.Join(tempDir, "downloaded-artifact")
+			file, err := os.Create(artifactsFileName)
+			require.NoError(t, err)
 
-			state := c.DownloadArtifacts(testCase.credentials, artifactsFileName, testCase.directDownload)
+			buf := bufio.NewWriter(file)
+
+			state := c.DownloadArtifacts(testCase.credentials, &nopWriteCloser{w: buf}, testCase.directDownload)
 			require.Equal(t, testCase.expectedState, state)
 
-			artifact, err := ioutil.ReadFile(artifactsFileName)
-
 			if testCase.expectedArtifact == "" {
-				assert.Error(t, err)
 				return
 			}
+
+			err = buf.Flush()
+			require.NoError(t, err)
+
+			artifact, err := ioutil.ReadFile(artifactsFileName)
 
 			assert.NoError(t, err)
 			assert.Equal(t, string(artifact), testCase.expectedArtifact)

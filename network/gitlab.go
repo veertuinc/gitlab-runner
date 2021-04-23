@@ -2,13 +2,13 @@ package network
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"os"
 	"runtime"
 	"strconv"
 	"sync"
@@ -123,7 +123,6 @@ func (n *GitLabClient) getClient(credentials requestCredentials) (c *client, err
 }
 
 func (n *GitLabClient) getLastUpdate(credentials requestCredentials) (lu string) {
-
 	cli, err := n.getClient(credentials)
 	if err != nil {
 		return ""
@@ -135,6 +134,7 @@ func (n *GitLabClient) getLastUpdate(credentials requestCredentials) (lu string)
 func (n *GitLabClient) getFeatures(features *common.FeaturesInfo) {
 	features.TraceReset = true
 	features.TraceChecksum = true
+	features.TraceSize = true
 	features.Cancelable = true
 }
 
@@ -167,6 +167,7 @@ func (n *GitLabClient) getRunnerVersion(config common.RunnerConfig) common.Versi
 }
 
 func (n *GitLabClient) doRaw(
+	ctx context.Context,
 	credentials requestCredentials,
 	method, uri string,
 	request io.Reader,
@@ -174,15 +175,15 @@ func (n *GitLabClient) doRaw(
 	headers http.Header,
 ) (res *http.Response, err error) {
 	c, err := n.getClient(credentials)
-
 	if err != nil {
 		return nil, err
 	}
 
-	return c.do(uri, method, request, requestType, headers)
+	return c.do(ctx, uri, method, request, requestType, headers)
 }
 
 func (n *GitLabClient) doJSON(
+	ctx context.Context,
 	credentials requestCredentials,
 	method, uri string,
 	statusCode int,
@@ -194,7 +195,7 @@ func (n *GitLabClient) doJSON(
 		return clientError, err.Error(), nil
 	}
 
-	return c.doJSON(uri, method, statusCode, request, response)
+	return c.doJSON(ctx, uri, method, statusCode, request, response)
 }
 
 func (n *GitLabClient) getResponseTLSData(
@@ -222,6 +223,7 @@ func (n *GitLabClient) RegisterRunner(
 
 	var response common.RegisterRunnerResponse
 	result, statusText, resp := n.doJSON(
+		context.Background(),
 		&runner,
 		http.MethodPost,
 		"runners",
@@ -254,7 +256,15 @@ func (n *GitLabClient) VerifyRunner(runner common.RunnerCredentials) bool {
 		Token: runner.Token,
 	}
 
-	result, statusText, resp := n.doJSON(&runner, http.MethodPost, "runners/verify", http.StatusOK, &request, nil)
+	result, statusText, resp := n.doJSON(
+		context.Background(),
+		&runner,
+		http.MethodPost,
+		"runners/verify",
+		http.StatusOK,
+		&request,
+		nil,
+	)
 	if resp != nil {
 		defer func() { _ = resp.Body.Close() }()
 	}
@@ -281,7 +291,15 @@ func (n *GitLabClient) UnregisterRunner(runner common.RunnerCredentials) bool {
 		Token: runner.Token,
 	}
 
-	result, statusText, resp := n.doJSON(&runner, http.MethodDelete, "runners", http.StatusNoContent, &request, nil)
+	result, statusText, resp := n.doJSON(
+		context.Background(),
+		&runner,
+		http.MethodDelete,
+		"runners",
+		http.StatusNoContent,
+		&request,
+		nil,
+	)
 	if resp != nil {
 		defer func() { _ = resp.Body.Close() }()
 	}
@@ -321,6 +339,7 @@ func addTLSData(response *common.JobResponse, tlsData ResponseTLSData) {
 }
 
 func (n *GitLabClient) RequestJob(
+	ctx context.Context,
 	config common.RunnerConfig,
 	sessionInfo *common.SessionInfo,
 ) (*common.JobResponse, bool) {
@@ -333,6 +352,7 @@ func (n *GitLabClient) RequestJob(
 
 	var response common.JobResponse
 	result, statusText, httpResponse := n.doJSON(
+		ctx,
 		&config.RunnerCredentials,
 		http.MethodPost,
 		"jobs/request",
@@ -383,10 +403,13 @@ func (n *GitLabClient) UpdateJob(
 		Token:         jobCredentials.Token,
 		State:         jobInfo.State,
 		FailureReason: jobInfo.FailureReason,
-		Checksum:      jobInfo.Checksum,
+		Checksum:      jobInfo.Output.Checksum, // deprecated
+		Output:        jobInfo.Output,
+		ExitCode:      jobInfo.ExitCode,
 	}
 
 	statusCode, statusText, response := n.doJSON(
+		context.Background(),
 		&config.RunnerCredentials,
 		http.MethodPut,
 		fmt.Sprintf("jobs/%d", jobInfo.ID),
@@ -474,7 +497,15 @@ func (n *GitLabClient) PatchTrace(
 	uri := fmt.Sprintf("jobs/%d/trace", id)
 	request := bytes.NewReader(content)
 
-	response, err := n.doRaw(&config.RunnerCredentials, "PATCH", uri, request, "text/plain", headers)
+	response, err := n.doRaw(
+		context.Background(),
+		&config.RunnerCredentials,
+		"PATCH",
+		uri,
+		request,
+		"text/plain",
+		headers,
+	)
 	if err != nil {
 		config.Log().Errorln("Appending trace to coordinator...", "error", err.Error())
 		return common.NewPatchTraceResult(startOffset, common.PatchFailed, 0)
@@ -558,17 +589,30 @@ func (n *GitLabClient) createPatchTraceResult(
 	}
 }
 
-func (n *GitLabClient) createArtifactsForm(mpw *multipart.Writer, reader io.Reader, baseName string) error {
-	wr, err := mpw.CreateFormFile("file", baseName)
-	if err != nil {
-		return err
-	}
+func (n *GitLabClient) createArtifactsForm(reader io.Reader, baseName string) (io.ReadCloser, string) {
+	pr, pw := io.Pipe()
 
-	_, err = io.Copy(wr, reader)
-	if err != nil {
-		return err
-	}
-	return nil
+	mpw := multipart.NewWriter(pw)
+
+	go func() {
+		defer func() {
+			_ = mpw.Close()
+			_ = pw.Close()
+		}()
+
+		wr, err := mpw.CreateFormFile("file", baseName)
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+
+		_, err = io.Copy(wr, reader)
+		if err != nil {
+			_ = pw.CloseWithError(err)
+		}
+	}()
+
+	return pr, mpw.FormDataContentType()
 }
 
 func uploadRawArtifactsQuery(options common.ArtifactsOptions) url.Values {
@@ -591,23 +635,16 @@ func uploadRawArtifactsQuery(options common.ArtifactsOptions) url.Values {
 
 func (n *GitLabClient) UploadRawArtifacts(
 	config common.JobCredentials,
-	reader io.Reader,
+	reader io.ReadCloser,
 	options common.ArtifactsOptions,
 ) common.UploadState {
-	pr, pw := io.Pipe()
-	defer func() { _ = pr.Close() }()
+	defer func() {
+		_ = reader.Close()
+	}()
 
-	mpw := multipart.NewWriter(pw)
-
-	go func() {
-		defer func() {
-			_ = mpw.Close()
-			_ = pw.Close()
-		}()
-		err := n.createArtifactsForm(mpw, reader, options.BaseName)
-		if err != nil {
-			_ = pw.CloseWithError(err)
-		}
+	pr, contentType := n.createArtifactsForm(reader, options.BaseName)
+	defer func() {
+		_ = pr.Close()
 	}()
 
 	query := uploadRawArtifactsQuery(options)
@@ -615,11 +652,12 @@ func (n *GitLabClient) UploadRawArtifacts(
 	headers := make(http.Header)
 	headers.Set("JOB-TOKEN", config.Token)
 	res, err := n.doRaw(
+		context.Background(),
 		&config,
 		http.MethodPost,
 		fmt.Sprintf("jobs/%d/artifacts?%s", config.ID, query.Encode()),
 		pr,
-		mpw.FormDataContentType(),
+		contentType,
 		headers,
 	)
 
@@ -632,6 +670,9 @@ func (n *GitLabClient) UploadRawArtifacts(
 		log = log.WithField("responseStatus", res.Status)
 	}
 
+	closeWithLogging(log, pr, "pipe reader")
+	closeWithLogging(log, reader, "archive reader")
+
 	messagePrefix := "Uploading artifacts to coordinator..."
 	if options.Type != "" {
 		messagePrefix = fmt.Sprintf("Uploading artifacts as %q to coordinator...", options.Type)
@@ -641,12 +682,20 @@ func (n *GitLabClient) UploadRawArtifacts(
 		log.WithError(err).Errorln(messagePrefix, "error")
 		return common.UploadFailed
 	}
+
 	defer func() {
 		_, _ = io.Copy(ioutil.Discard, res.Body)
 		_ = res.Body.Close()
 	}()
 
 	return n.determineUploadState(res.StatusCode, log, messagePrefix)
+}
+
+func closeWithLogging(log logrus.FieldLogger, c io.Closer, name string) {
+	err := c.Close()
+	if err != nil {
+		log.WithError(err).Warningf("Error while closing the %s", name)
+	}
 }
 
 func (n *GitLabClient) determineUploadState(
@@ -675,7 +724,7 @@ func (n *GitLabClient) determineUploadState(
 
 func (n *GitLabClient) DownloadArtifacts(
 	config common.JobCredentials,
-	artifactsFile string,
+	artifactsFile io.WriteCloser,
 	directDownload *bool,
 ) common.DownloadState {
 	query := url.Values{}
@@ -688,7 +737,7 @@ func (n *GitLabClient) DownloadArtifacts(
 	headers.Set("JOB-TOKEN", config.Token)
 	uri := fmt.Sprintf("jobs/%d/artifacts?%s", config.ID, query.Encode())
 
-	res, err := n.doRaw(&config, http.MethodGet, uri, nil, "", headers)
+	res, err := n.doRaw(context.Background(), &config, http.MethodGet, uri, nil, "", headers)
 
 	log := logrus.WithFields(logrus.Fields{
 		"id":    config.ID,
@@ -710,19 +759,7 @@ func (n *GitLabClient) DownloadArtifacts(
 
 	switch res.StatusCode {
 	case http.StatusOK:
-		file, err := os.Create(artifactsFile)
-		if err == nil {
-			defer func() { _ = file.Close() }()
-			_, err = io.Copy(file, res.Body)
-		}
-		if err != nil {
-			_ = file.Close()
-			_ = os.Remove(file.Name())
-			log.WithError(err).Errorln("Downloading artifacts from coordinator...", "error")
-			return common.DownloadFailed
-		}
-		log.Println("Downloading artifacts from coordinator...", "ok")
-		return common.DownloadSucceeded
+		return n.downloadArtifactFile(log, artifactsFile, res)
 	case http.StatusForbidden:
 		log.WithField("status", res.Status).Errorln("Downloading artifacts from coordinator...", "forbidden")
 		return common.DownloadForbidden
@@ -733,6 +770,25 @@ func (n *GitLabClient) DownloadArtifacts(
 		log.WithField("status", res.Status).Warningln("Downloading artifacts from coordinator...", "failed")
 		return common.DownloadFailed
 	}
+}
+
+func (n *GitLabClient) downloadArtifactFile(
+	log logrus.FieldLogger,
+	file io.WriteCloser,
+	res *http.Response,
+) common.DownloadState {
+	_, err := io.Copy(file, res.Body)
+
+	closeWithLogging(log, file, "file writer")
+
+	if err != nil {
+		log.WithError(err).Errorln("Downloading artifacts from coordinator...", "error")
+		return common.DownloadFailed
+	}
+
+	log.Println("Downloading artifacts from coordinator...", "ok")
+
+	return common.DownloadSucceeded
 }
 
 func (n *GitLabClient) ProcessJob(

@@ -2,15 +2,25 @@ package helpers
 
 import (
 	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"gocloud.dev/blob"
+	"gocloud.dev/blob/fileblob"
 
+	"gitlab.com/gitlab-org/gitlab-runner/commands/helpers/archive"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 )
 
@@ -18,33 +28,35 @@ const cacheArchiverArchive = "archive.zip"
 const cacheArchiverTestArchivedFile = "archive_file"
 
 func TestCacheArchiverIsUpToDate(t *testing.T) {
-	writeTestFile(t, cacheArchiverTestArchivedFile)
-	defer os.Remove(cacheArchiverTestArchivedFile)
+	OnEachZipArchiver(t, func(t *testing.T) {
+		writeTestFile(t, cacheArchiverTestArchivedFile)
+		defer os.Remove(cacheArchiverTestArchivedFile)
 
-	defer os.Remove(cacheArchiverArchive)
-	cmd := CacheArchiverCommand{
-		File: cacheArchiverArchive,
-		fileArchiver: fileArchiver{
-			Paths: []string{
-				cacheArchiverTestArchivedFile,
+		defer os.Remove(cacheArchiverArchive)
+		cmd := CacheArchiverCommand{
+			File: cacheArchiverArchive,
+			fileArchiver: fileArchiver{
+				Paths: []string{
+					cacheArchiverTestArchivedFile,
+				},
 			},
-		},
-	}
-	cmd.Execute(nil)
-	fi, _ := os.Stat(cacheArchiverArchive)
-	cmd.Execute(nil)
-	fi2, _ := os.Stat(cacheArchiverArchive)
-	assert.Equal(t, fi.ModTime(), fi2.ModTime(), "archive is up to date")
+		}
+		cmd.Execute(nil)
+		fi, _ := os.Stat(cacheArchiverArchive)
+		cmd.Execute(nil)
+		fi2, _ := os.Stat(cacheArchiverArchive)
+		assert.Equal(t, fi.ModTime(), fi2.ModTime(), "archive is up to date")
 
-	// We need to wait one second, since the FS doesn't save milliseconds
-	time.Sleep(time.Second)
+		// We need to wait one second, since the FS doesn't save milliseconds
+		time.Sleep(time.Second)
 
-	err := os.Chtimes(cacheArchiverTestArchivedFile, time.Now(), time.Now())
-	assert.NoError(t, err)
+		err := os.Chtimes(cacheArchiverTestArchivedFile, time.Now(), time.Now())
+		assert.NoError(t, err)
 
-	cmd.Execute(nil)
-	fi3, _ := os.Stat(cacheArchiverArchive)
-	assert.NotEqual(t, fi.ModTime(), fi3.ModTime(), "archive should get updated")
+		cmd.Execute(nil)
+		fi3, _ := os.Stat(cacheArchiverArchive)
+		assert.NotEqual(t, fi.ModTime(), fi3.ModTime(), "archive should get updated")
+	})
 }
 
 func TestCacheArchiverForIfNoFileDefined(t *testing.T) {
@@ -105,9 +117,9 @@ func TestCacheArchiverRemoteServerNotFound(t *testing.T) {
 
 	removeHook := helpers.MakeFatalToPanic()
 	defer removeHook()
-	os.Remove(cacheExtractorArchive)
+	defer os.Remove(cacheArchiverArchive)
 	cmd := CacheArchiverCommand{
-		File:    cacheExtractorArchive,
+		File:    cacheArchiverArchive,
 		URL:     ts.URL + "/invalid-file.zip",
 		Timeout: 0,
 	}
@@ -122,9 +134,9 @@ func TestCacheArchiverRemoteServer(t *testing.T) {
 
 	removeHook := helpers.MakeFatalToPanic()
 	defer removeHook()
-	os.Remove(cacheExtractorArchive)
+	defer os.Remove(cacheArchiverArchive)
 	cmd := CacheArchiverCommand{
-		File:    cacheExtractorArchive,
+		File:    cacheArchiverArchive,
 		URL:     ts.URL + "/cache.zip",
 		Timeout: 0,
 	}
@@ -133,15 +145,37 @@ func TestCacheArchiverRemoteServer(t *testing.T) {
 	})
 }
 
+func TestCacheArchiverGoCloudRemoteServer(t *testing.T) {
+	mux, bucketDir, cleanup := setupGoCloudFileBucket(t, "testblob")
+	defer cleanup()
+
+	objectName := "path/to/cache.zip"
+
+	removeHook := helpers.MakeFatalToPanic()
+	defer removeHook()
+	defer os.Remove(cacheArchiverArchive)
+	cmd := CacheArchiverCommand{
+		File:       cacheArchiverArchive,
+		GoCloudURL: fmt.Sprintf("testblob://bucket/" + objectName),
+		Timeout:    0,
+		mux:        mux,
+	}
+	assert.NotPanics(t, func() {
+		cmd.Execute(nil)
+	})
+
+	goCloudObjectExists(t, bucketDir, objectName)
+}
+
 func TestCacheArchiverRemoteServerWithHeaders(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(testCacheUploadWithCustomHeaders))
 	defer ts.Close()
 
 	removeHook := helpers.MakeFatalToPanic()
 	defer removeHook()
-	os.Remove(cacheExtractorArchive)
+	defer os.Remove(cacheArchiverArchive)
 	cmd := CacheArchiverCommand{
-		File:    cacheExtractorArchive,
+		File:    cacheArchiverArchive,
 		URL:     ts.URL + "/cache.zip",
 		Headers: []string{"Content-Type: application/zip", "x-ms-blob-type:   BlockBlob "},
 		Timeout: 0,
@@ -162,9 +196,9 @@ func TestCacheArchiverRemoteServerTimedOut(t *testing.T) {
 	removeHook := helpers.MakeFatalToPanic()
 	defer removeHook()
 
-	os.Remove(cacheExtractorArchive)
+	defer os.Remove(cacheArchiverArchive)
 	cmd := CacheArchiverCommand{
-		File: cacheExtractorArchive,
+		File: cacheArchiverArchive,
 		URL:  ts.URL + "/timeout",
 	}
 	cmd.getClient().Timeout = 1 * time.Millisecond
@@ -178,9 +212,9 @@ func TestCacheArchiverRemoteServerTimedOut(t *testing.T) {
 func TestCacheArchiverRemoteServerFailOnInvalidServer(t *testing.T) {
 	removeHook := helpers.MakeFatalToPanic()
 	defer removeHook()
-	os.Remove(cacheExtractorArchive)
+	defer os.Remove(cacheArchiverArchive)
 	cmd := CacheArchiverCommand{
-		File:    cacheExtractorArchive,
+		File:    cacheArchiverArchive,
 		URL:     "http://localhost:65333/cache.zip",
 		Timeout: 0,
 	}
@@ -190,4 +224,73 @@ func TestCacheArchiverRemoteServerFailOnInvalidServer(t *testing.T) {
 
 	_, err := os.Stat(cacheExtractorTestArchivedFile)
 	assert.Error(t, err)
+}
+
+type dirOpener struct {
+	tmpDir string
+}
+
+func (o *dirOpener) OpenBucketURL(_ context.Context, u *url.URL) (*blob.Bucket, error) {
+	return fileblob.OpenBucket(o.tmpDir, nil)
+}
+
+func setupGoCloudFileBucket(t *testing.T, scheme string) (m *blob.URLMux, bucketDir string, cleanup func()) {
+	tmpDir, err := ioutil.TempDir("", "test-bucket")
+	require.NoError(t, err)
+
+	mux := new(blob.URLMux)
+	fake := &dirOpener{tmpDir: tmpDir}
+	mux.RegisterBucket(scheme, fake)
+	cleanup = func() {
+		os.RemoveAll(tmpDir)
+	}
+
+	return mux, tmpDir, cleanup
+}
+
+func goCloudObjectExists(t *testing.T, bucketDir string, objectName string) {
+	bucket, err := fileblob.OpenBucket(bucketDir, nil)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	exists, err := bucket.Exists(ctx, objectName)
+	require.NoError(t, err)
+	assert.True(t, exists)
+}
+
+func TestCacheArchiverCompressionLevel(t *testing.T) {
+	writeTestFile(t, cacheArchiverTestArchivedFile)
+	defer os.Remove(cacheArchiverTestArchivedFile)
+
+	for _, expectedLevel := range []string{"fastest", "fast", "default", "slow", "slowest"} {
+		t.Run(expectedLevel, func(t *testing.T) {
+			mockArchiver := new(archive.MockArchiver)
+			defer mockArchiver.AssertExpectations(t)
+
+			archive.Register(
+				"zip",
+				func(w io.Writer, dir string, level archive.CompressionLevel) (archive.Archiver, error) {
+					assert.Equal(t, getCompressionLevel(expectedLevel), level)
+					return mockArchiver, nil
+				},
+				nil,
+			)
+
+			mockArchiver.On("Archive", mock.Anything, mock.Anything).Return(nil)
+
+			defer os.Remove(cacheArchiverArchive)
+			cmd := CacheArchiverCommand{
+				File: cacheArchiverArchive,
+				fileArchiver: fileArchiver{
+					Paths: []string{
+						cacheArchiverTestArchivedFile,
+					},
+				},
+				CompressionLevel: expectedLevel,
+			}
+			cmd.Execute(nil)
+		})
+	}
 }

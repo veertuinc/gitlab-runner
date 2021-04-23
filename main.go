@@ -2,7 +2,7 @@ package main
 
 import (
 	"os"
-	"path"
+	"path/filepath"
 
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -17,7 +17,14 @@ import (
 	_ "gitlab.com/gitlab-org/gitlab-runner/commands"
 	_ "gitlab.com/gitlab-org/gitlab-runner/commands/helpers"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/anka"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/custom"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/docker"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/docker/machine"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/kubernetes"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/parallels"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/shell"
 	_ "gitlab.com/gitlab-org/gitlab-runner/executors/ssh"
+	_ "gitlab.com/gitlab-org/gitlab-runner/executors/virtualbox"
 	_ "gitlab.com/gitlab-org/gitlab-runner/helpers/secrets/resolvers/vault"
 	_ "gitlab.com/gitlab-org/gitlab-runner/shells"
 )
@@ -34,7 +41,7 @@ func main() {
 	}()
 
 	app := cli.NewApp()
-	app.Name = path.Base(os.Args[0])
+	app.Name = filepath.Base(os.Args[0])
 	app.Usage = "the Anka GitLab Runner"
 	app.Version = common.AppVersion.ShortLine()
 	cli.VersionPrinter = common.AppVersion.Printer

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
+
 	"gitlab.com/gitlab-org/gitlab-runner/cache"
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/tls"
@@ -28,6 +30,7 @@ func (b *AbstractShell) GetFeatures(features *common.FeaturesInfo) {
 	features.ArtifactsExclude = true
 	features.MultiBuildSteps = true
 	features.VaultSecrets = true
+	features.ReturnExitCode = true
 }
 
 func (b *AbstractShell) writeCdBuildDir(w ShellWriter, info common.ShellScriptInfo) {
@@ -339,9 +342,10 @@ func (b *AbstractShell) writeRefspecFetchCmd(w ShellWriter, build *common.Build,
 		b.writeGitSSLConfig(w, build, []string{"-f", templateFile})
 	}
 
+	b.writeGitCleanup(w, projectDir)
+
 	w.Command("git", "init", projectDir, "--template", templateDir)
 	w.Cd(projectDir)
-	b.writeGitCleanup(w)
 
 	// Add `git remote` or update existing
 	w.IfCmd("git", "remote", "add", "origin", build.GetRemoteURL())
@@ -350,7 +354,10 @@ func (b *AbstractShell) writeRefspecFetchCmd(w ShellWriter, build *common.Build,
 	w.Command("git", "remote", "set-url", "origin", build.GetRemoteURL())
 	w.EndIf()
 
-	fetchArgs := []string{"fetch", "origin"}
+	v := common.AppVersion
+	userAgent := fmt.Sprintf("http.userAgent=%s %s %s/%s", v.Name, v.Version, v.OS, v.Architecture)
+
+	fetchArgs := []string{"-c", userAgent, "fetch", "origin"}
 	fetchArgs = append(fetchArgs, build.GitInfo.Refspecs...)
 	if depth > 0 {
 		fetchArgs = append(fetchArgs, "--depth", strconv.Itoa(depth))
@@ -361,14 +368,20 @@ func (b *AbstractShell) writeRefspecFetchCmd(w ShellWriter, build *common.Build,
 	w.Command("git", fetchArgs...)
 }
 
-func (b *AbstractShell) writeGitCleanup(w ShellWriter) {
-	// Remove .git/{index,shallow,HEAD}.lock files from .git, which can fail the fetch command
+func (b *AbstractShell) writeGitCleanup(w ShellWriter, projectDir string) {
+	// Remove .git/{index,shallow,HEAD,config}.lock files from .git, which can fail the fetch command
 	// The file can be left if previous build was terminated during git operation
-	w.RmFile(".git/index.lock")
-	w.RmFile(".git/shallow.lock")
-	w.RmFile(".git/HEAD.lock")
+	files := []string{
+		".git/index.lock",
+		".git/shallow.lock",
+		".git/HEAD.lock",
+		".git/hooks/post-checkout",
+		".git/config.lock",
+	}
 
-	w.RmFile(".git/hooks/post-checkout")
+	for _, f := range files {
+		w.RmFile(path.Join(projectDir, f))
+	}
 }
 
 func (b *AbstractShell) writeCheckoutCmd(w ShellWriter, build *common.Build) {
@@ -403,11 +416,9 @@ func (b *AbstractShell) writeSubmoduleUpdateCmds(w ShellWriter, info common.Shel
 }
 
 func (b *AbstractShell) writeSubmoduleUpdateCmd(w ShellWriter, build *common.Build, recursive bool) {
-	if recursive {
-		w.Noticef("Updating/initializing submodules recursively...")
-	} else {
-		w.Noticef("Updating/initializing submodules...")
-	}
+	depth := build.GitInfo.Depth
+
+	b.writeSubmoduleUpdateNoticeMsg(w, recursive, depth)
 
 	// Sync .git/config to .gitmodules in case URL changes (e.g. new build token)
 	args := []string{"submodule", "sync"}
@@ -423,9 +434,11 @@ func (b *AbstractShell) writeSubmoduleUpdateCmd(w ShellWriter, build *common.Bui
 		updateArgs = append(updateArgs, "--recursive")
 		foreachArgs = append(foreachArgs, "--recursive")
 	}
+	if depth > 0 {
+		updateArgs = append(updateArgs, "--depth", strconv.Itoa(depth))
+	}
 
 	// Clean changed files in submodules
-	// "git submodule update --force" option not supported in Git 1.7.1 (shipped with CentOS 6)
 	w.Command("git", append(foreachArgs, "git clean -ffxd")...)
 	w.Command("git", append(foreachArgs, "git reset --hard")...)
 	w.Command("git", updateArgs...)
@@ -434,6 +447,19 @@ func (b *AbstractShell) writeSubmoduleUpdateCmd(w ShellWriter, build *common.Bui
 		w.IfCmd("git", "lfs", "version")
 		w.Command("git", append(foreachArgs, "git lfs pull")...)
 		w.EndIf()
+	}
+}
+
+func (b *AbstractShell) writeSubmoduleUpdateNoticeMsg(w ShellWriter, recursive bool, depth int) {
+	switch {
+	case recursive && depth > 0:
+		w.Noticef("Updating/initializing submodules recursively with git depth set to %d...", depth)
+	case recursive && depth == 0:
+		w.Noticef("Updating/initializing submodules recursively...")
+	case depth > 0:
+		w.Noticef("Updating/initializing submodules with git depth set to %d...", depth)
+	default:
+		w.Noticef("Updating/initializing submodules...")
 	}
 }
 
@@ -588,26 +614,49 @@ func (b *AbstractShell) addCacheUploadCommand(
 	args = append(args, archiverArgs...)
 
 	// Generate cache upload address
-	if url := cache.GetCacheUploadURL(info.Build, cacheKey); url != nil {
-		args = append(args, "--url", url.String())
-	}
+	args = append(args, getCacheUploadURL(info.Build, cacheKey)...)
 
-	httpHeaders := cache.GetCacheUploadHeaders(info.Build, cacheKey)
-	for key, values := range httpHeaders {
-		for _, value := range values {
-			args = append(args, "--header", fmt.Sprintf("%s: %s", key, value))
-		}
-	}
+	env := cache.GetCacheUploadEnv(info.Build, cacheKey)
 
 	// Execute cache-archiver command. Failure is not fatal.
 	b.guardRunnerCommand(w, info.RunnerCommand, "Creating cache", func() {
 		w.Noticef("Creating cache %s...", cacheKey)
+
+		for key, value := range env {
+			w.Variable(common.JobVariable{Key: key, Value: value})
+		}
+
 		w.IfCmdWithOutput(info.RunnerCommand, args...)
 		w.Noticef("Created cache")
 		w.Else()
 		w.Warningf("Failed to create cache")
 		w.EndIf()
 	})
+}
+
+// getCacheUploadURL will first try to generate the GoCloud URL if it's
+// available then fallback to a pre-signed URL.
+func getCacheUploadURL(build *common.Build, cacheKey string) []string {
+	// Prefer Go Cloud URL if supported
+	goCloudURL := cache.GetCacheGoCloudURL(build, cacheKey)
+	if goCloudURL != nil && build.IsFeatureFlagOn(featureflags.UseGoCloudWithCacheArchiver) {
+		return []string{"--gocloud-url", goCloudURL.String()}
+	}
+
+	uploadURL := cache.GetCacheUploadURL(build, cacheKey)
+	if uploadURL == nil {
+		return []string{}
+	}
+
+	urlArgs := []string{"--url", uploadURL.String()}
+	httpHeaders := cache.GetCacheUploadHeaders(build, cacheKey)
+	for key, values := range httpHeaders {
+		for _, value := range values {
+			urlArgs = append(urlArgs, "--header", fmt.Sprintf("%s: %s", key, value))
+		}
+	}
+
+	return urlArgs
 }
 
 func (b *AbstractShell) writeUploadArtifact(w ShellWriter, info common.ShellScriptInfo, artifact common.Artifact) bool {
@@ -735,12 +784,19 @@ func (b *AbstractShell) writeArchiveCacheOnFailureScript(w ShellWriter, info com
 }
 
 func (b *AbstractShell) writeCleanupFileVariablesScript(w ShellWriter, info common.ShellScriptInfo) error {
+	skipCleanupFileVariables := true
+
 	for _, variable := range info.Build.GetAllVariables() {
 		if !variable.File {
 			continue
 		}
 
+		skipCleanupFileVariables = false
 		w.RmFile(w.TmpFile(variable.Key))
+	}
+
+	if skipCleanupFileVariables {
+		return common.ErrSkipBuildStage
 	}
 
 	return nil

@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"io"
 	"io/ioutil"
-	"os"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -35,7 +34,7 @@ type testNetwork struct {
 
 func (m *testNetwork) DownloadArtifacts(
 	config common.JobCredentials,
-	artifactsFile string,
+	artifactsFile io.WriteCloser,
 	directDownload *bool,
 ) common.DownloadState {
 	m.downloadCalled++
@@ -45,16 +44,11 @@ func (m *testNetwork) DownloadArtifacts(
 	}
 
 	if m.downloadState == common.DownloadSucceeded {
-		file, err := os.Create(artifactsFile)
-		if err != nil {
-			logrus.Warningln(err)
-			return common.DownloadFailed
-		}
-		defer file.Close()
+		defer func() { _ = artifactsFile.Close() }()
 
-		archive := zip.NewWriter(file)
+		archive := zip.NewWriter(artifactsFile)
 		_, _ = archive.Create(artifactsTestArchivedFile)
-		archive.Close()
+		_ = archive.Close()
 	}
 	return m.downloadState
 }
@@ -112,7 +106,10 @@ func (m *testNetwork) consumeGzipUpload(reader io.Reader) common.UploadState {
 }
 
 func (m *testNetwork) consumeRawUpload(reader io.Reader) common.UploadState {
-	_, _ = io.Copy(ioutil.Discard, reader)
+	_, err := io.Copy(ioutil.Discard, reader)
+	if err != nil {
+		return common.UploadFailed
+	}
 
 	m.uploadedFiles = append(m.uploadedFiles, "raw")
 	m.uploadFormat = common.ArtifactFormatRaw
@@ -121,7 +118,7 @@ func (m *testNetwork) consumeRawUpload(reader io.Reader) common.UploadState {
 
 func (m *testNetwork) UploadRawArtifacts(
 	config common.JobCredentials,
-	reader io.Reader,
+	reader io.ReadCloser,
 	options common.ArtifactsOptions,
 ) common.UploadState {
 	m.uploadCalled++

@@ -2,6 +2,7 @@ package network
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -55,7 +57,6 @@ type client struct {
 	certFile        string
 	keyFile         string
 	caData          []byte
-	skipVerify      bool
 	updateTime      time.Time
 	lastUpdate      string
 	requestBackOffs map[string]*backoff.Backoff
@@ -106,7 +107,7 @@ func (n *client) ensureTLSConfig() {
 func (n *client) addTLSCA(tlsConfig *tls.Config) {
 	// load TLS CA certificate
 	file := n.caFile
-	if file == "" || n.skipVerify {
+	if file == "" {
 		return
 	}
 
@@ -120,8 +121,9 @@ func (n *client) addTLSCA(tlsConfig *tls.Config) {
 		return
 	}
 
+	// SystemCertPool doesn't work on Windows: https://github.com/golang/go/issues/16736
 	pool, err := x509.SystemCertPool()
-	if err != nil {
+	if err != nil && runtime.GOOS != "windows" {
 		logrus.Warningln("Failed to load system CertPool:", err)
 	}
 	if pool == nil {
@@ -159,8 +161,7 @@ func (n *client) addTLSAuth(tlsConfig *tls.Config) {
 func (n *client) createTransport() {
 	// create reference TLS config
 	tlsConfig := tls.Config{
-		MinVersion:         tls.VersionTLS10,
-		InsecureSkipVerify: n.skipVerify,
+		MinVersion: tls.VersionTLS12,
 	}
 
 	n.addTLSCA(&tlsConfig)
@@ -214,6 +215,7 @@ func (n *client) checkBackoffRequest(req *http.Request, res *http.Response) {
 }
 
 func (n *client) do(
+	ctx context.Context,
 	uri, method string,
 	request io.Reader,
 	requestType string,
@@ -224,7 +226,7 @@ func (n *client) do(
 		return nil, err
 	}
 
-	req, err := http.NewRequest(method, url.String(), request)
+	req, err := http.NewRequestWithContext(ctx, method, url.String(), request)
 	if err != nil {
 		err = fmt.Errorf("failed to create NewRequest: %w", err)
 		return nil, err
@@ -247,10 +249,12 @@ func (n *client) do(
 	}
 
 	n.checkBackoffRequest(req, res)
+
 	return res, nil
 }
 
 func (n *client) doJSON(
+	ctx context.Context,
 	uri, method string,
 	statusCode int,
 	request interface{},
@@ -271,7 +275,7 @@ func (n *client) doJSON(
 		headers.Set("Accept", jsonMimeType)
 	}
 
-	res, err := n.do(uri, method, body, jsonMimeType, headers)
+	res, err := n.do(ctx, uri, method, body, jsonMimeType, headers)
 	if err != nil {
 		return -1, err.Error(), nil
 	}

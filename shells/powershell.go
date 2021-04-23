@@ -35,6 +35,30 @@ type PsWriter struct {
 	EOL           string
 }
 
+func stdinCmdArgs() []string {
+	return []string{
+		"-NoProfile",
+		"-NoLogo",
+		"-InputFormat",
+		"text",
+		"-OutputFormat",
+		"text",
+		"-NonInteractive",
+		"-ExecutionPolicy",
+		"Bypass",
+		"-Command",
+		"-",
+	}
+}
+
+func fileCmdArgs() []string {
+	return []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"}
+}
+
+func PowershellDockerCmd(shell string) []string {
+	return append([]string{shell}, stdinCmdArgs()...)
+}
+
 func psQuote(text string) string {
 	// taken from: http://www.robvanderwoude.com/escapechars.php
 	text = strings.ReplaceAll(text, "`", "``")
@@ -278,8 +302,11 @@ func (p *PsWriter) Finish(trace bool) string {
 	var buffer bytes.Buffer
 	w := bufio.NewWriter(&buffer)
 
-	// write BOM
-	_, _ = io.WriteString(w, "\xef\xbb\xbf")
+	if p.Shell != SNPwsh {
+		// write UTF-8 BOM (Powershell Core doesn't use a BOM as mentioned in
+		// https://gitlab.com/gitlab-org/gitlab-runner/-/issues/3896#note_157830131)
+		_, _ = io.WriteString(w, "\xef\xbb\xbf")
+	}
 
 	p.writeTrace(w, trace)
 	if p.Shell == SNPwsh {
@@ -303,34 +330,23 @@ func (b *PowerShell) GetName() string {
 	return b.Shell
 }
 
-func (b *PowerShell) GetConfiguration(info common.ShellScriptInfo) (script *common.ShellConfiguration, err error) {
-	script = &common.ShellConfiguration{
-		Command:   b.Shell,
-		Arguments: []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"},
-		PassFile:  info.Build.Runner.Executor != dockerWindowsExecutor,
-		Extension: "ps1",
-		DockerCommand: []string{
-			b.Shell,
-			"-NoProfile",
-			"-NoLogo",
-			"-InputFormat",
-			"text",
-			"-OutputFormat",
-			"text",
-			"-NonInteractive",
-			"-ExecutionPolicy",
-			"Bypass",
-			"-Command",
-			"-",
-		},
+func (b *PowerShell) GetConfiguration(info common.ShellScriptInfo) (*common.ShellConfiguration, error) {
+	script := &common.ShellConfiguration{
+		Command:       b.Shell,
+		Arguments:     stdinCmdArgs(),
+		PassFile:      b.Shell != SNPwsh && info.Build.Runner.Executor != dockerWindowsExecutor,
+		Extension:     "ps1",
+		DockerCommand: PowershellDockerCmd(b.Shell),
 	}
-	return
+
+	if script.PassFile {
+		script.Arguments = fileCmdArgs()
+	}
+
+	return script, nil
 }
 
-func (b *PowerShell) GenerateScript(
-	buildStage common.BuildStage,
-	info common.ShellScriptInfo,
-) (script string, err error) {
+func (b *PowerShell) GenerateScript(buildStage common.BuildStage, info common.ShellScriptInfo) (string, error) {
 	w := &PsWriter{
 		Shell:         b.Shell,
 		EOL:           b.EOL,
@@ -348,14 +364,18 @@ func (b *PowerShell) GenerateScript(
 		}
 	}
 
-	err = b.writeScript(w, buildStage, info)
+	err := b.writeScript(w, buildStage, info)
+	if err != nil {
+		return "", err
+	}
 
 	// No need to set up BOM or tracing since no script was generated.
 	if w.Buffer.Len() > 0 {
-		script = w.Finish(info.Build.IsDebugTraceEnabled())
+		script := w.Finish(info.Build.IsDebugTraceEnabled())
+		return script, nil
 	}
 
-	return
+	return "", nil
 }
 
 func (b *PowerShell) IsDefault() bool {

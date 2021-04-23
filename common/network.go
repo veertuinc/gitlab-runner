@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	url_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/url"
@@ -83,8 +84,10 @@ type FeaturesInfo struct {
 	MultiBuildSteps         bool `json:"multi_build_steps"`
 	TraceReset              bool `json:"trace_reset"`
 	TraceChecksum           bool `json:"trace_checksum"`
+	TraceSize               bool `json:"trace_size"`
 	VaultSecrets            bool `json:"vault_secrets"`
 	Cancelable              bool `json:"cancelable"`
+	ReturnExitCode          bool `json:"return_exit_code"`
 }
 
 type RegisterRunnerParameters struct {
@@ -447,12 +450,25 @@ func (j *JobResponse) RepoCleanURL() string {
 	return url_helpers.CleanURL(j.GitInfo.RepoURL)
 }
 
+func (j *JobResponse) JobURL() string {
+	url := strings.TrimSuffix(j.RepoCleanURL(), ".git")
+
+	return fmt.Sprintf("%s/-/jobs/%d", url, j.ID)
+}
+
 type UpdateJobRequest struct {
 	Info          VersionInfo      `json:"info,omitempty"`
 	Token         string           `json:"token,omitempty"`
 	State         JobState         `json:"state,omitempty"`
 	FailureReason JobFailureReason `json:"failure_reason,omitempty"`
-	Checksum      string           `json:"checksum,omitempty"`
+	Checksum      string           `json:"checksum,omitempty"` // deprecated
+	Output        JobTraceOutput   `json:"output,omitempty"`
+	ExitCode      int              `json:"exit_code,omitempty"`
+}
+
+type JobTraceOutput struct {
+	Checksum string `json:"checksum,omitempty"`
+	Bytesize int    `json:"bytesize,omitempty"`
 }
 
 //nolint:lll
@@ -489,7 +505,8 @@ type UpdateJobInfo struct {
 	ID            int
 	State         JobState
 	FailureReason JobFailureReason
-	Checksum      string
+	Output        JobTraceOutput
+	ExitCode      int
 }
 
 type ArtifactsOptions struct {
@@ -506,7 +523,7 @@ type FailuresCollector interface {
 type JobTrace interface {
 	io.Writer
 	Success()
-	Fail(err error, failureReason JobFailureReason)
+	Fail(err error, failureData JobFailureData)
 	SetCancelFunc(cancelFunc context.CancelFunc)
 	Cancel() bool
 	SetAbortFunc(abortFunc context.CancelFunc)
@@ -542,10 +559,10 @@ type Network interface {
 	RegisterRunner(config RunnerCredentials, parameters RegisterRunnerParameters) *RegisterRunnerResponse
 	VerifyRunner(config RunnerCredentials) bool
 	UnregisterRunner(config RunnerCredentials) bool
-	RequestJob(config RunnerConfig, sessionInfo *SessionInfo) (*JobResponse, bool)
+	RequestJob(ctx context.Context, config RunnerConfig, sessionInfo *SessionInfo) (*JobResponse, bool)
 	UpdateJob(config RunnerConfig, jobCredentials *JobCredentials, jobInfo UpdateJobInfo) UpdateJobResult
 	PatchTrace(config RunnerConfig, jobCredentials *JobCredentials, content []byte, startOffset int) PatchTraceResult
-	DownloadArtifacts(config JobCredentials, artifactsFile string, directDownload *bool) DownloadState
-	UploadRawArtifacts(config JobCredentials, reader io.Reader, options ArtifactsOptions) UploadState
+	DownloadArtifacts(config JobCredentials, artifactsFile io.WriteCloser, directDownload *bool) DownloadState
+	UploadRawArtifacts(config JobCredentials, reader io.ReadCloser, options ArtifactsOptions) UploadState
 	ProcessJob(config RunnerConfig, buildCredentials *JobCredentials) (JobTrace, error)
 }

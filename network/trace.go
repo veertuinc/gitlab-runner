@@ -9,10 +9,6 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/trace"
 )
 
-const (
-	emptyRemoteTraceUpdateInterval = 0
-)
-
 type clientJobTrace struct {
 	client         common.Network
 	config         common.RunnerConfig
@@ -36,13 +32,14 @@ type clientJobTrace struct {
 	maxTracePatchSize int
 
 	failuresCollector common.FailuresCollector
+	exitCode          int
 }
 
 func (c *clientJobTrace) Success() {
-	c.complete(nil, "")
+	c.complete(nil, common.JobFailureData{})
 }
 
-func (c *clientJobTrace) complete(err error, failureReason common.JobFailureReason) {
+func (c *clientJobTrace) complete(err error, failureData common.JobFailureData) {
 	c.lock.Lock()
 
 	if c.state != common.Running {
@@ -53,15 +50,15 @@ func (c *clientJobTrace) complete(err error, failureReason common.JobFailureReas
 	if err == nil {
 		c.state = common.Success
 	} else {
-		c.setFailure(failureReason)
+		c.setFailure(failureData)
 	}
 
 	c.lock.Unlock()
 	c.finish()
 }
 
-func (c *clientJobTrace) Fail(err error, failureReason common.JobFailureReason) {
-	c.complete(err, failureReason)
+func (c *clientJobTrace) Fail(err error, failureData common.JobFailureData) {
+	c.complete(err, failureData)
 }
 
 func (c *clientJobTrace) Write(data []byte) (n int, err error) {
@@ -74,6 +71,10 @@ func (c *clientJobTrace) SetMasked(masked []string) {
 
 func (c *clientJobTrace) checksum() string {
 	return c.buffer.Checksum()
+}
+
+func (c *clientJobTrace) bytesize() int {
+	return c.buffer.Size()
 }
 
 // SetCancelFunc sets the function to be called by Cancel(). The function
@@ -139,18 +140,12 @@ func (c *clientJobTrace) IsStdout() bool {
 	return false
 }
 
-func (c *clientJobTrace) IsJobSuccessful() bool {
-	if c.state == common.Success {
-		return true
-	}
-	return false
-}
-
-func (c *clientJobTrace) setFailure(reason common.JobFailureReason) {
+func (c *clientJobTrace) setFailure(data common.JobFailureData) {
 	c.state = common.Failed
-	c.failureReason = reason
+	c.failureReason = data.Reason
+	c.exitCode = data.ExitCode
 	if c.failuresCollector != nil {
-		c.failuresCollector.RecordFailure(reason, c.config.ShortDescription())
+		c.failuresCollector.RecordFailure(data.Reason, c.config.ShortDescription())
 	}
 }
 
@@ -307,9 +302,12 @@ func (c *clientJobTrace) touchJob() common.UpdateJobResult {
 	}
 
 	jobInfo := common.UpdateJobInfo{
-		ID:       c.id,
-		State:    common.Running,
-		Checksum: c.checksum(),
+		ID:    c.id,
+		State: common.Running,
+		Output: common.JobTraceOutput{
+			Checksum: c.checksum(),
+			Bytesize: c.bytesize(),
+		},
 	}
 
 	result := c.client.UpdateJob(c.config, c.jobCredentials, jobInfo)
@@ -334,7 +332,11 @@ func (c *clientJobTrace) sendUpdate() common.UpdateState {
 		ID:            c.id,
 		State:         state,
 		FailureReason: c.failureReason,
-		Checksum:      c.checksum(),
+		Output: common.JobTraceOutput{
+			Checksum: c.checksum(),
+			Bytesize: c.bytesize(),
+		},
+		ExitCode: c.exitCode,
 	}
 
 	result := c.client.UpdateJob(c.config, c.jobCredentials, jobInfo)
@@ -407,4 +409,8 @@ func newJobTrace(
 		updateInterval:    common.DefaultUpdateInterval,
 		forceSendInterval: common.TraceForceSendInterval,
 	}, nil
+}
+
+func (c *clientJobTrace) IsJobSuccessful() bool {
+	return c.state == common.Success
 }

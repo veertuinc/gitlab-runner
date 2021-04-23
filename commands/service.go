@@ -32,13 +32,12 @@ func (n *NullService) Stop(s service.Service) error {
 
 func runServiceInstall(s service.Service, c *cli.Context) error {
 	if user := c.String("user"); user == "" && os.Getuid() == 0 {
-		logrus.Fatal("Please specify user that will run gitlab-runner service")
+		logrus.Fatal("Please specify user that will run anka-gitlab-runner service")
 	}
 
 	if configFile := c.String("config"); configFile != "" {
 		// try to load existing config
 		config := common.NewConfig()
-
 		err := config.LoadConfig(configFile)
 		if err != nil {
 			return err
@@ -78,7 +77,12 @@ func getServiceArguments(c *cli.Context) (arguments []string) {
 		arguments = append(arguments, "--service", sn)
 	}
 
+	// syslogging doesn't make sense for systemd systems as those log straight to journald
 	syslog := !c.IsSet("syslog") || c.Bool("syslog")
+	if service.Platform() == "linux-systemd" && !c.IsSet("syslog") {
+		syslog = false
+	}
+
 	if syslog {
 		arguments = append(arguments, "--syslog")
 	}

@@ -40,6 +40,7 @@ test:
     # Only use these variables to override the defaults you set when you register the runner.
     ANKA_TEMPLATE_UUID: "c0847bc9-5d2d-4dbc-ba6a-240f7ff08032"
     ANKA_TAG_NAME: "base"
+    ANKA_NODE_GROUP: "larger-vm-pool"
   script:
     - hostname
     - echo "Echo from inside of the VM!"
@@ -52,10 +53,6 @@ brew install xz
 go get gitlab.com/gitlab-org/gitlab-runner
 make deps
 export PATH="$PATH:$HOME/go/bin" # To load in gox
-make development_setup
-
-# Run all tests
-make simple-test
 
 # Build a single binary for testing
 make runner-bin-host
@@ -123,47 +120,31 @@ Changes we made from the offical gitlab-runner repo:
       - `var NAME` -> anka-gitlab-runner
       - prometheus `Name` -> anka_gitlab...
   - `main.go`: 
-      - Commented out executor imports we don't need
+      - Added anka executor import
       - Added Veertu as author and changed Usage
   - `commands/exec.go`: 
-      - Commented out executor imports we don't need
-      - Commented out `Add self-volume to docker` code
+      - Added anka executor import
   - `network/trace.go` + `common/trace.go` + `common/network.go`: 
       - Added `IsJobSuccessful` function
   - `common/config.go`: 
       - Added `AnkaConfig` struct
+      - Added `Anka` and `PreparationRetries` to RunnerSettings struct
+  - `commands/config.go`:
       - `getDefaultConfigFile`: `config.toml` -> `anka-config.toml` (allows multiple gitlab-runners on same host)
-      - Commented out Runners we don't support from `RunnerSettings`
-      - Commented out for loop that checkes runner.Machine from `LoadConfig`
-      - Commented out any structs and funcs we don't use
-  - `common/config_test.go`: 
-      - Added `TestConfigParse` tests for anka since the default didn't work after pulling out docker
   - `Makefile`: 
       - Modified `NAME` ENV in  to be `anka-gitlab-runner`
       - Fixed `PKG = ` so it doesn't try to use anka-gitlab-runner as the repo name
-      - Removed virtualbox and parallels from `development_setup`
-  - `commands/register.go`: 
-      - Commented out ask* functions we don't use
+  - `commands/register.go`:
+      - Added several imports
       - We duplicated `askSSHLogin`, renamed it to `askAnkaSSHLogin`, then added it to the `exectorFns` so it prompts
-      - Commented out exectors we don't use from `exectorFns`
-      - Added better prompt messages (s.Name was called description and made unregister confusing)
-      - Commented out `transformDockerServices` and anything else Docker related
-      - Changed `Invalid executor specified` message to include the executor name
       - Added askAnka
-  - `commands/register_test.go`:
-      - Replaced everything with anka examples
-      - Various modifications to get tests passing
-      - Added all available anka options to `testRegisterCommandRun`
-  - `commands/multi_test.go`
-      - `multi-runner-build-limit` -> anka
+      - Updated the description for s.Name, Token, TagList to remove any confusion as to what they're for (they're for gitlab, not anka executor)
+      - Changed `Invalid executor specified` message/Paniclns to include the executor name
   - `commands/service_test.go`
       - gitlab-runner -> anka-gitlab-runner
-  - `commands/build_logger_test.go`
-      - Added missing `IsJobSuccessful`
   - `commands/service.go`:
       - Updated `defaultServiceName` + `defaultDescription` with anka name
-      - Added `service` definition to the import of `gitlab.com/gitlab-org/gitlab-runner/helpers/service`.
-      - Added `service "github.com/ayufan/golang-kardianos-service"` to `commands/service.go`
+      - `runServiceInstall` Fatal message update: anka-gitlab-runner
       - Printing a message to `RunServiceControl` when a command is successful
   - `commands/unregister.go`: 
       - Added a failure if you don't specify the runner to unregister
@@ -172,18 +153,12 @@ Changes we made from the offical gitlab-runner repo:
       - gitlab-runner -> anka-gitlab-runner
   - `common/build.go`
       - Added Retries logic to support the new --preparation-retries option
-  - `common/build_test.go`
-      - Fixed `TestRetryPrepare` and `TestPrepareFailure` for PrepareRetries being 0 by default (consts.go updated const to var)
   - `common/const.go`
-      - PreparationRetries = 2
-      - const PreparationRetries -> var so tests can change it
-      - shortened TraceForceSendInterval for when users cancel jobs in the UI (30 seconds is too long)
+      - PreparationRetries = 0
+      - const PreparationRetries -> var
+      - shortened TraceForceSendInterval for when users cancel jobs in the UI to 10s
   - `VERSION`
       - Added {gitlab runner version}/{anka executor version}
   - `ci/version`
-      - Modified echo so the version doesn't contain useless stuff
-  - `create-docker.bash`
-      - Script for building, tagging, and pushing to veertu/ dockerhub
-  - `docs` deleted
-
-> **`executor/ssh.go` must stay as an available executor**
+      - Modified echo to just show version
+  - `build-and*` script for building, tagging, and pushing to veertu/ dockerhub

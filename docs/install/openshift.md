@@ -1,0 +1,115 @@
+---
+stage: Verify
+group: Runner
+info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
+---
+
+# Install GitLab Runner on Red Hat OpenShift
+
+> - [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26640) in GitLab 13.3.
+> - [Updated](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27126) in GitLab 13.7.
+
+You can install the GitLab Runner on Red Hat OpenShift v4 and later using the [GitLab Runner Operator](https://gitlab.com/gitlab-org/gl-openshift/gitlab-runner-operator) available from the beta channel of OperatorHub embedded in OpenShift's web console. Once installed, you can run your GitLab CI/CD jobs using the newly deployed GitLab Runner instance. Each CI/CD job will run in a separate pod.
+
+## Prerequisites
+
+- OpenShift 4.x cluster with administrator privileges
+- GitLab Runner registration token
+
+### Install the OpenShift Operator
+
+First you must install the OpenShift Operator.
+
+1. Open the OpenShift UI and log in as a user with administrator privileges.
+1. In the left pane, click **Operators**, then **OperatorHub**.
+1. In the main pane, below **All Items**, search for the keyword `GitLab`.
+
+   ![GitLab Operator](img/openshift_allitems_v13_3.png)
+
+1. To install, click the GitLab Runner Operator.
+1. On the GitLab Runner Operator summary page, click **Install**.
+1. On the Install Operator page, under **Installed Namespace**, select the desired namespace and click **Install**.
+
+   ![GitLab Operator Install Page](img/openshift_installoperator_v13_3.png)
+
+On the Installed Operators page, when the GitLab Operator is ready, the status changes to **Succeeded**.
+
+![GitLab Operator Install Status](img/openshift_success_v13_3.png)
+
+#### Install GitLab Runner
+
+Now install GitLab Runner. The version you're installing is tagged as the latest
+in the [Red Hat Ecosystem Catalog container list](https://catalog.redhat.com/software/containers/gitlab/gitlab-runner/5ea0a90eecb5246c0903b9fd).
+
+1. Obtain a token that you'll use to register the runner:
+   - For a [shared runner](https://docs.gitlab.com/ee/ci/runners/#shared-runners),
+     have an administrator go to the GitLab Admin Area and click **Overview > Runners**.
+   - For a [group runner](https://docs.gitlab.com/ee/ci/runners/README.html#group-runners),
+     go to **Settings > CI/CD** and expand the **Runners** section.
+   - For a [project-specific runner](https://docs.gitlab.com/ee/ci/runners/README.html#specific-runners),
+     go to **Settings > CI/CD** and expand the **Runners** section.
+1. Under **Use the following registration token during setup:**, copy the token.
+1. Open an OpenShift console and switch to the project namespace:
+
+   ```shell
+   oc project "PROJECT NAMESPACE"
+   ```
+
+1. Create the secret file with your GitLab project's runner token:
+
+   ```shell
+   cat > gitlab-runner-secret.yml << EOF
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: gitlab-runner-secret
+   type: Opaque
+   stringData:
+     runner-registration-token: REPLACE_ME # your project runner secret
+   EOF
+   ```
+
+1. Create the secret in your cluster by running:
+
+   ```shell
+   oc apply -f gitlab-runner-secret.yml
+   ```
+
+1. Create the Custom Resource Definition (CRD) file and include
+   the following information. The `tags` value must be `openshift` for the job to run.
+
+   ```shell
+   cat > gitlab-runner.yml << EOF
+   apiVersion: apps.gitlab.com/v1beta2
+   kind: Runner
+   metadata:
+     name: gitlab-runner
+   spec:
+     gitlabUrl: https://gitlab.example.com
+     buildImage: alpine
+     token: gitlab-runner-secret
+     tags: openshift
+   EOF
+   ```
+
+1. Now apply the CRD file by running the command:
+
+   ```shell
+   oc apply -f gitlab-runner.yml
+   ```
+
+1. Confirm that GitLab Runner is installed by running:
+
+   ```shell
+   oc get runners
+   NAME             AGE
+   gitlab-runner    5m
+   ```
+
+1. The runner pod should also be visible:
+
+   ```shell
+   oc get pods
+   NAME                             READY   STATUS    RESTARTS   AGE
+   gitlab-runner-bf9894bdb-wplxn    1/1     Running   0          5m
+   ```

@@ -33,12 +33,16 @@ CI_REGISTRY=${CI_REGISTRY:-}
 CI_REGISTRY_IMAGE=${CI_REGISTRY_IMAGE:-}
 CI_REGISTRY_USER=${CI_REGISTRY_USER:-}
 CI_REGISTRY_PASSWORD=${CI_REGISTRY_PASSWORD:-}
-DOCKER_HUB_REPOSITORY=${DOCKER_HUB_REPOSITORY:-'gitlab/gitlab-runner'}
+DOCKER_HUB_NAMESPACE=${DOCKER_HUB_NAMESPACE:-'gitlab'}
 DOCKER_HUB_USER=${DOCKER_HUB_USER:-}
 DOCKER_HUB_PASSWORD=${DOCKER_HUB_PASSWORD:-}
+ECR_PUBLIC_REGISTRY=${ECR_PUBLIC_REGISTRY:-'public.ecr.aws/gitlab'}
+ECR_PUBLIC_USER='AWS'
+ECR_PUBLIC_PASSWORD=${ECR_PUBLIC_PASSWORD:-}
 IS_LATEST=${IS_LATEST:-}
 PUBLISH_IMAGES=${PUBLISH_IMAGES:-false}
 PUSH_TO_DOCKER_HUB=${PUSH_TO_DOCKER_HUB:-false}
+PUSH_TO_ECR_PUBLIC=${PUSH_TO_ECR_PUBLIC:-false}
 
 ref_tag="${CI_COMMIT_TAG}"
 if [[ -z "${ref_tag}" ]]; then
@@ -74,14 +78,6 @@ buildx() {
     local args=("$@")
     local buildxFlags=()
 
-    local experimental
-    experimental=$(_docker_experimental info -f '{{json .ExperimentalBuild}}')
-    if [ "${experimental}" = 'false' ]; then
-        echo "Docker experimental mode needs to be enabled for multi-platform build support. Aborting."
-        echo "See https://github.com/docker/cli/blob/master/experimental/README.md#use-docker-experimental for more information."
-        exit 1
-    fi
-
     # Build -t tag name options from remaining arguments
     local tagOpts=()
     for tagName in "${args[@]}"; do
@@ -111,6 +107,9 @@ buildx() {
     if [[ "${PUSH_TO_DOCKER_HUB}" == "true" ]] && [[ -n "${DOCKER_HUB_USER}" ]] && [[ -n "${DOCKER_HUB_PASSWORD}" ]]; then
         login "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}"
     fi
+    if [[ "${PUSH_TO_ECR_PUBLIC}" == "true" ]] && [[ -n "${ECR_PUBLIC_USER}" ]] && [[ -n "${ECR_PUBLIC_PASSWORD}" ]]; then
+        login "${ECR_PUBLIC_USER}" "${ECR_PUBLIC_PASSWORD}" "${ECR_PUBLIC_REGISTRY}"
+    fi
 
     local formatted_platforms
     formatted_platforms=$(join_by , "${platforms[@]}")
@@ -135,6 +134,9 @@ buildx() {
     fi
     if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ -n "${CI_REGISTRY_USER}" ]] && [[ -n "${CI_REGISTRY_PASSWORD}" ]]; then
         logout "${CI_REGISTRY}"
+    fi
+    if [[ "${PUSH_TO_ECR_PUBLIC}" == "true" ]] && [[ -n "${ECR_PUBLIC_USER}" ]] && [[ -n "${ECR_PUBLIC_PASSWORD}" ]]; then
+        logout "${ECR_PUBLIC_REGISTRY}"
     fi
 }
 
@@ -169,44 +171,56 @@ push_latest() {
     push "${@}"
 }
 
+# Release the helper images. The first passed argument will be used as a
+# prefix for the image name, which is useful to push do a different registry.
+# For example `registry.gitlab.com/gitlab-org/gitlab-runner` and `gitlab`.
 release_docker_helper_images() {
-    helper_image_x86_64="gitlab/gitlab-runner-helper:x86_64-${REVISION}"
-    helper_image_x86_64_version="gitlab/gitlab-runner-helper:x86_64-${ref_tag}"
-    helper_image_x86_64_latest="gitlab/gitlab-runner-helper:x86_64-latest"
-    helper_image_arm="gitlab/gitlab-runner-helper:arm-${REVISION}"
-    helper_image_arm_version="gitlab/gitlab-runner-helper:arm-${ref_tag}"
-    helper_image_arm_latest="gitlab/gitlab-runner-helper:arm-latest"
-    helper_image_arm64="gitlab/gitlab-runner-helper:arm64-${REVISION}"
-    helper_image_arm64_version="gitlab/gitlab-runner-helper:arm64-${ref_tag}"
-    helper_image_arm64_latest="gitlab/gitlab-runner-helper:arm64-latest"
-    helper_image_s390x="gitlab/gitlab-runner-helper:s390x-${REVISION}"
-    helper_image_s390x_version="gitlab/gitlab-runner-helper:s390x-${ref_tag}"
-    helper_image_s390x_latest="gitlab/gitlab-runner-helper:s390x-latest"
+    helper_image_x86_64="${1}/gitlab-runner-helper:x86_64-${REVISION}"
+    helper_image_x86_64_pwsh="${1}/gitlab-runner-helper:x86_64-${REVISION}-pwsh"
+    helper_image_x86_64_version="${1}/gitlab-runner-helper:x86_64-${ref_tag}"
+    helper_image_x86_64_pwsh_version="${1}/gitlab-runner-helper:x86_64-${ref_tag}-pwsh"
+    helper_image_x86_64_latest="${1}/gitlab-runner-helper:x86_64-latest"
+    helper_image_x86_64_pwsh_latest="${1}/gitlab-runner-helper:x86_64-latest-pwsh"
+    helper_image_arm="${1}/gitlab-runner-helper:arm-${REVISION}"
+    helper_image_arm_version="${1}/gitlab-runner-helper:arm-${ref_tag}"
+    helper_image_arm_latest="${1}/gitlab-runner-helper:arm-latest"
+    helper_image_arm64="${1}/gitlab-runner-helper:arm64-${REVISION}"
+    helper_image_arm64_version="${1}/gitlab-runner-helper:arm64-${ref_tag}"
+    helper_image_arm64_latest="${1}/gitlab-runner-helper:arm64-latest"
+    helper_image_s390x="${1}/gitlab-runner-helper:s390x-${REVISION}"
+    helper_image_s390x_version="${1}/gitlab-runner-helper:s390x-${ref_tag}"
+    helper_image_s390x_latest="${1}/gitlab-runner-helper:s390x-latest"
 
     import out/helper-images/prebuilt-x86_64.tar.xz "${helper_image_x86_64}"
+    import out/helper-images/prebuilt-x86_64-pwsh.tar.xz "${helper_image_x86_64_pwsh}"
     import out/helper-images/prebuilt-arm.tar.xz "${helper_image_arm}"
     import out/helper-images/prebuilt-arm64.tar.xz "${helper_image_arm64}"
     import out/helper-images/prebuilt-s390x.tar.xz "${helper_image_s390x}"
 
     tag_latest "${helper_image_x86_64}" "${helper_image_x86_64_latest}"
+    tag_latest "${helper_image_x86_64_pwsh}" "${helper_image_x86_64_pwsh_latest}"
     tag_latest "${helper_image_arm}" "${helper_image_arm_latest}"
     tag_latest "${helper_image_arm64}" "${helper_image_arm64_latest}"
     tag_latest "${helper_image_s390x}" "${helper_image_s390x_latest}"
     tag "${helper_image_x86_64}" "${helper_image_x86_64_version}"
+    tag "${helper_image_x86_64_pwsh}" "${helper_image_x86_64_pwsh_version}"
     tag "${helper_image_arm}" "${helper_image_arm_version}"
     tag "${helper_image_arm64}" "${helper_image_arm64_version}"
     tag "${helper_image_s390x}" "${helper_image_s390x_version}"
 
     push "${helper_image_x86_64}"
+    push "${helper_image_x86_64_pwsh}"
     push "${helper_image_arm}"
     push "${helper_image_arm64}"
     push "${helper_image_s390x}"
 
     push_latest "${helper_image_x86_64_latest}"
+    push_latest "${helper_image_x86_64_pwsh_latest}"
     push_latest "${helper_image_arm_latest}"
     push_latest "${helper_image_arm64_latest}"
     push_latest "${helper_image_s390x_latest}"
     push "${helper_image_x86_64_version}"
+    push "${helper_image_x86_64_pwsh_version}"
     push "${helper_image_arm_version}"
     push "${helper_image_arm64_version}"
     push "${helper_image_s390x_version}"
@@ -277,28 +291,46 @@ done
 
 alpineTags=()
 ubuntuTags=()
-if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ -n "${PUSH_TO_DOCKER_HUB}" ]]; then
-   add_tags alpineTags "alpine" "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}" "${DOCKER_HUB_REPOSITORY}" "${ref_tag}"
-   add_tags ubuntuTags "ubuntu" "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}" "${DOCKER_HUB_REPOSITORY}" "${ref_tag}"
+if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ "${PUSH_TO_DOCKER_HUB}" == "true" ]]; then
+   add_tags alpineTags "alpine" "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}" "${DOCKER_HUB_NAMESPACE}/gitlab-runner" "${ref_tag}"
+   add_tags ubuntuTags "ubuntu" "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}" "${DOCKER_HUB_NAMESPACE}/gitlab-runner" "${ref_tag}"
 fi
+
 if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ -n "${CI_REGISTRY}" ]] && [[ -n "${CI_REGISTRY_IMAGE}" ]]; then
    add_tags alpineTags "alpine" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY_IMAGE}" "${ref_tag}"
    add_tags ubuntuTags "ubuntu" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY_IMAGE}" "${ref_tag}"
+fi
+
+if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ "${PUSH_TO_ECR_PUBLIC}" == "true" ]]; then
+   add_tags alpineTags "alpine" "${ECR_PUBLIC_USER}" "${ECR_PUBLIC_PASSWORD}" "${ECR_PUBLIC_REGISTRY}/gitlab-runner" "${ref_tag}"
+   add_tags ubuntuTags "ubuntu" "${ECR_PUBLIC_USER}" "${ECR_PUBLIC_PASSWORD}" "${ECR_PUBLIC_REGISTRY}/gitlab-runner" "${ref_tag}"
 fi
 
 # Build and publish multi-platform images using `docker buildx`
 buildx "${runner_home_dir}/ubuntu" "${ubuntuTags[@]}"
 buildx "${runner_home_dir}/alpine" "${alpineTags[@]}"
 
-if [[ -z "${PUSH_TO_DOCKER_HUB}" ]] || [[ "${PUSH_TO_DOCKER_HUB}" != "true" ]]; then
-    echo "Skipping push to Docker Hub"
-    exit 0
+# Release helper images
+if [[ -n "${CI_REGISTRY_USER}" ]] && [[ -n "${CI_REGISTRY_PASSWORD}" && "${PUBLISH_IMAGES}" == "true" ]]; then
+    login "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+
+    release_docker_helper_images "${CI_REGISTRY_IMAGE}"
+
+    logout "${CI_REGISTRY}"
 fi
 
-if [[ -n "${DOCKER_HUB_USER}" ]] && [[ -n "${DOCKER_HUB_PASSWORD}" ]]; then
+if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ "${PUSH_TO_DOCKER_HUB}" == "true" ]]; then
     login "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}"
 
-    release_docker_helper_images
+    release_docker_helper_images "${DOCKER_HUB_NAMESPACE}"
 
     logout
+fi
+
+if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ "${PUSH_TO_ECR_PUBLIC}" == "true" ]]; then
+    login "${ECR_PUBLIC_USER}" "${ECR_PUBLIC_PASSWORD}" "${ECR_PUBLIC_REGISTRY}"
+
+    release_docker_helper_images "${ECR_PUBLIC_REGISTRY}"
+
+    logout "${ECR_PUBLIC_REGISTRY}"
 fi

@@ -1,3 +1,392 @@
+## v13.11.0 (2021-04-20)
+
+### New features
+
+- Allow user to specify multiple pull policies for Kubernetes executor !2807
+
+### Bug fixes
+
+- Use inspect.GID() to collect GID value in Docker executor !2769
+- Fix Kubernetes attach strategy for non-root environments !2749
+
+### Maintenance
+
+- ci: wrap GOCACHE with double quotes !2859
+- Add bridge job to runner-incept !2845
+- Fix archives/zip tests on Windows !2832
+- Report CI test build failures !2829
+- Add job URL to container labels !2823
+- Compile gitlab-runner binary for shell integration tests !2820
+- Don't return error when checking feature flag !2812
+- Simplify the triggerring of 'gitlab-docs' Review App pipelines !2809
+- Fix git 1.8.3.1 job errors !2791
+- Fix job duration value when in log format is json !2787
+- Add support for CSI volumes !2784 (Brandon Butler @brandonbutler)
+- Move Kubernetes integration tests to separate file !2779
+- Support for env variables expansion for image name for kubernetes executor !2778
+- Segregate integration tests in docker executor !2776
+- Remove test with int overflow !2597 (Fábio Matavelli @fabiomatavelli)
+- Adding git depth for submodules !2107 (Nico Bollen @bollenn)
+
+### Documentation changes
+
+- Removed reference to master !2855
+- Fix pipeline configuration for docs branches !2853
+- Make clear when FF runner configuration syntax was introduced !2852
+- Roughly alphabetised Docker Container parms - docs !2851 (Raimund Hook @stingrayza)
+- Updated docs reference to MinIO !2850 (Raimund Hook @stingrayza)
+- Documentation Update/docs/security/index.md !2849 (Anshuman Singh @singhanshuman)
+- Add clarification on Runner and GitLab Version match !2841
+- Edited for style !2838
+- More edits for style !2834
+- Add services note to Windows container troubleshooting !2833
+- Edited for grammar and style !2830
+- Moved troubleshooting to OS topics !2819
+- Fix heading type in GPU documentation !2817
+- pWIP: Add configuration section to docs for runner Operator on OpenShift !2816
+- Add feature flags in config.toml !2811
+- Update links to redirected files !2808
+- Add a note to docs on usage of docker script from `13.9` !2806
+- Remove docker-machine provision on creation failure !2805
+- Improve documentation for GPUs for all executors !2804
+- Update redirected links in runner docs !2802
+- Add troubleshooting section in kubernetes executor documentation !2799 (Vincent Firmin @winkies)
+- Edited for style and consistency !2777
+- Document how to customize environment variables for Runner !2775
+
+### Other changes
+
+- Update warning message URL for DockerHub !2844
+
+## v13.10.0 (2021-03-21)
+
+### Bug fixes
+
+- Don't print DockerHub helper image warning when custom image is defined !2761
+- Allow graceful termination on Windows !2739
+
+### Maintenance
+
+- Include symbols in gitlab-runner binary !2800
+- Move process package integration tests to own files !2794
+- Update `code navigation` job definition !2792
+- Rename shell_writer_test.go to reflect use !2782
+- Move virtualbox executor integration tests to own file !2781
+- Move parallels executor integration tests to own file !2780
+- Update trace limit wording !2765
+- Update of docker error message !2759
+- Add integration tests for trace limit handling !2758
+- Add integration tests for build trace masking !2754
+- Version pin pwsh version inside of our CI tests !2748
+- Update hashicorp/go-version dependency to v1.2.1 !2746
+- Removal of unused replace from go.mod !2745
+- Start updating runner pipeline to rules !2728
+
+### Documentation changes
+
+- Add mentions to pwsh to documentation !2797
+- Update Vale rules !2789
+- Add mention to pwsh support in Docker executor docs !2786
+- Fix example gcp zone for docker+machine config !2771
+- Runner: Update spelling exceptions list !2770
+- Docs for installing runner on a separate machine !2767
+- Update docs/monitoring/README.md !2766
+- Fix misspelling of "Force" in Powershell examples !2764 (Gabriel Smith @yodal_)
+- Add runner execution flow diagram !2760
+- Fix duplicate labels in CONTRIBUTING.md !2747 (h.yoshida @hirokiyoshida837)
+- Add backticks around --google-accelerator docs !2742
+- Update documented check internal for config changes !2741
+- Add documentation for using GPUs with Docker Machine !2736
+- Update MachineOptions to only mandatory configuration. !2673
+
+## v13.9.0 (2021-02-22)
+
+### New features
+
+- Enable PowerShell Core support in Kubernetes Executor !2705
+- Enable PowerShell Core support in Docker Executor on Linux !2563
+- Add support for setting the artifact/cache compression level !2684
+- Display feature flags that are set to a non-default status !2606
+- Add GPU support for Docker executor !1955 (Andreas Gravgaard Andersen @agravgaard)
+
+### Security fixes
+
+- Remove skipVerify from client struct !2654
+
+### Bug fixes
+
+- Fix panic when PKCS7-encoded payload has no certificate !2737
+- Correctly set fastzip's staging directory !2693
+- Improve trace secret masking with x/text/transform !2677
+- Add explicit bash shell error checks !2671
+- Terminate requests on process shutdown !1684
+
+### Maintenance
+
+- Change env to bash to resolve Illegal option !2732
+- Upgrade Docker version to 20.10.2 !2722
+- Update docker script default to docker prune volumes !2720
+- Default to no Docker image compression in local environment !2717
+- pwsh scripts can be passed over STDIN on shell executor !2715
+- Update github.com/docker/cli dependency !2714
+- Add artifact and cache download progress meter !2708
+- Remove requirement for Docker daemon experimental mode from image build scripts !2707
+- Fix the image that is used to create the pwsh tag !2706
+- Exclude out/binaries/gitlab-runner-helper from binaries artifacts !2703
+- Improve logging to packagecloud push !2702
+- Upgrade Powershell Core to 7.1.1 !2696
+- Make TestHelperImageRegistry not need real prebuilt images !2682
+- Add test for permissions container in k8s !2676
+- Add object storage cache credentials adapter !2674
+- Add artifact/cache upload progress meter !2670
+- Refactor Docker pull logic into dedicated package !2659
+- Update to Docker client v20.10.2 !2658
+- Update gitlab-terminal package !2656
+- Create separate helper image with Powershell Core !2641
+- Prioritize helper image specified in config to change K8s log dir permissions !2578 (naruhito @naruhito1)
+- Remove helpers/trace redundant io.Pipe use !2464
+- Kubernetes tests simplify build creation !2445
+- Report deleted pods as a system failure with attach strategy !2444
+- Fix incorrect path/filepath use !2313
+- Improve docker cleanup script to also include old builds and images !2310
+- Output coverage to Cobertura report !2252
+- Version pin pwsh version inside of our CI tests !2748
+- Add integration tests for trace limit handling !2758
+- Add integration tests for build trace masking !2754
+
+### Documentation changes
+
+- Document how to view Windows service logs with cli !2733
+- Update linux-manually.md !2731 (Simon Carr @simonjcarr)
+- Added details about guided install !2730
+- Use correct Vale extension in VS Code ext file !2727
+- Refresh Vale linting rules !2726
+- Specify tag syntax for tagged releases !2725
+- Add note about permissions !2723
+- do not link to unmaintained docker image cleanup app !2712 (Antoine Beaupré @anarcat)
+- Fix formatting of FF_USE_LEGACY_KUBERNETES_EXECUTION_STRATEGY !2701 (Ben Bodenmiller @bbodenmiller)
+- Clarify download instructions !2700
+- Replace x86 and amd64 with 32-bit and 64-bit terminology for download !2699
+- Add buildImage in the default openshift operator example !2698
+- 1/3 Add crosslink to Kubernetes Agent docs !2697
+- docs: Clarify self-signed certs on windows !2695 (Stefan Schmalzhaf @the_s)
+- Docs: Fix minor whitespace inconsistency !2694 (Stefan Schmalzhaf @the_s)
+- 27451 Fix Documentation - podAnnotation should be a TOML table !2692 (Benjamin Souty @B-Souty)
+- Split docs linting jobs !2689
+- Docs: Links documentation to working example for CMD Shell usage on Windows GitLab Runners where only PowerShell can be the default !2687
+- Documentation - Supported OS updates !2683
+- Whole hour periods for autoscale !2681
+- Mention version sync on first sign of trouble !2680
+- Fix typo in kubernetes.md !2675
+- Removed extra spaces !2672
+- Update install runner on Kubernetes install page - docs !2668
+- Simplification of dind service section !2663 (Keith Kirkwood @keithkirkwood)
+- Instructions for installing dependencies on CentOS. !2619 (David Hannasch @dHannasch)
+- Include in docs details about the updated script !2586
+- Changed recommendation to instance type in docs to a smaller one !2579 (Jan Pobořil @janpoboril)
+- Document known race condition about helm upgrade !2541
+- Improve TLS custom cert documentation !2487
+
+### Other changes
+
+- Add CODEOWNERS for 3 files at repo root !2667
+- Revert "Improve trace secret masking with x/text/transform" !2752
+
+## v13.8.0 (2021-01-20)
+
+### New features
+
+- Allow user to specify multiple pull policies for Docker executor !2623
+
+### Bug fixes
+
+- Fix fastzip to support artifacts for nonroot users !2661
+- Fix s3 cache upload for aws EKS IRSA !2644 (Clemens Buchacher @cbuchacher)
+- Fix cache push for failed jobs for Docker and Kubernetes executor !2638 (Axel Amigo @hax0l)
+- Fix Azure cache not working in K8S executor !2626
+- Fix path checking in Build.getCustomBuildDir !2251
+
+### Maintenance
+
+- Add Docker integration tests for cache push for failed job !2657
+- Report that the Runner returns exit codes !2645
+- Update GoCloud to v0.21.1+ !2637
+- Add tests to Powershell shell !2634
+- Lock mutex in Buffer.SetLimit !2627
+- Fix/k8s skip hostaliases for empty services !2582 (Horatiu Eugen Vlad @hvlad)
+- Fix windowsPath to handle local named pipes correctly !2470
+- Override Git HTTP user agent !2392
+- Allow using prebuilt Docker helper images when running from out/binaries !2104
+
+### Documentation changes
+
+- Finish runner standardization update !2666
+- Update linux-repository.md changes date of end of life date of CentOS 8 !2662 (Mohammad.E @emamirazavi)
+- Removed ntrights reference !2660
+- Restructure "Supported options for self-signed certificates" doc section !2651
+- Edited runner to be lowercase !2650
+- Edited runner to be lowercase !2649
+- Edited runner to be lowercase !2648
+- Edited runner to be lowercase !2647
+- Edited runner capitalization !2646
+- Fix documentation issue in Kubernetes node_selector !2643
+- Update docs for the new gitlab runner operator !2640
+- Synchronize Vale rules and fix !2633
+- Improve documentation for configuring the cache with a K8S runner !2632
+- Add Azure to possible runners cache type !2631
+- Add reference to GitLab Runner Operator and 13.7 MVC issue !2630
+- Add `make runner-and-helper-docker-host` to `make help` !2629
+- Add troubleshooting guide for GitLab Runner !2628
+- Runner: add Vale test for possessive form of GitLab !2624
+- Docs: Removed possessive GitLab's !2620
+- Runner: fix unquoted curl command URL strings !2618
+- Runner: move CurlStringsQuoted.yml rule to error !2617
+- Add Windows Server Core command for logs !2602
+- Fixed typo: libivrt -> libvirt !2519 (Aaron @aaronk6)
+- Autodetect VirtualBox path on Windows !2020 (Pedro Pombeiro @pedropombeiro)
+- Update kubernetes.md to reflect https://gitlab.com/charts/gitlab-runner/merge_requests/34 !1470
+
+### Other changes
+
+- Add missing entry to 13.6 changelog !2642
+
+## v13.7.0 (2020-12-21)
+
+### Security fixes
+
+- Updating min TLS version to 1.2 !2576
+- Replace umask usage with files permission change when a non-root image used !2539
+
+### Bug fixes
+
+- Upgrade fastzip to v0.1.4 !2605
+- Remove .git/config.lock in build directory !2580
+- Fix attempting Kubernetes docker registry secret cleanup on failed creation !2429
+
+### Maintenance
+
+- Gracefully fail unexpected Stream() calls !2609
+- Update lowest git version support inside of CI !2600
+- windows: Don't log crypto/x509: system root pool warning !2595
+- Add .editorconfig !2588
+- Use helper image to change K8s log dir permissions !2573
+- Fix check_modules command !2572
+- Replace assert.True and errors.Is with assert.ErrorAs/ErrorIs !2571
+- Exclude secure jobs from docs pipelines !2564
+- Submit exit code back to Rails when a job fails !2562
+- Fix dead URL in docker.go !2557 (Victor Mireyev @AmbientLighter)
+- Pin StefanScherer/windows_2019_docker box to 2020.04.15 !2555
+- Pull helper image from GitLab.com registry !2554
+- Update testify package to version supporting errors.Is/As directly !2537
+- Introduce docker internal user package !2534
+- Introduce docker internal exec package !2533
+- Send build trace bytesize in the final build update !2521
+- Support Pod DNS policy for Kubernetes executor !2477
+- Support Pod DNS Config and Policy for Kubernetes executor !2473
+- Add support for Windows Server Core 2004 !2459 (Raphael Gozzo @raphaelgz)
+- Ensure that runner is unregistered on registration failure !2447
+- Make runner-and-helper-docker-host use host arch and os. !2432 (Horatiu Eugen Vlad @hvlad)
+- Improve cache upload speed !2358 (Erik Lindahl @erik.lindahl)
+- Disable syslogging by default for systemd systems !2333 (Matthias Baur @m.baur)
+
+### GitLab Runner distribution
+
+- Publish docker images to ECR public !2608
+- Add job to create ecr token for pipeline !2607
+- Install aws cli in CI image !2599
+
+### Documentation changes
+
+- Removed spaces from diagram !2616
+- Remove alert box vale rules !2613
+- Add interaction diagram to Kubernetes executor docs !2612
+- Changed format of alert boxes !2610
+- Fix unescaped characters in a table !2604
+- Correct grammar/spelling errors in advanced configuration !2603
+- Removed one-sentence topics !2601
+- Fixed error in `config example` !2598
+- Fix indentation of runners.cache in kubernetes.md !2592 (Yorgos Oikonomou @yorgos..oik)
+- Fixed Vale future tense issues !2585
+- Fixed Vale future tense errors !2584
+- Moved Kubernetes keywords into sub-tables !2583
+- Commented out modal install window details (2 of 2) !2577
+- Fix trailing space issues in docs !2569
+- Fix broken links in the gitlab-runner docs !2568
+- Fix typo in monitoring documentation !2556 (Horst Gutmann @h.gutmann)
+- Add documentation on how to add a new Windows version !2498
+- Updated compatibility table !2489
+- Update index page for style !2484
+- Allow specifying `basefolder` when creating virtualbox VM !2461 (Jack Dunn @JackDunnNZ)
+- Runner guided install (2 of 2) !2460
+- Allow to set extra hosts on kubernetes executor !2446 (Horatiu Eugen Vlad @hvlad)
+- Updates documentation to highlight that SELinux can cause errors in the "Prepare Environment" state !2309 (Sean McNamara @seanmcn)
+- Update AWS autoscale docs for clarity !1820
+- Update generated PowerShell script example mkdir !1565
+- Add advice on network segmentation !1404
+
+### Other changes
+
+- Update GitLab Changelog configuration !2615
+- Remove product from product-categories URL from template !2611
+
+## v13.6.0 (2020-11-21)
+
+### New features
+
+- Add labels to cache-init docker container !2412
+- Expose custom executor services with $CI_JOB_SERVICES !1827 (Jovan Marić @jovanmaric)
+- Enable PowerShell Core support in Docker-Windows executor !2492
+
+### Maintenance
+
+- Expose ci job services as custom !2550
+- Publish helper images to registry.gitlab.com !2540
+- Allow user to define command and entrypoint to services from config !2525
+- Consolidate helper exe location for Dockerfile build !2501
+- Fix Azure cache uploads using Go Cloud !2500
+- Fix definition of security related jobs !2499
+- Move doc/dependency_decisions.yml file to a better place !2485
+- Fix TestBuildCancel from timing out !2468
+- Teach artifact/cache commands about the archive interface !2467
+- Improve build logging testing !2465
+- Skip CleanupFileVariables stage if no file variables !2456
+- Change in interactive --url question to match docs !2431
+- Added SubPath support to Kubernetes volume definitions !2424 (Matt Mikitka @mmikitka)
+- Add fastzip archiver/extractor !2210
+- Implement archiver/extractor interface !2195
+- Manage driver defined job variables in custom executor !2032 (Paul Bryant @paulbry)
+- Update doc about release windows image script !1561
+
+### Documentation changes
+
+- More Vale rules updates !2552
+- Clarify windows install instructions !2549
+- synchronize Vale rules and fix !2547
+- Add reference to config.toml for setting docker image pull policy - docs !2545
+- Remove extra parentheses !2542 (Ben Bodenmiller @bbodenmiller)
+- Docs: Rename and redirect docs/install/registry_and_cache_servers.md !2535
+- Add stage / group metadata to docs pages !2528
+- Add mention that registry mirror is started as HTTP not HTTPS !2527
+- Elaborate on Docker mirror, and link to docker doc !2526
+- Docs: Redirected custom executor index page !2522
+- Docs: Changed bullets to a table !2517
+- Added docs for using a configuration template in the helm chart !2503
+- Update vale rules !2502
+- Use latest docs linting image !2497
+- Docs: Updated top-level page !2496
+- Update link to runner helper image in documentation !2494 (botayhard @botayhard)
+- Change mention of custom cache containers to volumes !2491
+- Add missing supported architectures for Runner helper !2490
+- Update [runners.machine] section in Autoscaling GitLab Runner on AWS EC2 documentation !2480
+- Provide a full list of metrics available for GitLab runners in the documentation !2479
+- Clarify how service_account in toml is used !2476 (Ben Bodenmiller @bbodenmiller)
+- Introduce usage of Runner Manager terminology !2474
+- Docs: Revamp Runner home page !2472
+- Update Kubernetes' documentation to include ephemeral storage requests/limits !2457
+- Add kubernetes runners allowPrivilegeEscalation security context configuration !2430 (Horatiu Eugen Vlad @hvlad)
+- Update Runner registry and cache documentation page !2386
+- Cap maximum Docker Machine provisioning rate !1038 (Joel Low @lowjoel)
+
 ## v13.5.0 (2020-10-20)
 
 ### New features

@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/sirupsen/logrus"
+
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/process"
 	url_helpers "gitlab.com/gitlab-org/gitlab-runner/helpers/url"
@@ -13,6 +14,13 @@ import (
 type BuildLogger struct {
 	log   JobTrace
 	entry *logrus.Entry
+}
+
+func NewBuildLogger(log JobTrace, entry *logrus.Entry) BuildLogger {
+	return BuildLogger{
+		log:   log,
+		entry: entry,
+	}
 }
 
 func (e *BuildLogger) WithFields(fields logrus.Fields) BuildLogger {
@@ -87,13 +95,6 @@ func (e *BuildLogger) Errorln(args ...interface{}) {
 		return
 	}
 	e.sendLog(e.entry.Errorln, helpers.ANSI_BOLD_RED+"ERROR: ", args...)
-}
-
-func NewBuildLogger(log JobTrace, entry *logrus.Entry) BuildLogger {
-	return BuildLogger{
-		log:   log,
-		entry: entry,
-	}
 }
 
 type ProcessLoggerAdapter struct {

@@ -1,8 +1,8 @@
 package helpers
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,8 +10,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
+	"gitlab.com/gitlab-org/gitlab-runner/commands/helpers/archive"
+	"gitlab.com/gitlab-org/gitlab-runner/commands/helpers/meter"
 	"gitlab.com/gitlab-org/gitlab-runner/common"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/archives"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/retry"
 	"gitlab.com/gitlab-org/gitlab-runner/log"
 	"gitlab.com/gitlab-org/gitlab-runner/network"
@@ -28,34 +29,35 @@ var (
 	errTooLarge           = errors.New("too large")
 )
 
+//nolint:lll
 type ArtifactsUploaderCommand struct {
 	common.JobCredentials
 	fileArchiver
+	meter.TransferMeterCommand
+
 	network common.Network
 
-	Name     string                `long:"name" description:"The name of the archive"`
-	ExpireIn string                `long:"expire-in" description:"When to expire artifacts"`
-	Format   common.ArtifactFormat `long:"artifact-format" description:"Format of generated artifacts"`
-	Type     string                `long:"artifact-type" description:"Type of generated artifacts"`
+	Name             string                `long:"name" description:"The name of the archive"`
+	ExpireIn         string                `long:"expire-in" description:"When to expire artifacts"`
+	Format           common.ArtifactFormat `long:"artifact-format" description:"Format of generated artifacts"`
+	Type             string                `long:"artifact-type" description:"Type of generated artifacts"`
+	CompressionLevel string                `long:"compression-level" env:"ARTIFACT_COMPRESSION_LEVEL" description:"Compression level (fastest, fast, default, slow, slowest)"`
 }
 
-func (c *ArtifactsUploaderCommand) generateZipArchive(w *io.PipeWriter) {
-	err := archives.CreateZipArchive(w, c.sortedFiles())
-	_ = w.CloseWithError(err)
-}
-
-func (c *ArtifactsUploaderCommand) generateGzipStream(w *io.PipeWriter) {
-	err := archives.CreateGzipArchive(w, c.sortedFiles())
-	_ = w.CloseWithError(err)
-}
-
-func (c *ArtifactsUploaderCommand) openRawStream() (io.ReadCloser, error) {
-	fileNames := c.sortedFiles()
-	if len(fileNames) > 1 {
-		return nil, errors.New("only one file can be send as raw")
+func (c *ArtifactsUploaderCommand) artifactFilename(name string, format common.ArtifactFormat) string {
+	name = filepath.Base(name)
+	if name == "" || name == "." {
+		name = DefaultUploadName
 	}
 
-	return os.Open(fileNames[0])
+	switch format {
+	case common.ArtifactFormatZip:
+		return name + ".zip"
+
+	case common.ArtifactFormatGzip:
+		return name + ".gz"
+	}
+	return name
 }
 
 func (c *ArtifactsUploaderCommand) createReadStream() (string, io.ReadCloser, error) {
@@ -63,32 +65,26 @@ func (c *ArtifactsUploaderCommand) createReadStream() (string, io.ReadCloser, er
 		return "", nil, nil
 	}
 
-	name := filepath.Base(c.Name)
-	if name == "" || name == "." {
-		name = DefaultUploadName
+	format := c.Format
+	if format == common.ArtifactFormatDefault {
+		format = common.ArtifactFormatZip
 	}
 
-	switch c.Format {
-	case common.ArtifactFormatZip, common.ArtifactFormatDefault:
-		pr, pw := io.Pipe()
-		go c.generateZipArchive(pw)
+	filename := c.artifactFilename(c.Name, format)
+	pr, pw := io.Pipe()
 
-		return name + ".zip", pr, nil
-
-	case common.ArtifactFormatGzip:
-		pr, pw := io.Pipe()
-		go c.generateGzipStream(pw)
-
-		return name + ".gz", pr, nil
-
-	case common.ArtifactFormatRaw:
-		file, err := c.openRawStream()
-
-		return name, file, err
-
-	default:
-		return "", nil, fmt.Errorf("unsupported archive format: %s", c.Format)
+	archiver, err := archive.NewArchiver(archive.Format(format), pw, c.wd, getCompressionLevel(c.CompressionLevel))
+	if err != nil {
+		_ = pr.CloseWithError(err)
+		return filename, nil, err
 	}
+
+	go func() {
+		err := archiver.Archive(context.Background(), c.files)
+		_ = pw.CloseWithError(err)
+	}()
+
+	return filename, pr, nil
 }
 
 func (c *ArtifactsUploaderCommand) Run() error {
@@ -110,6 +106,12 @@ func (c *ArtifactsUploaderCommand) Run() error {
 		Format:   c.Format,
 		Type:     c.Type,
 	}
+
+	stream = meter.NewReader(
+		stream,
+		c.TransferMeterFrequency,
+		meter.LabelledRateFormat(os.Stdout, "Uploading artifacts", meter.UnknownTotalSize),
+	)
 
 	// Upload the data
 	switch c.network.UploadRawArtifacts(c.JobCredentials, stream, options) {

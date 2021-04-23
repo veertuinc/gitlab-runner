@@ -19,6 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 	"gitlab.com/gitlab-org/gitlab-runner/session"
 	"gitlab.com/gitlab-org/gitlab-runner/session/terminal"
@@ -194,6 +196,7 @@ func TestJobImageExposed(t *testing.T) {
 				options.Build.Variables = append(options.Build.Variables, tt.vars...)
 				return options.Build.StartBuild("/root/dir", "/cache/dir", false, false)
 			})
+
 			actualVarExists := false
 			for _, v := range build.GetAllVariables() {
 				if v.Key == "CI_JOB_IMAGE" {
@@ -202,6 +205,7 @@ func TestJobImageExposed(t *testing.T) {
 				}
 			}
 			assert.Equal(t, tt.expectVarExists, actualVarExists, "CI_JOB_IMAGE exported?")
+
 			if tt.expectVarExists {
 				actualJobImage := build.GetAllVariables().Get("CI_JOB_IMAGE")
 				assert.Equal(t, tt.expectImageName, actualJobImage)
@@ -211,17 +215,19 @@ func TestJobImageExposed(t *testing.T) {
 }
 
 func TestBuildRunNoModifyConfig(t *testing.T) {
-	expectHostAddr := "http://10.0.0.1"
+	expectHostAddr := "10.0.0.1"
 	p, assertFn := setupSuccessfulMockExecutor(t, func(options ExecutorPrepareOptions) error {
-		options.Config.Anka.ControllerAddress = expectHostAddr
+		options.Config.Docker.Credentials.Host = "10.0.0.2"
 		return nil
 	})
 	defer assertFn()
 
 	rc := &RunnerConfig{
 		RunnerSettings: RunnerSettings{
-			Anka: &AnkaConfig{
-				ControllerAddress: expectHostAddr,
+			Docker: &DockerConfig{
+				Credentials: docker.Credentials{
+					Host: expectHostAddr,
+				},
 			},
 		},
 	}
@@ -229,11 +235,10 @@ func TestBuildRunNoModifyConfig(t *testing.T) {
 
 	err := build.Run(&Config{}, &Trace{Writer: os.Stdout})
 	assert.NoError(t, err)
-	assert.Equal(t, expectHostAddr, rc.Anka.ControllerAddress)
+	assert.Equal(t, expectHostAddr, rc.Docker.Credentials.Host)
 }
 
 func TestRetryPrepare(t *testing.T) {
-	PreparationRetries = 2
 	PreparationRetryInterval = 0
 
 	e := MockExecutor{}
@@ -267,7 +272,6 @@ func TestRetryPrepare(t *testing.T) {
 }
 
 func TestPrepareFailure(t *testing.T) {
-	PreparationRetries = 2
 	PreparationRetryInterval = 0
 
 	e := MockExecutor{}
@@ -305,7 +309,7 @@ func TestPrepareFailureOnBuildError(t *testing.T) {
 	err := build.Run(&Config{}, &Trace{Writer: os.Stdout})
 
 	expectedErr := new(BuildError)
-	assert.True(t, errors.Is(err, expectedErr), "expected: %#v, got: %#v", expectedErr, err)
+	assert.ErrorIs(t, err, expectedErr)
 }
 
 func TestPrepareEnvironmentFailure(t *testing.T) {
@@ -342,7 +346,7 @@ func TestPrepareEnvironmentFailure(t *testing.T) {
 	}
 
 	err = build.Run(&Config{}, &Trace{Writer: os.Stdout})
-	assert.True(t, errors.Is(err, testErr))
+	assert.ErrorIs(t, err, testErr)
 }
 
 func TestJobFailure(t *testing.T) {
@@ -354,7 +358,7 @@ func TestJobFailure(t *testing.T) {
 	executor.On("Cleanup").Once()
 
 	// Set up a failing a build script
-	thrownErr := &BuildError{Inner: errors.New("test error")}
+	thrownErr := &BuildError{Inner: errors.New("test error"), ExitCode: 1}
 	executor.On("Shell").Return(&ShellScriptInfo{Shell: "script-shell"})
 	executor.On("Run", matchBuildStage(BuildStagePrepare)).Return(nil).Once()
 	executor.On("Run", mock.Anything).Return(thrownErr).Times(3)
@@ -381,12 +385,12 @@ func TestJobFailure(t *testing.T) {
 	trace.On("SetCancelFunc", mock.Anything).Once()
 	trace.On("SetAbortFunc", mock.Anything).Once()
 	trace.On("SetMasked", mock.Anything).Once()
-	trace.On("Fail", thrownErr, ScriptFailure).Once()
+	trace.On("Fail", thrownErr, JobFailureData{Reason: ScriptFailure, ExitCode: 1}).Once()
 
 	err = build.Run(&Config{}, trace)
 
 	expectedErr := new(BuildError)
-	assert.True(t, errors.Is(err, expectedErr), "expected: %#v, got: %#v", expectedErr, err)
+	assert.ErrorIs(t, err, expectedErr)
 }
 
 func TestJobFailureOnExecutionTimeout(t *testing.T) {
@@ -416,14 +420,14 @@ func TestJobFailureOnExecutionTimeout(t *testing.T) {
 	trace.On("SetCancelFunc", mock.Anything).Once()
 	trace.On("SetAbortFunc", mock.Anything).Once()
 	trace.On("SetMasked", mock.Anything).Once()
-	trace.On("Fail", mock.Anything, JobExecutionTimeout).Run(func(arguments mock.Arguments) {
+	trace.On("Fail", mock.Anything, JobFailureData{Reason: JobExecutionTimeout}).Run(func(arguments mock.Arguments) {
 		assert.Error(t, arguments.Get(0).(error))
 	}).Once()
 
 	err := build.Run(&Config{}, trace)
 
 	expectedErr := &BuildError{FailureReason: JobExecutionTimeout}
-	assert.True(t, errors.Is(err, expectedErr), "expected: %#v, got: %#v", expectedErr, err)
+	assert.ErrorIs(t, err, expectedErr)
 }
 
 func TestRunFailureRunsAfterScriptAndArtifactsOnFailure(t *testing.T) {
@@ -845,76 +849,66 @@ func TestGetRemoteURL(t *testing.T) {
 	}
 }
 
-type featureFlagOnTestCase struct {
-	value          string
-	expectedStatus bool
-	expectedError  bool
-}
-
 func TestIsFeatureFlagOn(t *testing.T) {
-	hook := test.NewGlobal()
+	const testFF = "FF_TEST_FEATURE"
 
-	tests := map[string]featureFlagOnTestCase{
+	tests := map[string]struct {
+		featureFlagCfg map[string]bool
+		value          string
+		expectedStatus bool
+	}{
 		"no value": {
 			value:          "",
 			expectedStatus: false,
-			expectedError:  false,
 		},
 		"true": {
 			value:          "true",
 			expectedStatus: true,
-			expectedError:  false,
 		},
 		"1": {
 			value:          "1",
 			expectedStatus: true,
-			expectedError:  false,
 		},
 		"false": {
 			value:          "false",
 			expectedStatus: false,
-			expectedError:  false,
 		},
 		"0": {
 			value:          "0",
 			expectedStatus: false,
-			expectedError:  false,
 		},
 		"invalid value": {
 			value:          "test",
 			expectedStatus: false,
-			expectedError:  true,
+		},
+		"feature flag set inside config.toml take precedence": {
+			featureFlagCfg: map[string]bool{
+				testFF: true,
+			},
+			value:          "false",
+			expectedStatus: true,
 		},
 	}
 
 	for name, testCase := range tests {
 		t.Run(name, func(t *testing.T) {
 			build := new(Build)
+			build.Runner = &RunnerConfig{
+				RunnerSettings: RunnerSettings{
+					FeatureFlags: testCase.featureFlagCfg,
+				},
+			}
 			build.Variables = JobVariables{
-				{Key: "FF_TEST_FEATURE", Value: testCase.value},
+				{Key: testFF, Value: testCase.value},
 			}
 
-			status := build.IsFeatureFlagOn("FF_TEST_FEATURE")
+			status := build.IsFeatureFlagOn(testFF)
 			assert.Equal(t, testCase.expectedStatus, status)
-
-			entry := hook.LastEntry()
-			if testCase.expectedError {
-				require.NotNil(t, entry)
-
-				logrusOutput, err := entry.String()
-				require.NoError(t, err)
-
-				assert.Contains(t, logrusOutput, "Error while parsing the value of feature flag")
-			} else {
-				assert.Nil(t, entry)
-			}
-
-			hook.Reset()
 		})
 	}
 }
 
-func TestAllowToOverwriteFeatureFlagWithRunnerVariables(t *testing.T) {
+func TestIsFeatureFlagOn_SetWithRunnerVariables(t *testing.T) {
 	tests := map[string]struct {
 		variable      string
 		expectedValue bool
@@ -946,6 +940,61 @@ func TestAllowToOverwriteFeatureFlagWithRunnerVariables(t *testing.T) {
 			assert.Equal(t, test.expectedValue, result)
 		})
 	}
+}
+
+func TestIsFeatureFlagOn_Precedence(t *testing.T) {
+	const testFF = "FF_TEST_FEATURE"
+
+	t.Run("config takes precedence over job variable", func(t *testing.T) {
+		b := &Build{
+			Runner: &RunnerConfig{
+				RunnerSettings: RunnerSettings{
+					FeatureFlags: map[string]bool{
+						testFF: true,
+					},
+				},
+			},
+			JobResponse: JobResponse{
+				Variables: JobVariables{
+					{Key: testFF, Value: "false"},
+				},
+			},
+		}
+
+		assert.True(t, b.IsFeatureFlagOn(testFF))
+	})
+
+	t.Run("config takes precedence over configured environments", func(t *testing.T) {
+		b := &Build{
+			Runner: &RunnerConfig{
+				RunnerSettings: RunnerSettings{
+					FeatureFlags: map[string]bool{
+						testFF: true,
+					},
+					Environment: []string{testFF + "=false"},
+				},
+			},
+		}
+
+		assert.True(t, b.IsFeatureFlagOn(testFF))
+	})
+
+	t.Run("variable defined at job take precedence over configured environments", func(t *testing.T) {
+		b := &Build{
+			Runner: &RunnerConfig{
+				RunnerSettings: RunnerSettings{
+					Environment: []string{testFF + "=false"},
+				},
+			},
+			JobResponse: JobResponse{
+				Variables: JobVariables{
+					{Key: testFF, Value: "true"},
+				},
+			},
+		}
+
+		assert.True(t, b.IsFeatureFlagOn(testFF))
+	})
 }
 
 func TestStartBuild(t *testing.T) {
@@ -1018,6 +1067,22 @@ func TestStartBuild(t *testing.T) {
 			expectedBuildDir: "/builds/go/src/gitlab.com/test-namespace/test-repo",
 			expectedCacheDir: "/cache/test-namespace/test-repo",
 			expectedError:    false,
+		},
+		"out-of-bounds GIT_CLONE_PATH was specified": {
+			args: startBuildArgs{
+				rootDir:               "/builds",
+				cacheDir:              "/cache",
+				customBuildDirEnabled: true,
+				sharedDir:             false,
+			},
+			jobVariables: JobVariables{
+				{
+					Key:    "GIT_CLONE_PATH",
+					Value:  "/builds/../outside",
+					Public: true,
+				},
+			},
+			expectedError: true,
 		},
 		"custom build disabled": {
 			args: startBuildArgs{
@@ -1489,22 +1554,6 @@ func TestProjectUniqueName(t *testing.T) {
 			},
 			expectedName: "runner-zen8e6e-project-1234567890-concurrent-0",
 		},
-		"project non rfc1132 unique name longer than 63 char": {
-			build: &Build{
-				Runner: &RunnerConfig{
-					RunnerCredentials: RunnerCredentials{
-						Token: "Ze_n8E6en622WxxSg4r8",
-					},
-				},
-				JobResponse: JobResponse{
-					JobInfo: JobInfo{
-						ProjectID: 123456789012345,
-					},
-				},
-				ProjectRunnerID: 123456789012345,
-			},
-			expectedName: "runner-zen8e6e-project-123456789012345-concurrent-1234567890123",
-		},
 		"project normal unique name": {
 			build: &Build{
 				Runner: &RunnerConfig{
@@ -1601,8 +1650,48 @@ func TestBuild_GetExecutorJobSectionAttempts(t *testing.T) {
 			}
 
 			attempts, err := build.GetExecutorJobSectionAttempts()
-			assert.True(t, errors.Is(err, tt.expectedErr))
+			assert.ErrorIs(t, err, tt.expectedErr)
 			assert.Equal(t, tt.expectedAttempts, attempts)
+		})
+	}
+}
+
+func TestBuild_getFeatureFlagInfo(t *testing.T) {
+	const changedFeatureFlags = "FF_CMD_DISABLE_DELAYED_ERROR_LEVEL_EXPANSION:true"
+	tests := []struct {
+		value          string
+		expectedStatus string
+	}{
+		{
+			value:          "true",
+			expectedStatus: changedFeatureFlags,
+		},
+		{
+			value:          "1",
+			expectedStatus: changedFeatureFlags,
+		},
+		{
+			value:          "invalid",
+			expectedStatus: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			b := Build{
+				JobResponse: JobResponse{
+					Variables: JobVariables{
+						{
+							Key:    featureflags.CmdDisableDelayedErrorLevelExpansion,
+							Value:  tt.value,
+							Public: true,
+						},
+					},
+				},
+				Runner: &RunnerConfig{},
+			}
+
+			assert.Equal(t, tt.expectedStatus, b.getFeatureFlagInfo())
 		})
 	}
 }
@@ -1784,7 +1873,7 @@ func TestSecretsResolving(t *testing.T) {
 			assert.Equal(t, tt.expectedVariables, build.secretsVariables)
 
 			if tt.expectedError != nil {
-				assert.True(t, errors.As(err, &tt.expectedError))
+				assert.ErrorAs(t, err, &tt.expectedError)
 				return
 			}
 			assert.NoError(t, err)

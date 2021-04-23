@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -39,18 +38,18 @@ func generateObjectName(build *common.Build, config *common.CacheConfig, key str
 	}
 
 	basePath := generateBaseObjectName(build, config)
-	path := path.Join(basePath, key)
+	fullPath := path.Join(basePath, key)
 
-	relative, err := filepath.Rel(basePath, path)
-	if err != nil {
-		return "", fmt.Errorf("cache path correctness check failed with: %w", err)
-	}
-
-	if strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+	// The typical concerns regarding the use of strings.HasPrefix to detect
+	// path traversal do not apply here. The detection here is made easier
+	// as we're dealing with URL paths, not filepaths and we're ensuring that
+	// the basepath has a final separator (the key can not be empty).
+	// TestGenerateObjectName contains path traversal tests.
+	if !strings.HasPrefix(fullPath, basePath+"/") {
 		return "", fmt.Errorf("computed cache path outside of project bucket. Please remove `../` from cache key")
 	}
 
-	return path, nil
+	return fullPath, nil
 }
 
 func buildAdapter(build *common.Build, key string) (Adapter, error) {
@@ -125,4 +124,25 @@ func GetCacheUploadHeaders(build *common.Build, key string) http.Header {
 	}
 
 	return h
+}
+
+func GetCacheGoCloudURL(build *common.Build, key string) *url.URL {
+	return castToURL(func() interface{} {
+		return onAdapter(build, key, func(adapter Adapter) interface{} {
+			return adapter.GetGoCloudURL()
+		})
+	})
+}
+
+func GetCacheUploadEnv(build *common.Build, key string) map[string]string {
+	result := onAdapter(build, key, func(adapter Adapter) interface{} {
+		return adapter.GetUploadEnv()
+	})
+
+	m, ok := result.(map[string]string)
+	if !ok {
+		return nil
+	}
+
+	return m
 }

@@ -1,7 +1,6 @@
 .binaries: &binaries
   extends:
-  - .merge_request_pipelines
-  - .except_docs
+  - .rules:merge_request_pipelines:no_docs
   - .go-cache
   stage: build
   needs:
@@ -12,7 +11,9 @@
   - make runner-bin BUILD_PLATFORMS="-osarch='$platforms'"
   artifacts:
     paths:
-    - out/binaries/
+    - out/binaries/gitlab-runner-*
+    exclude:
+    - out/binaries/gitlab-runner-helper/
     expire_in: 7d
 
 binaries darwin/amd64: *binaries

@@ -70,7 +70,7 @@ func TestIgnoreStatusChange(t *testing.T) {
 
 	b.start()
 	b.Success()
-	b.Fail(errors.New("test"), "script_failure")
+	b.Fail(errors.New("test"), common.JobFailureData{Reason: "script_failure"})
 }
 
 func TestTouchJobAbort(t *testing.T) {
@@ -176,6 +176,7 @@ func TestSendPatchAbort(t *testing.T) {
 
 func TestJobOutputLimit(t *testing.T) {
 	traceMessage := "abcde"
+	traceMessageSize := 1024
 
 	mockNetwork := new(common.MockNetwork)
 	defer mockNetwork.AssertExpectations(t)
@@ -188,12 +189,19 @@ func TestJobOutputLimit(t *testing.T) {
 
 	updateMatcher := generateJobInfoMatcher(jobCredentials.ID, common.Success, "")
 
+	expectedLogLimitExceededMsg := fmt.Sprintf(
+		"\n\x1b[33;1mJob's log exceeded limit of %v bytes.\n"+
+			"Job execution will continue but no more output will be collected.\x1b[0;m\n",
+		traceMessageSize,
+	)
+	expectedLogLength := jobOutputLimit.OutputLimit*traceMessageSize + len(expectedLogLimitExceededMsg)
+
 	receivedTrace := bytes.NewBuffer([]byte{})
 	mockNetwork.On("PatchTrace", jobOutputLimit, jobCredentials, mock.Anything, mock.Anything).
-		Return(common.NewPatchTraceResult(1078, common.PatchSucceeded, 0)).
+		Return(common.NewPatchTraceResult(expectedLogLength, common.PatchSucceeded, 0)).
 		Once().
 		Run(func(args mock.Arguments) {
-			// the 1078 == len(data)
+			// the expectedLogLength == len(data)
 			data := args.Get(2).([]byte)
 			receivedTrace.Write(data)
 		})
@@ -203,12 +211,10 @@ func TestJobOutputLimit(t *testing.T) {
 
 	b.start()
 	// Write 5k to the buffer
-	for i := 0; i < 1024; i++ {
+	for i := 0; i < traceMessageSize; i++ {
 		fmt.Fprint(b, traceMessage)
 	}
 	b.Success()
-
-	expectedLogLimitExceededMsg := "Job's log exceeded limit of"
 
 	assert.Contains(t, receivedTrace.String(), traceMessage)
 	assert.Contains(t, receivedTrace.String(), expectedLogLimitExceededMsg)
@@ -775,18 +781,21 @@ func TestUpdateIntervalChanges(t *testing.T) {
 	}
 }
 
-// TestJobChecksum validates a completness of crc32 checksum as send
-// in `UpdateJob`. It ensures that checksum engine generates a checksum
-// of a masked content that is send in a chunks to Rails
+// TestJobChecksum validates a completness of crc32 checksum as sent in
+// `UpdateJob`. It ensures that checksum engine generates a checksum of a
+// masked content that is send in a chunks to Rails
 func TestJobChecksum(t *testing.T) {
 	maskedValues := []string{"masked"}
 	traceMessage := "This string should be masked $$$$"
 	traceMaskedMessage := "This string should be [MASKED] $$$$"
 
 	expectedJobInfo := common.UpdateJobInfo{
-		ID:       -1,
-		State:    "success",
-		Checksum: "crc32:0fc72945", // this is a checksum of `traceMaskedMessage`
+		ID:    -1,
+		State: "success",
+		Output: common.JobTraceOutput{
+			Checksum: "crc32:0fc72945", // this is a checksum of `traceMaskedMessage`
+			Bytesize: 35,
+		},
 	}
 
 	mockNetwork := new(common.MockNetwork)
@@ -806,6 +815,41 @@ func TestJobChecksum(t *testing.T) {
 	require.NoError(t, err)
 
 	jobTrace.maxTracePatchSize = 22
+	jobTrace.SetMasked(maskedValues)
+	jobTrace.start()
+
+	_, err = jobTrace.Write([]byte(traceMessage))
+	require.NoError(t, err)
+	jobTrace.Success()
+}
+
+func TestJobBytesize(t *testing.T) {
+	maskedValues := []string{"secret"}
+	traceMessage := "Build trace with secret and multi-byte ü character"
+	traceMaskedMessage := "Build trace with [MASKED] and multi-byte ü character"
+
+	expectedJobInfo := common.UpdateJobInfo{
+		ID:    -1,
+		State: "success",
+		Output: common.JobTraceOutput{
+			Checksum: "crc32:984a6af7",
+			Bytesize: 53,
+		},
+	}
+
+	mockNetwork := new(common.MockNetwork)
+	defer mockNetwork.AssertExpectations(t)
+
+	mockNetwork.On("PatchTrace", mock.Anything, mock.Anything, []byte(traceMaskedMessage), 0).
+		Return(common.NewPatchTraceResult(len(traceMaskedMessage), common.PatchSucceeded, 0)).Once()
+
+	mockNetwork.On("UpdateJob", jobConfig, jobCredentials, expectedJobInfo).
+		Return(common.UpdateJobResult{State: common.UpdateSucceeded})
+
+	jobTrace, err := newJobTrace(mockNetwork, jobConfig, jobCredentials)
+	require.NoError(t, err)
+
+	jobTrace.maxTracePatchSize = 100
 	jobTrace.SetMasked(maskedValues)
 	jobTrace.start()
 

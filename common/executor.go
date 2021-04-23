@@ -87,6 +87,7 @@ type ExecutorProvider interface {
 type BuildError struct {
 	Inner         error
 	FailureReason JobFailureReason
+	ExitCode      int
 }
 
 // Error implements the error interface.
@@ -105,6 +106,10 @@ func (b *BuildError) Is(err error) bool {
 	}
 
 	return buildErr.FailureReason == b.FailureReason
+}
+
+func (b *BuildError) Unwrap() error {
+	return b.Inner
 }
 
 // MakeBuildError returns an new instance of BuildError.

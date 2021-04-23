@@ -6,7 +6,7 @@ RUN apt-get update -yq && \
     apt-get install -yq locales make xz-utils \
                         ruby ruby-dev python-pip \
                         dpkg-sig createrepo rpm \
-                        zip libffi-dev jq && \
+                        zip libffi-dev jq zip && \
     rm -rf /var/lib/apt/lists/*
 
 # Set default locale for the environment
@@ -32,7 +32,7 @@ RUN wget https://packages.microsoft.com/config/debian/10/packages-microsoft-prod
     dpkg -i packages-microsoft-prod.deb && \
     rm packages-microsoft-prod.deb && \
     apt-get update && \
-    apt-get install -y powershell=${PWSH_VERSION}.debian.10 && \
+    apt-get install -y powershell=${PWSH_VERSION}-1.debian.10 && \
     rm -rf /var/lib/apt/lists/* && \
     pwsh --version
 
@@ -54,6 +54,14 @@ ARG KUBECTL_VERSION
 # Install kubectl
 RUN wget -q https://storage.googleapis.com/kubernetes-release/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl -O /usr/local/bin/kubectl && \
     chmod +x /usr/local/bin/kubectl
+
+# Install aws-cli
+ARG AWS_CLI_VERSION
+RUN wget -q https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWS_CLI_VERSION}.zip -O awscliv2.zip && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    rm -r aws && \
+    rm awscliv2.zip
 
 COPY Makefile* /tmp/
 WORKDIR /tmp

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"path"
@@ -157,7 +158,7 @@ type Build struct {
 	createdAt time.Time
 
 	Referees         []referees.Referee
-	ArtifactUploader func(config JobCredentials, reader io.Reader, options ArtifactsOptions) UploadState
+	ArtifactUploader func(config JobCredentials, reader io.ReadCloser, options ArtifactsOptions) UploadState
 }
 
 func (b *Build) setCurrentStage(stage BuildStage) {
@@ -278,7 +279,11 @@ func (b *Build) getCustomBuildDir(rootDir, overrideKey string, customBuildDirEna
 		return "", MakeBuildError("setting %s is not allowed, enable `custom_build_dir` feature", overrideKey)
 	}
 
-	if !strings.HasPrefix(dir, rootDir) {
+	relDir, err := filepath.Rel(rootDir, dir)
+	if err != nil {
+		return "", &BuildError{Inner: err}
+	}
+	if strings.HasPrefix(relDir, "..") {
 		return "", MakeBuildError("the %s=%q has to be within %q", overrideKey, dir, rootDir)
 	}
 
@@ -379,7 +384,7 @@ func getPredefinedEnv(buildStage BuildStage) bool {
 		BuildStageDownloadArtifacts:        true,
 		BuildStageAfterScript:              false,
 		BuildStageArchiveOnSuccessCache:    true,
-		BuildStageArchiveOnFailureCache:    false,
+		BuildStageArchiveOnFailureCache:    true,
 		BuildStageUploadOnFailureArtifacts: true,
 		BuildStageUploadOnSuccessArtifacts: true,
 		BuildStageCleanupFileVariables:     true,
@@ -551,7 +556,7 @@ func (b *Build) executeUploadReferees(ctx context.Context, startTime, endTime ti
 		}
 
 		// referee ran successfully, upload its results to GitLab as an artifact
-		b.ArtifactUploader(jobCredentials, reader, ArtifactsOptions{
+		b.ArtifactUploader(jobCredentials, ioutil.NopCloser(reader), ArtifactsOptions{
 			BaseName: referee.ArtifactBaseName(),
 			Type:     referee.ArtifactType(),
 			Format:   ArtifactFormat(referee.ArtifactFormat()),
@@ -713,7 +718,8 @@ func (b *Build) retryCreateExecutor(
 			return executor, nil
 		}
 		executor.Cleanup()
-		if _, ok := err.(*BuildError); ok {
+		var buildErr *BuildError
+		if errors.As(err, &buildErr) {
 			return nil, err
 		} else if options.Context.Err() != nil {
 			return nil, b.handleError(options.Context.Err())
@@ -785,7 +791,7 @@ func (b *Build) getTerminalTimeout(ctx context.Context, timeout time.Duration) t
 
 func (b *Build) setTraceStatus(trace JobTrace, err error) {
 	logger := b.logger.WithFields(logrus.Fields{
-		"duration": b.Duration(),
+		"duration_s": b.Duration().Seconds(),
 	})
 
 	if err == nil {
@@ -803,13 +809,13 @@ func (b *Build) setTraceStatus(trace JobTrace, err error) {
 			failureReason = ScriptFailure
 		}
 
-		trace.Fail(err, failureReason)
+		trace.Fail(err, JobFailureData{Reason: failureReason, ExitCode: buildError.ExitCode})
 
 		return
 	}
 
 	logger.Errorln("Job failed (system failure):", err)
-	trace.Fail(err, RunnerSystemFailure)
+	trace.Fail(err, JobFailureData{Reason: RunnerSystemFailure})
 }
 
 func (b *Build) setExecutorStageResolver(resolver func() ExecutorStage) {
@@ -834,10 +840,7 @@ func (b *Build) Run(globalConfig *Config, trace JobTrace) (err error) {
 	var executor Executor
 
 	b.logger = NewBuildLogger(trace, b.Log())
-	b.logger.Println("Running with", AppVersion.Line())
-	if b.Runner != nil && b.Runner.ShortDescription() != "" {
-		b.logger.Println("  on", b.Runner.Name, b.Runner.ShortDescription())
-	}
+	b.printRunningWithHeader()
 
 	b.setCurrentState(BuildRunStatePending)
 
@@ -1032,7 +1035,7 @@ func (b *Build) GetDefaultFeatureFlagsVariables() JobVariables {
 	for _, featureFlag := range featureflags.GetAll() {
 		variables = append(variables, JobVariable{
 			Key:      featureFlag.Name,
-			Value:    featureFlag.DefaultValue,
+			Value:    strconv.FormatBool(featureFlag.DefaultValue),
 			Public:   true,
 			Internal: true,
 			File:     false,
@@ -1328,19 +1331,39 @@ func NewBuild(
 }
 
 func (b *Build) IsFeatureFlagOn(name string) bool {
-	value := b.GetAllVariables().Get(name)
-
-	on, err := featureflags.IsOn(value)
-	if err != nil {
-		logrus.WithError(err).
-			WithField("name", name).
-			WithField("value", value).
-			Error("Error while parsing the value of feature flag")
-
-		return false
+	if b.Runner.IsFeatureFlagDefined(name) {
+		return b.Runner.IsFeatureFlagOn(name)
 	}
 
-	return on
+	return featureflags.IsOn(
+		b.Log().WithField("name", name),
+		b.GetAllVariables().Get(name),
+	)
+}
+
+// getFeatureFlagInfo returns the status of feature flags that differ
+// from their default status.
+func (b *Build) getFeatureFlagInfo() string {
+	var statuses []string
+	for _, ff := range featureflags.GetAll() {
+		isOn := b.IsFeatureFlagOn(ff.Name)
+
+		if isOn != ff.DefaultValue {
+			statuses = append(statuses, fmt.Sprintf("%s:%t", ff.Name, isOn))
+		}
+	}
+
+	return strings.Join(statuses, ", ")
+}
+
+func (b *Build) printRunningWithHeader() {
+	b.logger.Println("Running with", AppVersion.Line())
+	if b.Runner != nil && b.Runner.ShortDescription() != "" {
+		b.logger.Println("  on", b.Runner.Name, b.Runner.ShortDescription())
+	}
+	if featureInfo := b.getFeatureFlagInfo(); featureInfo != "" {
+		b.logger.Println("  feature flags:", featureInfo)
+	}
 }
 
 func (b *Build) IsLFSSmudgeDisabled() bool {

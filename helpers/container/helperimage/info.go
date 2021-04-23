@@ -4,13 +4,26 @@ import (
 	"fmt"
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker/errors"
+	"gitlab.com/gitlab-org/gitlab-runner/shells"
 )
 
 const (
 	OSTypeLinux   = "linux"
 	OSTypeWindows = "windows"
 
-	name = "gitlab/gitlab-runner-helper"
+	//nolint:lll
+	// DockerHubWarningMessage is the message that is printed to the user when
+	// it's using the helper image hosted in Docker Hub. It is up to the caller
+	// to print this message.
+	DockerHubWarningMessage = "Pulling GitLab Runner helper image from Docker Hub. " +
+		"Helper image is migrating to registry.gitlab.com, " +
+		"for more information see " +
+		"https://docs.gitlab.com/runner/configuration/advanced-configuration.html#migrate-helper-image-to-registrygitlabcom"
+
+	// DockerHubName is the name of the helper image hosted in Docker Hub.
+	DockerHubName = "gitlab/gitlab-runner-helper"
+	// GitLabRegistryName is the name of the helper image hosted in registry.gitlab.com.
+	GitLabRegistryName = "registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper"
 
 	headRevision        = "HEAD"
 	latestImageRevision = "latest"
@@ -34,6 +47,8 @@ type Config struct {
 	OSType          string
 	Architecture    string
 	OperatingSystem string
+	Shell           string
+	GitLabRegistry  bool
 }
 
 type creator interface {
@@ -60,4 +75,21 @@ func imageRevision(revision string) string {
 	}
 
 	return latestImageRevision
+}
+
+func imageName(gitlabRegistry bool) string {
+	if gitlabRegistry {
+		return GitLabRegistryName
+	}
+
+	return DockerHubName
+}
+
+func getPowerShellCmd(shell string) []string {
+	if shell == "" {
+		// TODO: Replace with shells.SNPwsh in 14.0 in https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26419
+		shell = shells.SNPowershell
+	}
+
+	return shells.PowershellDockerCmd(shell)
 }

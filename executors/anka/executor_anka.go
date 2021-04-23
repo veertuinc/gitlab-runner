@@ -68,6 +68,11 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		s.Config.Anka.Tag = &ankaTagNameENV
 	}
 
+	ankaGroupENV := s.Build.Variables.Get("ANKA_NODE_GROUP")
+	if ankaGroupENV != "" {
+		s.Config.Anka.NodeGroup = &ankaGroupENV
+	}
+
 	s.Println("Opening a connection to the Anka Cloud Controller:", s.Config.Anka.ControllerAddress)
 	s.connector = MakeNewAnkaCloudConnector(s.Config.Anka)
 
@@ -75,6 +80,9 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	s.Println("  - Template UUID:", s.Config.Anka.TemplateUUID)
 	if s.Config.Anka.Tag != nil {
 		s.Println("  - Tag:", *s.Config.Anka.Tag)
+	}
+	if s.Config.Anka.NodeGroup != nil {
+		s.Println("  - Node Group:", *s.Config.Anka.NodeGroup)
 	}
 
 	s.Println("Please be patient...")

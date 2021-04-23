@@ -1,7 +1,6 @@
 package shells
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -324,131 +323,223 @@ func TestWriteWritingArchiveCacheOnSuccess(t *testing.T) {
 	gitlabURL := "https://example.com:3443"
 
 	shell := AbstractShell{}
-	runnerConfig := &common.RunnerConfig{
-		RunnerSettings: common.RunnerSettings{
-			Cache: &common.CacheConfig{
-				Type:   "test",
-				Shared: true,
-			},
+
+	tests := map[string]struct {
+		cacheType string
+	}{
+		"pre-signed URL cache": {
+			cacheType: "test",
 		},
-		RunnerCredentials: common.RunnerCredentials{
-			URL: gitlabURL,
+
+		"GoCloud cache": {
+			cacheType: "goCloudTest",
 		},
 	}
 
-	build := &common.Build{
-		CacheDir:    "cache_dir",
-		JobResponse: getJobResponseWithCachePaths(),
-		Runner:      runnerConfig,
-	}
-	info := common.ShellScriptInfo{
-		RunnerCommand: "gitlab-runner-helper",
-		Build:         build,
-	}
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			runnerConfig := &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Cache: &common.CacheConfig{
+						Type:   tt.cacheType,
+						Shared: true,
+					},
+				},
+				RunnerCredentials: common.RunnerCredentials{
+					URL: gitlabURL,
+				},
+			}
 
-	mockWriter := new(MockShellWriter)
-	defer mockWriter.AssertExpectations(t)
-	mockWriter.On("Variable", mock.Anything)
-	mockWriter.On("Cd", mock.Anything)
-	mockWriter.On("IfCmd", "gitlab-runner-helper", "--version")
-	mockWriter.On("Noticef", "Creating cache %s...", mock.Anything).Times(3)
-	mockWriter.On(
-		"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
-		"--file", mock.Anything,
-		"--timeout", mock.Anything,
-		"--path", "vendor/",
-		"--untracked",
-		"--url", mock.Anything,
-		"--header", "Header-1: a value",
-	).Once()
-	mockWriter.On(
-		"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
-		"--file", mock.Anything,
-		"--timeout", mock.Anything,
-		"--path", "some/path1",
-		"--path", "other/path2",
-		"--url", mock.Anything,
-		"--header", "Header-1: a value",
-	).Once()
-	mockWriter.On(
-		"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
-		"--file", mock.Anything,
-		"--timeout", mock.Anything,
-		"--path", "when-always",
-		"--url", mock.Anything,
-		"--header", "Header-1: a value",
-	).Once()
-	mockWriter.On("Noticef", "Created cache").Times(3)
-	mockWriter.On("Else").Times(3)
-	mockWriter.On("Warningf", "Failed to create cache").Times(3)
-	mockWriter.On("EndIf").Times(3)
-	mockWriter.On("Else").Times(3)
-	mockWriter.On("Warningf", mock.Anything, mock.Anything, mock.Anything).Times(3)
-	mockWriter.On("EndIf").Times(3)
+			build := &common.Build{
+				CacheDir:    "cache_dir",
+				JobResponse: getJobResponseWithCachePaths(),
+				Runner:      runnerConfig,
+			}
+			info := common.ShellScriptInfo{
+				RunnerCommand: "gitlab-runner-helper",
+				Build:         build,
+			}
 
-	err := shell.writeScript(mockWriter, common.BuildStageArchiveOnSuccessCache, info)
-	require.NoError(t, err)
+			mockWriter := new(MockShellWriter)
+			defer mockWriter.AssertExpectations(t)
+			mockWriter.On("Cd", mock.Anything)
+			mockWriter.On("IfCmd", "gitlab-runner-helper", "--version")
+			mockWriter.On("Noticef", "Creating cache %s...", mock.Anything).Times(3)
+
+			if tt.cacheType == "test" {
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "vendor/",
+					"--untracked",
+					"--url", mock.Anything,
+					"--header", "Header-1: a value",
+				).Once()
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "some/path1",
+					"--path", "other/path2",
+					"--url", mock.Anything,
+					"--header", "Header-1: a value",
+				).Once()
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "when-always",
+					"--url", mock.Anything,
+					"--header", "Header-1: a value",
+				).Once()
+			} else {
+				mockWriter.On("Variable", mock.MatchedBy(func(v common.JobVariable) bool {
+					return v.Key == "FIRST_VAR" && v.Value == "123"
+				})).Once()
+				mockWriter.On("Variable", mock.MatchedBy(func(v common.JobVariable) bool {
+					return v.Key == "SECOND_VAR" && v.Value == "456"
+				})).Once()
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "vendor/",
+					"--untracked",
+					"--gocloud-url", mock.Anything,
+				).Once()
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "some/path1",
+					"--path", "other/path2",
+					"--gocloud-url", mock.Anything,
+				).Once()
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "when-always",
+					"--gocloud-url", mock.Anything,
+				).Once()
+			}
+			mockWriter.On("Noticef", "Created cache").Times(3)
+			mockWriter.On("Else").Times(3)
+			mockWriter.On("Warningf", "Failed to create cache").Times(3)
+			mockWriter.On("EndIf").Times(3)
+			mockWriter.On("Else").Times(3)
+			mockWriter.On("Warningf", mock.Anything, mock.Anything, mock.Anything).Times(3)
+			mockWriter.On("EndIf").Times(3)
+			mockWriter.On("Variable", mock.Anything)
+
+			err := shell.writeScript(mockWriter, common.BuildStageArchiveOnSuccessCache, info)
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestWriteWritingArchiveCacheOnFailure(t *testing.T) {
 	gitlabURL := "https://example.com:3443"
 
 	shell := AbstractShell{}
-	runnerConfig := &common.RunnerConfig{
-		RunnerSettings: common.RunnerSettings{
-			Cache: &common.CacheConfig{
-				Type:   "test",
-				Shared: true,
-			},
+
+	tests := map[string]struct {
+		cacheType string
+	}{
+		"pre-signed URL cache": {
+			cacheType: "test",
 		},
-		RunnerCredentials: common.RunnerCredentials{
-			URL: gitlabURL,
+
+		"GoCloud cache": {
+			cacheType: "goCloudTest",
 		},
 	}
 
-	build := &common.Build{
-		CacheDir:    "cache_dir",
-		JobResponse: getJobResponseWithCachePaths(),
-		Runner:      runnerConfig,
-	}
-	info := common.ShellScriptInfo{
-		RunnerCommand: "gitlab-runner-helper",
-		Build:         build,
-	}
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			runnerConfig := &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Cache: &common.CacheConfig{
+						Type:   tt.cacheType,
+						Shared: true,
+					},
+				},
+				RunnerCredentials: common.RunnerCredentials{
+					URL: gitlabURL,
+				},
+			}
 
-	mockWriter := new(MockShellWriter)
-	defer mockWriter.AssertExpectations(t)
-	mockWriter.On("Variable", mock.Anything)
-	mockWriter.On("Cd", mock.Anything)
-	mockWriter.On("IfCmd", "gitlab-runner-helper", "--version")
-	mockWriter.On("Noticef", "Creating cache %s...", mock.Anything).Times(2)
-	mockWriter.On(
-		"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
-		"--file", mock.Anything,
-		"--timeout", mock.Anything,
-		"--path", "when-on-failure",
-		"--untracked",
-		"--url", mock.Anything,
-		"--header", "Header-1: a value",
-	).Once()
-	mockWriter.On(
-		"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
-		"--file", mock.Anything,
-		"--timeout", mock.Anything,
-		"--path", "when-always",
-		"--url", mock.Anything,
-		"--header", "Header-1: a value",
-	).Once()
-	mockWriter.On("Noticef", "Created cache").Times(2)
-	mockWriter.On("Else").Times(2)
-	mockWriter.On("Warningf", "Failed to create cache").Times(2)
-	mockWriter.On("EndIf").Times(2)
-	mockWriter.On("Else").Times(2)
-	mockWriter.On("Warningf", mock.Anything, mock.Anything, mock.Anything).Times(2)
-	mockWriter.On("EndIf").Times(2)
+			build := &common.Build{
+				CacheDir:    "cache_dir",
+				JobResponse: getJobResponseWithCachePaths(),
+				Runner:      runnerConfig,
+			}
+			info := common.ShellScriptInfo{
+				RunnerCommand: "gitlab-runner-helper",
+				Build:         build,
+			}
 
-	err := shell.writeScript(mockWriter, common.BuildStageArchiveOnFailureCache, info)
-	require.NoError(t, err)
+			mockWriter := new(MockShellWriter)
+			defer mockWriter.AssertExpectations(t)
+			mockWriter.On("Cd", mock.Anything)
+			mockWriter.On("IfCmd", "gitlab-runner-helper", "--version")
+			mockWriter.On("Noticef", "Creating cache %s...", mock.Anything).Times(2)
+
+			if tt.cacheType == "test" {
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "when-on-failure",
+					"--untracked",
+					"--url", mock.Anything,
+					"--header", "Header-1: a value",
+				).Once()
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "when-always",
+					"--url", mock.Anything,
+					"--header", "Header-1: a value",
+				).Once()
+			} else {
+				mockWriter.On("Variable", mock.MatchedBy(func(v common.JobVariable) bool {
+					return v.Key == "FIRST_VAR" && v.Value == "123"
+				})).Once()
+				mockWriter.On("Variable", mock.MatchedBy(func(v common.JobVariable) bool {
+					return v.Key == "SECOND_VAR" && v.Value == "456"
+				})).Once()
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "when-on-failure",
+					"--untracked",
+					"--gocloud-url", mock.Anything,
+				).Once()
+				mockWriter.On(
+					"IfCmdWithOutput", "gitlab-runner-helper", "cache-archiver",
+					"--file", mock.Anything,
+					"--timeout", mock.Anything,
+					"--path", "when-always",
+					"--gocloud-url", mock.Anything,
+				).Once()
+			}
+			mockWriter.On("Noticef", "Created cache").Times(2)
+			mockWriter.On("Else").Times(2)
+			mockWriter.On("Warningf", "Failed to create cache").Times(2)
+			mockWriter.On("EndIf").Times(2)
+			mockWriter.On("Else").Times(2)
+			mockWriter.On("Warningf", mock.Anything, mock.Anything, mock.Anything).Times(2)
+			mockWriter.On("EndIf").Times(2)
+			mockWriter.On("Variable", mock.Anything)
+
+			err := shell.writeScript(mockWriter, common.BuildStageArchiveOnFailureCache, info)
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestGitCleanFlags(t *testing.T) {
@@ -566,7 +657,10 @@ func TestGitFetchFlags(t *testing.T) {
 			mockWriter.On("Command", "git", "remote", "set-url", "origin", mock.Anything)
 			mockWriter.On("EndIf")
 
-			command := []interface{}{"git", "fetch", "origin"}
+			v := common.AppVersion
+			userAgent := fmt.Sprintf("http.userAgent=%s %s %s/%s", v.Name, v.Version, v.OS, v.Architecture)
+			command := []interface{}{"git", "-c", userAgent, "fetch", "origin"}
+
 			command = append(command, test.expectedGitFetchFlags...)
 			mockWriter.On("Command", command...)
 
@@ -575,38 +669,86 @@ func TestGitFetchFlags(t *testing.T) {
 	}
 }
 
-func TestAbstractShell_writeSubmoduleUpdateCmdRecursive(t *testing.T) {
-	shell := AbstractShell{}
-	mockWriter := new(MockShellWriter)
-	defer mockWriter.AssertExpectations(t)
-
-	mockWriter.On("Noticef", "Updating/initializing submodules recursively...").Once()
-	mockWriter.On("Command", "git", "submodule", "sync", "--recursive").Once()
-	mockWriter.On("Command", "git", "submodule", "update", "--init", "--recursive").Once()
-	mockWriter.On("Command", "git", "submodule", "foreach", "--recursive", "git clean -ffxd").Once()
-	mockWriter.On("Command", "git", "submodule", "foreach", "--recursive", "git reset --hard").Once()
-	mockWriter.On("IfCmd", "git", "lfs", "version").Once()
-	mockWriter.On("Command", "git", "submodule", "foreach", "--recursive", "git lfs pull").Once()
-	mockWriter.On("EndIf").Once()
-
-	shell.writeSubmoduleUpdateCmd(mockWriter, &common.Build{}, true)
-}
-
 func TestAbstractShell_writeSubmoduleUpdateCmd(t *testing.T) {
-	shell := AbstractShell{}
-	mockWriter := new(MockShellWriter)
-	defer mockWriter.AssertExpectations(t)
+	tests := map[string]struct {
+		Recursive               bool
+		Depth                   int
+		ExpectedNoticeArgs      []interface{}
+		ExpectedGitUpdateFlags  []interface{}
+		ExpectedGitForEachFlags []interface{}
+	}{
+		"no recursion, no depth limit": {
+			Recursive:          false,
+			Depth:              0,
+			ExpectedNoticeArgs: []interface{}{"Updating/initializing submodules..."},
+		},
+		"no recursion, depth limit 10": {
+			Recursive:               false,
+			Depth:                   10,
+			ExpectedNoticeArgs:      []interface{}{"Updating/initializing submodules with git depth set to %d...", 10},
+			ExpectedGitUpdateFlags:  []interface{}{"--depth", "10"},
+			ExpectedGitForEachFlags: []interface{}{},
+		},
+		"with recursion, no depth limit": {
+			Recursive:               true,
+			Depth:                   0,
+			ExpectedNoticeArgs:      []interface{}{"Updating/initializing submodules recursively..."},
+			ExpectedGitUpdateFlags:  []interface{}{"--recursive"},
+			ExpectedGitForEachFlags: []interface{}{"--recursive"},
+		},
+		"with recursion, depth limit 1": {
+			Recursive: true,
+			Depth:     1,
+			ExpectedNoticeArgs: []interface{}{
+				"Updating/initializing submodules recursively with git depth set to %d...",
+				1,
+			},
+			ExpectedGitUpdateFlags:  []interface{}{"--recursive", "--depth", "1"},
+			ExpectedGitForEachFlags: []interface{}{"--recursive"},
+		},
+	}
 
-	mockWriter.On("Noticef", "Updating/initializing submodules...").Once()
-	mockWriter.On("Command", "git", "submodule", "sync").Once()
-	mockWriter.On("Command", "git", "submodule", "update", "--init").Once()
-	mockWriter.On("Command", "git", "submodule", "foreach", "git clean -ffxd").Once()
-	mockWriter.On("Command", "git", "submodule", "foreach", "git reset --hard").Once()
-	mockWriter.On("IfCmd", "git", "lfs", "version").Once()
-	mockWriter.On("Command", "git", "submodule", "foreach", "git lfs pull").Once()
-	mockWriter.On("EndIf").Once()
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			shell := AbstractShell{}
+			mockWriter := new(MockShellWriter)
+			defer mockWriter.AssertExpectations(t)
+			expectedGitForEachArgsFn := func() []interface{} {
+				return append(
+					[]interface{}{"git", "submodule", "foreach"},
+					tc.ExpectedGitForEachFlags...,
+				)
+			}
+			mockWriter.On("Noticef", tc.ExpectedNoticeArgs...).Once()
+			mockWriter.
+				On(
+					"Command",
+					append([]interface{}{"git", "submodule", "sync"}, tc.ExpectedGitForEachFlags...)...,
+				).Once()
+			mockWriter.
+				On(
+					"Command",
+					append([]interface{}{"git", "submodule", "update", "--init"}, tc.ExpectedGitUpdateFlags...)...,
+				).Once()
+			mockWriter.
+				On("Command", append(expectedGitForEachArgsFn(), "git clean -ffxd")...).
+				Once()
+			mockWriter.On("Command", append(expectedGitForEachArgsFn(), "git reset --hard")...).Once()
+			mockWriter.On("IfCmd", "git", "lfs", "version").Once()
+			mockWriter.On("Command", append(expectedGitForEachArgsFn(), "git lfs pull")...).Once()
+			mockWriter.On("EndIf").Once()
 
-	shell.writeSubmoduleUpdateCmd(mockWriter, &common.Build{}, false)
+			shell.writeSubmoduleUpdateCmd(
+				mockWriter,
+				&common.Build{
+					JobResponse: common.JobResponse{
+						GitInfo: common.GitInfo{Depth: tc.Depth},
+					},
+				},
+				tc.Recursive,
+			)
+		})
+	}
 }
 
 func TestAbstractShell_extractCacheWithFallbackKey(t *testing.T) {
@@ -782,7 +924,7 @@ func TestWriteUserScript(t *testing.T) {
 			shell := AbstractShell{}
 
 			err := shell.writeUserScript(mockShellWriter, info, tt.buildStage)
-			assert.True(t, errors.Is(err, tt.expectedErr), "expected: %v, got: %v", tt.expectedErr, err)
+			assert.ErrorIs(t, err, tt.expectedErr)
 		})
 	}
 }
@@ -970,6 +1112,26 @@ func TestSkipBuildStage(t *testing.T) {
 				},
 			},
 		},
+		common.BuildStageCleanupFileVariables: {
+			"don't skip if file artifact defined": {
+				common.JobResponse{
+					Variables: common.JobVariables{
+						{
+							Key:      "FILE_VARIABLE",
+							Value:    "CONTENTS",
+							Public:   true,
+							Internal: true,
+							File:     true,
+						},
+					},
+				},
+				common.RunnerConfig{
+					RunnerCredentials: common.RunnerCredentials{
+						URL: "https://example.com",
+					},
+				},
+			},
+		},
 	}
 
 	shell := AbstractShell{}
@@ -988,17 +1150,17 @@ func TestSkipBuildStage(t *testing.T) {
 
 					// empty stages should always be skipped
 					err := shell.writeScript(&BashWriter{}, stage, info)
-					assert.True(
-						t,
-						errors.Is(err, common.ErrSkipBuildStage),
-						"expected err %T, but got %T",
-						common.ErrSkipBuildStage,
-						err,
-					)
+					assert.ErrorIs(t, err, common.ErrSkipBuildStage)
 
-					// stages with bare minimum requirements should not be skipped
-					build.JobResponse = tc.JobResponse
-					build.Runner = &tc.Runner
+					// stages with bare minimum requirements should not be skipped.
+					build = &common.Build{
+						JobResponse: tc.JobResponse,
+						Runner:      &tc.Runner,
+					}
+					info = common.ShellScriptInfo{
+						RunnerCommand: "gitlab-runner-helper",
+						Build:         build,
+					}
 					err = shell.writeScript(&BashWriter{}, stage, info)
 					assert.NoError(t, err, "stage %v should not have been skipped", stage)
 				})

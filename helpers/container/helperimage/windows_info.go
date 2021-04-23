@@ -10,6 +10,7 @@ const (
 	baseImage1809 = "servercore1809"
 	baseImage1903 = "servercore1903"
 	baseImage1909 = "servercore1909"
+	baseImage2004 = "servercore2004"
 
 	windowsSupportedArchitecture = "x86_64"
 )
@@ -18,21 +19,7 @@ var helperImages = map[string]string{
 	windows.V1809: baseImage1809,
 	windows.V1903: baseImage1903,
 	windows.V1909: baseImage1909,
-}
-
-var powerShellCmd = []string{
-	"PowerShell",
-	"-NoProfile",
-	"-NoLogo",
-	"-InputFormat",
-	"text",
-	"-OutputFormat",
-	"text",
-	"-NonInteractive",
-	"-ExecutionPolicy",
-	"Bypass",
-	"-Command",
-	"-",
+	windows.V2004: baseImage2004,
 }
 
 type windowsInfo struct{}
@@ -45,10 +32,10 @@ func (w *windowsInfo) Create(revision string, cfg Config) (Info, error) {
 
 	return Info{
 		Architecture:            windowsSupportedArchitecture,
-		Name:                    name,
+		Name:                    imageName(cfg.GitLabRegistry),
 		Tag:                     fmt.Sprintf("%s-%s-%s", windowsSupportedArchitecture, revision, baseImage),
 		IsSupportingLocalImport: false,
-		Cmd:                     powerShellCmd,
+		Cmd:                     getPowerShellCmd(cfg.Shell),
 	}, nil
 }
 

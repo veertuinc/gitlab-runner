@@ -2,11 +2,16 @@ package helpers
 
 import (
 	"errors"
+	"io"
+	"io/ioutil"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
+	"gitlab.com/gitlab-org/gitlab-runner/commands/helpers/archive"
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 )
@@ -78,76 +83,82 @@ func TestArtifactsUploaderForbidden(t *testing.T) {
 }
 
 func TestArtifactsUploaderRetry(t *testing.T) {
-	network := &testNetwork{
-		uploadState: common.UploadFailed,
-	}
-	cmd := ArtifactsUploaderCommand{
-		JobCredentials: UploaderCredentials,
-		network:        network,
-		fileArchiver: fileArchiver{
-			Paths: []string{artifactsTestArchivedFile},
-		},
-	}
+	OnEachZipArchiver(t, func(t *testing.T) {
+		network := &testNetwork{
+			uploadState: common.UploadFailed,
+		}
+		cmd := ArtifactsUploaderCommand{
+			JobCredentials: UploaderCredentials,
+			network:        network,
+			fileArchiver: fileArchiver{
+				Paths: []string{artifactsTestArchivedFile},
+			},
+		}
 
-	writeTestFile(t, artifactsTestArchivedFile)
-	defer os.Remove(artifactsTestArchivedFile)
+		writeTestFile(t, artifactsTestArchivedFile)
+		defer os.Remove(artifactsTestArchivedFile)
 
-	removeHook := helpers.MakeFatalToPanic()
-	defer removeHook()
+		removeHook := helpers.MakeFatalToPanic()
+		defer removeHook()
 
-	assert.Panics(t, func() {
-		cmd.Execute(nil)
+		assert.Panics(t, func() {
+			cmd.Execute(nil)
+		})
+
+		assert.Equal(t, defaultTries, network.uploadCalled)
 	})
-
-	assert.Equal(t, defaultTries, network.uploadCalled)
 }
 
 func TestArtifactsUploaderDefaultSucceeded(t *testing.T) {
-	network := &testNetwork{
-		uploadState: common.UploadSucceeded,
-	}
-	cmd := ArtifactsUploaderCommand{
-		JobCredentials: UploaderCredentials,
-		network:        network,
-		fileArchiver: fileArchiver{
-			Paths: []string{artifactsTestArchivedFile},
-		},
-	}
+	OnEachZipArchiver(t, func(t *testing.T) {
+		network := &testNetwork{
+			uploadState: common.UploadSucceeded,
+		}
+		cmd := ArtifactsUploaderCommand{
+			JobCredentials: UploaderCredentials,
+			network:        network,
+			fileArchiver: fileArchiver{
+				Paths: []string{artifactsTestArchivedFile},
+			},
+		}
 
-	writeTestFile(t, artifactsTestArchivedFile)
-	defer os.Remove(artifactsTestArchivedFile)
+		writeTestFile(t, artifactsTestArchivedFile)
+		defer os.Remove(artifactsTestArchivedFile)
 
-	cmd.Execute(nil)
-	assert.Equal(t, 1, network.uploadCalled)
-	assert.Equal(t, common.ArtifactFormatZip, network.uploadFormat)
-	assert.Equal(t, DefaultUploadName+".zip", network.uploadName)
-	assert.Empty(t, network.uploadType)
+		cmd.Execute(nil)
+		assert.Equal(t, 1, network.uploadCalled)
+		assert.Equal(t, common.ArtifactFormatZip, network.uploadFormat)
+		assert.Equal(t, DefaultUploadName+".zip", network.uploadName)
+		assert.Empty(t, network.uploadType)
+	})
 }
 
 func TestArtifactsUploaderZipSucceeded(t *testing.T) {
-	network := &testNetwork{
-		uploadState: common.UploadSucceeded,
-	}
-	cmd := ArtifactsUploaderCommand{
-		JobCredentials: UploaderCredentials,
-		Format:         common.ArtifactFormatZip,
-		Name:           "my-release",
-		Type:           "my-type",
-		network:        network,
-		fileArchiver: fileArchiver{
-			Paths: []string{artifactsTestArchivedFile},
-		},
-	}
+	OnEachZipArchiver(t, func(t *testing.T) {
+		network := &testNetwork{
+			uploadState: common.UploadSucceeded,
+		}
+		cmd := ArtifactsUploaderCommand{
+			JobCredentials: UploaderCredentials,
+			Format:         common.ArtifactFormatZip,
+			Name:           "my-release",
+			Type:           "my-type",
+			network:        network,
+			fileArchiver: fileArchiver{
+				Paths: []string{artifactsTestArchivedFile},
+			},
+		}
 
-	writeTestFile(t, artifactsTestArchivedFile)
-	defer os.Remove(artifactsTestArchivedFile)
+		writeTestFile(t, artifactsTestArchivedFile)
+		defer os.Remove(artifactsTestArchivedFile)
 
-	cmd.Execute(nil)
-	assert.Equal(t, 1, network.uploadCalled)
-	assert.Equal(t, common.ArtifactFormatZip, network.uploadFormat)
-	assert.Equal(t, "my-release.zip", network.uploadName)
-	assert.Equal(t, "my-type", network.uploadType)
-	assert.Contains(t, network.uploadedFiles, artifactsTestArchivedFile)
+		cmd.Execute(nil)
+		assert.Equal(t, 1, network.uploadCalled)
+		assert.Equal(t, common.ArtifactFormatZip, network.uploadFormat)
+		assert.Equal(t, "my-release.zip", network.uploadName)
+		assert.Equal(t, "my-type", network.uploadType)
+		assert.Contains(t, network.uploadedFiles, artifactsTestArchivedFile)
+	})
 }
 
 func TestArtifactsUploaderGzipSendsMultipleFiles(t *testing.T) {
@@ -299,6 +310,48 @@ func TestArtifactsExcludedPaths(t *testing.T) {
 	cmd.Execute(nil)
 
 	assert.Equal(t, 1, network.uploadCalled)
+}
+
+func TestFileArchiverCompressionLevel(t *testing.T) {
+	writeTestFile(t, artifactsTestArchivedFile)
+	defer os.Remove(artifactsTestArchivedFile)
+
+	network := &testNetwork{
+		uploadState: common.UploadSucceeded,
+	}
+
+	for _, expectedLevel := range []string{"fastest", "fast", "default", "slow", "slowest"} {
+		t.Run(expectedLevel, func(t *testing.T) {
+			mockArchiver := new(archive.MockArchiver)
+			defer mockArchiver.AssertExpectations(t)
+
+			archive.Register(
+				"zip",
+				func(w io.Writer, dir string, level archive.CompressionLevel) (archive.Archiver, error) {
+					assert.Equal(t, getCompressionLevel(expectedLevel), level)
+					return mockArchiver, nil
+				},
+				nil,
+			)
+
+			mockArchiver.On("Archive", mock.Anything, mock.Anything).Return(nil)
+
+			cmd := ArtifactsUploaderCommand{
+				JobCredentials: UploaderCredentials,
+				network:        network,
+				Format:         common.ArtifactFormatZip,
+				fileArchiver: fileArchiver{
+					Paths: []string{artifactsTestArchivedFile},
+				},
+				CompressionLevel: expectedLevel,
+			}
+			assert.NoError(t, cmd.enumerate())
+			_, r, err := cmd.createReadStream()
+			require.NoError(t, err)
+			defer r.Close()
+			_, _ = io.Copy(ioutil.Discard, r)
+		})
+	}
 }
 
 func TestArtifactUploaderCommandShouldRetry(t *testing.T) {
