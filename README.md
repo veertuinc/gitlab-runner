@@ -4,7 +4,7 @@
 
 For a list of compatible versions between GitLab and GitLab Runner, see the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
 
-> This is a stripped down and modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner/tree/13-2-stable) (version 13.5-stable).
+> This is a stripped down and modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner/tree/13-11-stable) (version 13.11-stable).
 
 ## Anka GitLab Runner Registration Example
 
