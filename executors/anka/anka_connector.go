@@ -17,14 +17,16 @@ type AnkaConnector struct {
 	sshPort          int
 }
 
-func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig, done *bool) (connectInfo *AnkaVmConnectInfo, funcErr error) {
+func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig, done *bool, options common.ExecutorPrepareOptions) (connectInfo *AnkaVmConnectInfo, funcErr error) {
 
 	startVmRequest := ankaCloudClient.StartVMRequest{
-		VmID:     ankaConfig.TemplateUUID,
-		Tag:      ankaConfig.Tag,
-		NodeID:   ankaConfig.NodeID,
-		Priority: ankaConfig.Priority,
-		GroupId:  ankaConfig.NodeGroup,
+		VmID:                   ankaConfig.TemplateUUID,
+		Tag:                    ankaConfig.Tag,
+		NodeID:                 ankaConfig.NodeID,
+		Priority:               ankaConfig.Priority,
+		GroupId:                ankaConfig.NodeGroup,
+		ControllerExternalID:   ankaConfig.ControllerExternalID,
+		ControllerInstanceName: ankaConfig.ControllerInstanceName,
 	}
 
 	defer func() {
@@ -50,6 +52,17 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig, don
 		if startVmRequest.GroupId == nil {
 			return nil, errors.New("The node group ID or name you provided cannot be found")
 		}
+	}
+
+	// Add name too
+
+	// options.Build.JobInfo.Stage
+	if ankaConfig.ControllerInstanceName == "" {
+		startVmRequest.ControllerInstanceName = "Anka Gitlab Runner Name: " + fmt.Sprint(options.Build.Runner.Name)
+	}
+
+	if ankaConfig.ControllerExternalID == "" {
+		startVmRequest.ControllerExternalID = options.Build.JobURL()
 	}
 
 	err, createResponse := connector.client.StartVm(&startVmRequest)

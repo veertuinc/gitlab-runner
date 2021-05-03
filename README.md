@@ -20,8 +20,10 @@ For a list of compatible versions between GitLab and GitLab Runner, see the [com
 --name "localhost shared runner" \
 --anka-controller-address "https://anka.controller:8090/" \
 --anka-template-uuid d09f2a1a-e621-463d-8dfd-8ce9ba9f4160 \
---anka-tag base:port-forward-22:brew-git:gitlab \
+--anka-tag v1 \
 --executor anka \
+--anka-controller-instance-name "triggered by shared runner" \ # Defaults to "Anka Gitlab Runner Name: localhost shared runner" in Controller Instances Name column
+--anka-controller-external-id "http://test123.com" \           # Defaults to full job URL. Example: http://anka.gitlab:8093/root/gitlab-examples/-/jobs/28
 --anka-root-ca-path /Users/hostUser/anka-ca-crt.pem \
 --anka-cert-path /Users/hostUser/anka-gitlab-crt.pem \
 --anka-key-path /Users/hostUser/anka-gitlab-key.pem \
@@ -41,6 +43,8 @@ test:
     ANKA_TEMPLATE_UUID: "c0847bc9-5d2d-4dbc-ba6a-240f7ff08032"
     ANKA_TAG_NAME: "base"
     ANKA_NODE_GROUP: "larger-vm-pool"
+    # ANKA_CONTROLLER_INSTANCE_NAME: "" # Defaults to "Anka Gitlab Runner Name: localhost shared runner" in Controller Instances Name column
+    # ANKA_CONTROLLER_EXTERNAL_ID: "" # Defaults to full job URL. Example: http://anka.gitlab:8093/root/gitlab-examples/-/jobs/28
   script:
     - hostname
     - echo "Echo from inside of the VM!"
@@ -66,47 +70,52 @@ Test your changes manually with `anka-gitlab-runner --debug --log-level debug ru
 > Try our https://github.com/veertuinc/getting-started scripts to run Gitlab locally inside of a docker container
 
 ```bash
-export GITLAB_DOCKER_CONTAINER_NAME="anka.gitlab"
-export GITLAB_PORT="8093"
-export GITLAB_ROOT_PASSWORD="rootpassword"
-export GITLAB_EXAMPLE_PROJECT_NAME="gitlab-examples"
-export GITLAB_ACCESS_TOKEN=$(curl -s --request POST --data "grant_type=password&username=root&password=$GITLAB_ROOT_PASSWORD" http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT/oauth/token | jq -r '.access_token')
-export GITLAB_EXAMPLE_PROJECT_ID=$(curl -s --request GET -H "Authorization: Bearer $GITLAB_ACCESS_TOKEN" "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT/api/v4/projects" | jq -r ".[] | select(.name==\"$GITLAB_EXAMPLE_PROJECT_NAME\") | .id")
-export SHARED_REGISTRATION_TOKEN="$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME bash -c "gitlab-rails runner -e production \"puts Gitlab::CurrentSettings.current_application_settings.runners_registration_token\"")"
-export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME bash -c "gitlab-rails runner -e production \"puts Project.find_by_id($GITLAB_EXAMPLE_PROJECT_ID).runners_token\"")
+export GITLAB_HOSTNAME="localhost";
+export GITLAB_DOCKER_CONTAINER_NAME="anka.gitlab";
+export GITLAB_PORT="8093";
+export GITLAB_ROOT_PASSWORD="rootpassword";
+export GITLAB_EXAMPLE_PROJECT_NAME="gitlab-examples";
+export GITLAB_ACCESS_TOKEN="token-string-here123";
+export GITLAB_EXAMPLE_PROJECT_ID=$(curl -s --request GET -H "PRIVATE-TOKEN: $GITLAB_ACCESS_TOKEN" "http://$GITLAB_HOSTNAME:$GITLAB_PORT/api/v4/projects" | jq -r ".[] | select(.name==\"$GITLAB_EXAMPLE_PROJECT_NAME\") | .id");
+export SHARED_REGISTRATION_TOKEN="$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME bash -c "gitlab-rails runner -e production \"puts Gitlab::CurrentSettings.current_application_settings.runners_registration_token\"")";
+export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME bash -c "gitlab-rails runner -e production \"puts Project.find_by_id($GITLAB_EXAMPLE_PROJECT_ID).runners_token\"");
 ```
 
 > The gitlab-rails will take a few minutes to do the query. Be patient.
 
 ```bash
-./out/binaries/anka-gitlab-runner stop; ./out/binaries/anka-gitlab-runner unregister -n "localhost shared runner"; ./out/binaries/anka-gitlab-runner unregister -n "localhost specific runner"; rm -f ./out/binaries/anka-gitlab-runner; make runner-bin-host && \
-./out/binaries/anka-gitlab-runner register --non-interactive \
---url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT/" \
+./out/binaries/anka-gitlab-runner-darwin-amd64 stop; ./out/binaries/anka-gitlab-runner-darwin-amd64 unregister -n "localhost shared runner"; ./out/binaries/anka-gitlab-runner-darwin-amd64 unregister -n "localhost specific runner"; rm -f ./out/binaries/anka-gitlab-runner-darwin-amd64; make runner-bin-host && \
+./out/binaries/anka-gitlab-runner-darwin-amd64 register --non-interactive \
+--url "http://$GITLAB_HOSTNAME:$GITLAB_PORT/" \
 --registration-token $SHARED_REGISTRATION_TOKEN \
 --ssh-user anka \
 --ssh-password admin \
 --name "localhost shared runner" \
 --anka-controller-address "http://anka.controller:8090/" \
---anka-template-uuid c0847bc9-5d2d-4dbc-ba6a-240f7ff08032 \
---anka-tag base:port-forward-22:brew-git:gitlab \
+--anka-template-uuid 5d1b40b9-7e68-4807-a290-c59c66e926b4	\
+--anka-tag v1 \
 --executor anka \
+--anka-controller-instance-name "triggered by shared runner" \
+--anka-controller-external-id "http://test123share.com" \
 --anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Typee\": \"test\" }" \
---clone-url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
+--clone-url "http://$GITLAB_HOSTNAME:$GITLAB_PORT" \
 --tag-list "localhost-shared,localhost,iOS" && \
-./out/binaries/anka-gitlab-runner register --non-interactive \
---url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
+./out/binaries/anka-gitlab-runner-darwin-amd64 register --non-interactive \
+--url "http://$GITLAB_HOSTNAME:$GITLAB_PORT" \
 --registration-token $PROJECT_REGISTRATION_TOKEN \
 --ssh-user anka \
 --ssh-password admin \
 --name "localhost specific runner" \
 --anka-controller-address "http://anka.controller:8090/" \
---anka-template-uuid c0847bc9-5d2d-4dbc-ba6a-240f7ff08032 \
---anka-tag base:port-forward-22:brew-git:gitlab \
+--anka-template-uuid 5d1b40b9-7e68-4807-a290-c59c66e926b4	 \
+--anka-tag v1 \
 --executor anka \
+--anka-controller-instance-name "triggered by project runner" \
+--anka-controller-external-id "http://test123proj.com" \
 --anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Typee\": \"test\" }" \
---clone-url "http://$GITLAB_DOCKER_CONTAINER_NAME:$GITLAB_PORT" \
+--clone-url "http://$GITLAB_HOSTNAME:$GITLAB_PORT" \
 --tag-list "localhost-specific,localhost,iOS" && \
-./out/binaries/anka-gitlab-runner stop && ./out/binaries/anka-gitlab-runner --debug --log-level debug run
+./out/binaries/anka-gitlab-runner-darwin-amd64 stop && ./out/binaries/anka-gitlab-runner-darwin-amd64 --debug --log-level debug run
 ```
 
 > When adding new options/flags, add them to `testRegisterCommandRun`

@@ -566,6 +566,20 @@ func (s *RegisterCommand) askAnka() {
 		}
 	}
 
+	controllerExternalId := s.ask("anka-controller-external-id", "Specify what to populate the Instance External ID with (optional) (defaults to the full gitlab job URL)", true)
+	if controllerExternalId == "" {
+		s.Anka.ControllerExternalID = ""
+	} else {
+		s.Anka.ControllerExternalID = controllerExternalId
+	}
+
+	controllerInstanceName := s.ask("anka-controller-instance-name", "Specify what to populate the Instance Name with (optional) (defaults to a string with the Runner name)", true)
+	if controllerInstanceName == "" {
+		s.Anka.ControllerInstanceName = ""
+	} else {
+		s.Anka.ControllerInstanceName = controllerInstanceName
+	}
+
 }
 
 func (s *RegisterCommand) askAnkaSSHLogin() {

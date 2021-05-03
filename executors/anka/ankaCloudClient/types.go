@@ -79,16 +79,18 @@ type GetVmResponse struct {
 }
 
 type StartVMRequest struct {
-	VmID               string  `json:"vmid"`
-	Count              *uint   `json:"count,omitempty"`
-	Tag                *string `json:"tag,omitempty"`
-	Version            *uint   `json:"version,omitempty"`
-	NodeID             *string `json:"node_id,omitempty"`
-	Name               *string `json:"name_template,omitempty"`
-	Script             *string `json:"startup_script,omitempty"`
-	ScriptRunCondition *int    `json:"startup_script_condition,omitempty"`
-	Priority           *int    `json:"priority,omitempty"`
-	GroupId            *string `json:"group_id,omitempty"`
+	VmID                   string  `json:"vmid"`
+	Count                  *uint   `json:"count,omitempty"`
+	Tag                    *string `json:"tag,omitempty"`
+	Version                *uint   `json:"version,omitempty"`
+	NodeID                 *string `json:"node_id,omitempty"`
+	Name                   *string `json:"name_template,omitempty"`
+	ControllerInstanceName string  `json:"name,omitempty"`
+	Script                 *string `json:"startup_script,omitempty"`
+	ScriptRunCondition     *int    `json:"startup_script_condition,omitempty"`
+	Priority               *int    `json:"priority,omitempty"`
+	GroupId                *string `json:"group_id,omitempty"`
+	ControllerExternalID   string  `json:"external_id,omitempty"`
 }
 
 type TerminateVMRequest struct {
