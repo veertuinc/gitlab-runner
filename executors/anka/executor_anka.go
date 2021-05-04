@@ -73,6 +73,16 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		s.Config.Anka.NodeGroup = &ankaGroupENV
 	}
 
+	ankaControllerInstanceName := s.Build.Variables.Get("ANKA_CONTROLLER_INSTANCE_NAME")
+	if ankaControllerInstanceName != "" {
+		s.Config.Anka.ControllerInstanceName = ankaControllerInstanceName
+	}
+
+	ankaControllerExternalId := s.Build.Variables.Get("ANKA_CONTROLLER_EXTERNAL_ID")
+	if ankaControllerExternalId != "" {
+		s.Config.Anka.ControllerExternalID = ankaControllerExternalId
+	}
+
 	s.Println("Opening a connection to the Anka Cloud Controller:", s.Config.Anka.ControllerAddress)
 	s.connector = MakeNewAnkaCloudConnector(s.Config.Anka)
 
@@ -83,6 +93,12 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	}
 	if s.Config.Anka.NodeGroup != nil {
 		s.Println("  - Node Group:", *s.Config.Anka.NodeGroup)
+	}
+	if s.Config.Anka.ControllerExternalID != "" {
+		s.Println("  - Controller External ID:", s.Config.Anka.ControllerExternalID)
+	}
+	if s.Config.Anka.ControllerInstanceName != "" {
+		s.Println("  - Controller Instance Name:", s.Config.Anka.ControllerInstanceName)
 	}
 
 	s.Println("Please be patient...")
@@ -97,7 +113,7 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 
 	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
 
-	connectInfo, err := s.connector.StartInstance(s.Config.Anka, &done)
+	connectInfo, err := s.connector.StartInstance(s.Config.Anka, &done, options)
 	if err != nil {
 		return err
 	}
