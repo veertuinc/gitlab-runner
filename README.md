@@ -115,7 +115,7 @@ export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME
 --anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Typee\": \"test\" }" \
 --clone-url "http://$GITLAB_HOSTNAME:$GITLAB_PORT" \
 --tag-list "localhost-specific,localhost,iOS" && \
-./out/binaries/anka-gitlab-runner-darwin-amd64 stop && ./out/binaries/anka-gitlab-runner-darwin-amd64 --debug --log-level debug run
+./out/binaries/anka-gitlab-runner-darwin-amd64 stop && ./out/binaries/anka-gitlab-runner-darwin-amd64 --debug --log-level debug run -c $HOME/.gitlab-runner/anka-config.toml
 ```
 
 > When adding new options/flags, add them to `testRegisterCommandRun`
