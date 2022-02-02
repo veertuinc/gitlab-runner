@@ -10,11 +10,13 @@ make runner-bin
 for arch in amd64 386; do
   cd $ROOT_DIR
   echo "Building $arch docker tags..."
-  FROM="$arch/ubuntu:18.04"
-  [[ $arch == 386 ]] && FROM="i$arch/ubuntu:18.04"
+  FROM="$arch/ubuntu:20.04"
+  [[ $arch == 386 ]] && FROM="i$arch/ubuntu:20.04"
 cat > out/binaries/register_and_run.sh <<BLOCK
 #!/bin/bash
-set -eo pipefail
+set -exo pipefail
+export RUNNER_OPTIONS="\${RUNNER_OPTIONS:-}"
+export RUN_OPTIONS="\${RUN_OPTIONS:-}"
 export ARR=("\$@")
 unregister() {
   for i in "\${!ARR[@]}"; do
@@ -22,12 +24,12 @@ unregister() {
   done
   RUNNER_NAME="\${ARR[\${NAME_INDEX}+1]}"
   echo "UNREGISTERING \$RUNNER_NAME"
-  anka-gitlab-runner unregister -n "\$RUNNER_NAME"
+  /usr/local/bin/anka-gitlab-runner unregister -n "\$RUNNER_NAME"
 }
 trap unregister EXIT
 update-ca-certificates
-anka-gitlab-runner register --non-interactive "\$@"
-/usr/local/bin/anka-gitlab-runner run
+/usr/local/bin/anka-gitlab-runner \${RUNNER_OPTIONS} register --non-interactive "\$@"
+/usr/local/bin/anka-gitlab-runner \${RUNNER_OPTIONS} run \${RUN_OPTIONS}
 BLOCK
 cat > out/binaries/Dockerfile <<BLOCK
   FROM $FROM
@@ -40,7 +42,6 @@ cat > out/binaries/Dockerfile <<BLOCK
   RUN apt-get update
   RUN apt-get install -y ca-certificates
   ENTRYPOINT ["/bin/bash", "/tmp/register_and_run.sh"]
-  CMD ['/usr/local/bin/anka-gitlab-runner', 'run']
 BLOCK
   # Build dockerfile
   cd out/binaries/
