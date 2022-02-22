@@ -4,7 +4,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#designated-technical-writers
 ---
 
-# Advanced configuration
+# Advanced configuration **(FREE)**
 
 You can change the behavior of GitLab Runner and of individual registered runners.
 
@@ -31,7 +31,7 @@ These settings are global. They apply to all runners.
 
 | Setting | Description |
 | ------- | ----------- |
-| `concurrent`     | Limits how many jobs can run concurrently. The maximum number is all defined runners. `0` **does not** mean unlimited. |
+| `concurrent`     | Limits how many jobs can run concurrently, across all registered runners. Each `[[runners]]` section can define its own limit, but this value sets a maximum for all of those values combined. For example, a value of `10` means no more than 10 jobs can run concurrently. `0` is forbidden. If you use this value, the runner process exits with a critical error. [View how this setting works with the Docker Machine executor (for autoscaling)](autoscale.md#limit-the-number-of-vms-created-by-the-docker-machine-executor). |
 | `log_level`      | Defines the log level. Options are `debug`, `info`, `warn`, `error`, `fatal`, and `panic`. This setting has lower priority than the level set by the command-line arguments `--debug`, `-l`, or `--log-level`. |
 | `log_format`     | Specifies the log format. Options are `runner`, `text`, and `json`. This setting has lower priority than the format set by command-line argument `--log-format`. The default value is `runner`. |
 | `check_interval` | Defines the interval length, in seconds, between new jobs check. The default value is `3`. If set to `0` or lower, the default value is used. |
@@ -128,11 +128,6 @@ repeated after all requests for the other runners and their sleep periods are ca
 
 ## The `[session_server]` section
 
-NOTE:
-The `session_server` section is not supported by the
-[`gitlab-runner` Helm chart](https://docs.gitlab.com/charts/charts/gitlab/gitlab-runner/index.html),
-but [an issue exists to track this work](https://gitlab.com/gitlab-org/charts/gitlab-runner/-/issues/79).
-
 The `[session_server]` section lets users interact with jobs, for example, in the
 [interactive web terminal](https://docs.gitlab.com/ee/ci/interactive_web_terminal/index.html).
 
@@ -151,6 +146,9 @@ of `host:port`, where `host` may be an IP address (`127.0.0.1:8093`)
 or a domain (`my-runner.example.com:8093`). The runner uses this information to create
 a TLS certificate, for a secure connection.
 
+NOTE:
+Live sessions are initiated by the web browser. Make sure your web browser can connect to the `advertise_address`.
+
 | Setting | Description |
 | ------- | ----------- |
 | `listen_address` | An internal URL for the session server. |
@@ -158,6 +156,9 @@ a TLS certificate, for a secure connection.
 | `session_timeout` | Number of seconds the session can stay active after the job completes. The timeout blocks the job from finishing. Default is `1800` (30 minutes). |
 
 To disable the session server and terminal support, delete the `[session_server]` section.
+
+NOTE:
+When your runner instance is already running, you might need to execute `gitlab-runner restart` for the changes in the `[session_server]` section to be take effect.
 
 If you are using the GitLab Runner Docker image, you must expose port `8093` by
 adding `-p 8093:8093` to your [`docker run` command](../install/docker.md).
@@ -170,11 +171,11 @@ Each `[[runners]]` section defines one runner.
 | ------- | ----------- |
 | `name`               | The runner's description. Informational only. |
 | `url`                | GitLab instance URL. |
-| `token`              | The runner's special token (not to be confused with the registration token). |
+| `token`              | The runner's authentication token, which is obtained during runner registration. [Not the same as the registration token](https://docs.gitlab.com/ee/api/runners.html#registration-and-authentication-tokens). |
 | `tls-ca-file`        | When using HTTPS, file that contains the certificates to verify the peer. See [Self-signed certificates or custom Certification Authorities documentation](tls-self-signed.md). |
 | `tls-cert-file`      | When using HTTPS, file that contains the certificate to authenticate with the peer. |
 | `tls-key-file`       | When using HTTPS, file that contains the private key to authenticate with the peer. |
-| `limit`              | Limit how many jobs can be handled concurrently by this token. `0` (default) means do not limit. |
+| `limit`              | Limit how many jobs can be handled concurrently by this registered runner. `0` (default) means do not limit. [View how this setting works with the Docker Machine executor (for autoscaling)](autoscale.md#limit-the-number-of-vms-created-by-the-docker-machine-executor). |
 | `executor`           | Select how a project should be built. |
 | `shell`              | Name of shell to generate the script. Default value is [platform dependent](../shells/index.md#overview). |
 | `builds_dir`         | Absolute path to a directory where builds are stored in the context of the selected executor. For example, locally, Docker, or SSH. |
@@ -193,7 +194,7 @@ Example:
 
 ```toml
 [[runners]]
-  name = "ruby-2.6-docker"
+  name = "ruby-2.7-docker"
   url = "https://CI/"
   token = "TOKEN"
   limit = 0
@@ -240,8 +241,8 @@ The available shells can run on different platforms.
 | ----- | ----------- |
 | `bash`        | Generate Bash (Bourne-shell) script. All commands executed in Bash context. Default for all Unix systems. |
 | `sh`          | Generate Sh (Bourne-shell) script. All commands executed in Sh context. The fallback for `bash` for all Unix systems. |
-| `powershell`  | Generate PowerShell script. All commands are executed in Windows PowerShell Desktop context. Default for Windows. |
-| `pwsh`        | Generate PowerShell script. All commands are executed in PowerShell Core context. |
+| `powershell`  | Generate PowerShell script. All commands are executed in PowerShell Desktop context. In GitLab Runner 12.0-13.12, this is the default for Windows. |
+| `pwsh`        | Generate PowerShell script. All commands are executed in PowerShell Core context. In GitLab Runner 14.0 and later, this is the default for Windows. |
 
 ## The `[runners.docker]` section
 
@@ -249,8 +250,8 @@ This defines the Docker Container parameters.
 
 | Parameter | Description |
 | --------- | ----------- |
-| `allowed_images`               | Wildcard list of images that can be specified in the `.gitlab-ci.yml` file. If not present, all images are allowed (equivalent to `["*/*:*"]`). |
-| `allowed_services`             | Wildcard list of services that can be specified in the `.gitlab-ci.yml` file. If not present, all images are allowed (equivalent to `["*/*:*"]`). |
+| `allowed_images`               | Wildcard list of images that can be specified in the `.gitlab-ci.yml` file. If not present, all images are allowed (equivalent to `["*/*:*"]`). See [Restrict Docker images and services](#restricting-docker-images-and-services). |
+| `allowed_services`             | Wildcard list of services that can be specified in the `.gitlab-ci.yml` file. If not present, all images are allowed (equivalent to `["*/*:*"]`). See [Restrict Docker images and services](#restricting-docker-images-and-services). |
 | `cache_dir`                    | Directory where Docker caches should be stored. This path can be absolute or relative to current working directory. See `disable_cache` for more information. |
 | `cap_add`                      | Add additional Linux capabilities to the container. |
 | `cap_drop`                     | Drop additional Linux capabilities from the container. |
@@ -265,6 +266,7 @@ This defines the Docker Container parameters.
 | `extra_hosts`                  | Hosts that should be defined in container environment. |
 | `gpus`                         | GPU devices for Docker container. Uses the same format as the `docker` cli. View details in the [Docker documentation](https://docs.docker.com/config/containers/resource_constraints/#gpu). |
 | `helper_image`                 | (Advanced) [The default helper image](#helper-image) used to clone repositories and upload artifacts. |
+| `helper_image_flavor`          | Sets the helper image flavor (`alpine`, `alpine3.12`, `alpine3.13`, `alpine3.14`, `alpine3.15`, `ubi-fips` or `ubuntu`). Defaults to `alpine`. The `alpine` flavor uses the same version as `alpine3.12`. |
 | `host`                         | Custom Docker endpoint. Default is `DOCKER_HOST` environment or `unix:///var/run/docker.sock`. |
 | `hostname`                     | Custom hostname for the Docker container. |
 | `image`                        | The image to run jobs with. |
@@ -287,12 +289,12 @@ This defines the Docker Container parameters.
 | `volumes`                      | Additional volumes that should be mounted. Same syntax as the Docker `-v` flag. |
 | `volumes_from`                 | A list of volumes to inherit from another container in the form `<container name>[:<ro|rw>]`. Access level defaults to read-write, but can be manually set to `ro` (read-only) or `rw` (read-write). |
 | `volume_driver`                | The volume driver to use for the container. |
-| `wait_for_services_timeout`    | How long to wait for Docker services. Set to `0` to disable. Default is `30`. |
+| `wait_for_services_timeout`    | How long to wait for Docker services. Set to `-1` to disable. Default is `30`. |
 
 ### The `[[runners.docker.services]]` section
 
 Specify additional services that should be run with the job. Visit the
-[Docker Registry](https://hub.docker.com) for the list of available applications.
+[Docker Registry](https://hub.docker.com) for the list of available images.
 Each service runs in a separate container and is linked to the job.
 
 | Parameter | Description |
@@ -309,7 +311,7 @@ Example:
   host = ""
   hostname = ""
   tls_cert_path = "/Users/ayufan/.boot2docker/certs"
-  image = "ruby:2.6"
+  image = "ruby:2.7"
   memory = "128m"
   memory_swap = "256m"
   memory_reservation = "64m"
@@ -365,7 +367,7 @@ independent of the container's life cycle.
   host = ""
   hostname = ""
   tls_cert_path = "/Users/ayufan/.boot2docker/certs"
-  image = "ruby:2.6"
+  image = "ruby:2.7"
   privileged = false
   disable_cache = true
   volumes = ["/path/to/volume/in/container"]
@@ -383,7 +385,7 @@ a directory from your Docker daemon's host into a container:
   host = ""
   hostname = ""
   tls_cert_path = "/Users/ayufan/.boot2docker/certs"
-  image = "ruby:2.6"
+  image = "ruby:2.7"
   privileged = false
   disable_cache = true
   volumes = ["/path/to/bind/from/host:/path/to/bind/in/container:rw"]
@@ -419,7 +421,7 @@ The steps performed by the runner can be summed up as:
    found, subsequent pulls makes use of it.
 
 Now that the runner is set up to authenticate against your private registry,
-learn [how to configure the `.gitlab-ci.yml` file](https://docs.gitlab.com/ee/ci/yaml/README.html#image) to use that
+learn [how to configure the `.gitlab-ci.yml` file](https://docs.gitlab.com/ee/ci/yaml/index.html#image) to use that
 registry.
 
 #### Support for GitLab integrated registry
@@ -433,7 +435,7 @@ configuration added with the `DOCKER_AUTH_CONFIG` variable.
 
 In your jobs, you can use any image from your GitLab integrated
 registry, even if the image is private or protected. For information on the images jobs have access to, read the
-[CI/CD job token documentation](https://docs.gitlab.com/ee/api/README.html#gitlab-cicd-job-token) documentation.
+[CI/CD job token documentation](https://docs.gitlab.com/ee/ci/jobs/ci_job_token.html) documentation.
 
 #### Precedence of Docker authorization resolving
 
@@ -451,17 +453,6 @@ The first credentials found for the registry are used. So for example,
 if you add credentials for the *integrated registry* with the
 `DOCKER_AUTH_CONFIG` variable, then the default credentials are overridden.
 
-#### Restrict `allowed_images` to private registry
-
-You can restrict access so that your jobs run on Docker images
-from your private Docker registry. For example:
-
-```toml
-[runners.docker]
-  ...
-  allowed_images = ["my.registry.tld:5000/*:*"]
-```
-
 ## The `[runners.parallels]` section
 
 The following parameters are for Parallels.
@@ -471,6 +462,7 @@ The following parameters are for Parallels.
 | `base_name`         | Name of Parallels VM that is cloned. |
 | `template_name`     | Custom name of Parallels VM linked template. Optional. |
 | `disable_snapshots` | If disabled, the VMs are destroyed when the jobs are done. |
+| `allowed_images`    | List of allowed `image`/`base_name` values, represented as regular expressions. See the [Overriding the base VM image](#overriding-the-base-vm-image) section for more details. |
 
 Example:
 
@@ -494,6 +486,7 @@ your `PATH` environment variable on Windows hosts:
 | `base_snapshot`     | Name or UUID of a specific snapshot of the VM to create a linked clone from. If this value is empty or omitted, the current snapshot is used. If no current snapshot exists, one is created. Unless `disable_snapshots` is true, in which case a full clone of the base VM is made. |
 | `base_folder`       | Folder to save the new VM in. If this value is empty or omitted, the default VM folder is used. |
 | `disable_snapshots` | If disabled, the VMs are destroyed when the jobs are done. |
+| `allowed_images`    | List of allowed `image`/`base_name` values, represented as regular expressions. See the [Overriding the base VM image](#overriding-the-base-vm-image) section for more details. |
 
 Example:
 
@@ -503,6 +496,36 @@ Example:
   base_snapshot = "my-image-snapshot"
   disable_snapshots = false
 ```
+
+## Overriding the base VM image
+
+> Introduced in GitLab Runner 14.2.
+
+For both the Parallels and VirtualBox executors, you can override the base VM name specified by `base_name`.
+To do this, use the [image](https://docs.gitlab.com/ee/ci/yaml/#image) parameter in the `.gitlab-ci.yml` file.
+
+For backward compatibility, you cannot override this value by default. Only the image specified by `base_name` is allowed.
+
+To allow users to select a VM image by using the `.gitlab-ci.yml` [image](https://docs.gitlab.com/ee/ci/yaml/#image) parameter:
+
+```toml
+[runners.virtualbox]
+  ...
+  allowed_images = [".*"]
+```
+
+In the example, any existing VM image can be used.
+
+The `allowed_images` parameter is a list of regular expressions. Configuration can be as precise as required.
+For instance, if you want to allow only certain VM images, you can use regex like:
+
+```toml
+[runners.virtualbox]
+  ...
+  allowed_images = ["^allowed_vm[1-2]$"]
+```
+
+In this example, only `allowed_vm1` and `allowed_vm2` are allowed. Any other attempts will result in an error.
 
 ## The `[runners.ssh]` section
 
@@ -515,6 +538,7 @@ The following parameters define the SSH connection.
 | `user`     | Username. |
 | `password` | Password. |
 | `identity_file` | File path to SSH private key (`id_rsa`, `id_dsa`, or `id_edcsa`). The file must be stored unencrypted. |
+| `disable_strict_host_key_checking` | In GitLab 14.3 and later, this value determines if the runner should use strict host key checking. Default is `true`. In GitLab 15.0, the default value, or the value if it's not specified, will be `false`. |
 
 Example:
 
@@ -538,6 +562,8 @@ found in the separate [runner autoscale documentation](autoscale.md).
 |---------------------|-------------|
 | `MaxGrowthRate`     | The maximum number of machines that can be added to the runner in parallel. Default is `0` (no limit). |
 | `IdleCount`         | Number of machines that need to be created and waiting in _Idle_ state. |
+| `IdleScaleFactor`   | (Experimental) The number of _Idle_ machines as a factor of the number of machines currently in use. Must be in float number format. See [the autoscale documentation](autoscale.md#the-idlescalefactor-strategy) for more details. Defaults to `0.0`. |
+| `IdleCountMin`      | Minimal number of machines that need to be created and waiting in _Idle_ state when the `IdleScaleFactor` is in use. Default is 1. |
 | `IdleTime`          | Time (in seconds) for machine to be in _Idle_ state before it is removed. |
 | `[[runners.machine.autoscaling]]` | Multiple sections, each containing overrides for autoscaling configuration. The last section with an expression that matches the current time is selected. |
 | `OffPeakPeriods`    | Deprecated: Time periods when the scheduler is in the OffPeak mode. An array of cron-style patterns (described [below](#periods-syntax)). |
@@ -555,6 +581,8 @@ found in the separate [runner autoscale documentation](autoscale.md).
 |---------------------|-------------|
 | `Periods`           | Time periods during which this schedule is active. An array of cron-style patterns (described [below](#periods-syntax)).
 | `IdleCount`         | Number of machines that need to be created and waiting in _Idle_ state. |
+| `IdleScaleFactor`   | (Experimental) The number of _Idle_ machines as a factor of the number of machines currently in use. Must be in float number format. See [the autoscale documentation](autoscale.md#the-idlescalefactor-strategy) for more details. Defaults to `0.0`. |
+| `IdleCountMin`      | Minimal number of machines that need to be created and waiting in _Idle_ state when the `IdleScaleFactor` is in use. Default is 1. |
 | `IdleTime`          | Time (in seconds) for a machine to be in _Idle_ state before it is removed. |
 | `Timezone`   | Timezone for the times given in `Periods`. A timezone string like `Europe/Berlin`. Defaults to the locale system setting of the host if omitted or empty. GitLab Runner attempts to locate the timezone database in the directory or uncompressed zip file named by the `ZONEINFO` environment variable, then looks in known installation locations on Unix systems, and finally looks in `$GOROOT/lib/time/zoneinfo.zip`. |
 
@@ -578,6 +606,9 @@ Example:
   [[runners.machine.autoscaling]]
     Periods = ["* * 9-17 * * mon-fri *"]
     IdleCount = 50
+    IdleCountMin = 5
+    IdleScaleFactor = 1.5 # Means that current number of Idle machines will be 1.5*in-use machines,
+                          # no more than 50 (the value of IdleCount) and no less than 5 (the value of IdleCountMin) 
     IdleTime = 3600
     Timezone = "UTC"
   [[runners.machine.autoscaling]]
@@ -663,6 +694,7 @@ This table lists `config.toml`, CLI options, and ENV variables for `register`.
 | `S3.BucketName`       | `[runners.cache.s3] -> BucketName`       | `--cache-s3-bucket-name`       | `$CACHE_S3_BUCKET_NAME`           | `[runners.cache] -> BucketName`     |                          | `$S3_BUCKET_NAME`         |
 | `S3.BucketLocation`   | `[runners.cache.s3] -> BucketLocation`   | `--cache-s3-bucket-location`   | `$CACHE_S3_BUCKET_LOCATION`       | `[runners.cache] -> BucketLocation` |                          | `$S3_BUCKET_LOCATION`     |
 | `S3.Insecure`         | `[runners.cache.s3] -> Insecure`         | `--cache-s3-insecure`          | `$CACHE_S3_INSECURE`              | `[runners.cache] -> Insecure`       |                          | `$S3_INSECURE`            |
+| `S3.AuthenticationType` | `[runners.cache.s3] -> AuthenticationType` | `--cache-s3-authentication_type` | `$CACHE_S3_AUTHENTICATION_TYPE`   |                                     |                          |                       |
 | `GCS.AccessID`        | `[runners.cache.gcs] -> AccessID`        | `--cache-gcs-access-id`        | `$CACHE_GCS_ACCESS_ID`            |                                     |                          |                           |
 | `GCS.PrivateKey`      | `[runners.cache.gcs] -> PrivateKey`      | `--cache-gcs-private-key`      | `$CACHE_GCS_PRIVATE_KEY`          |                                     |                          |                           |
 | `GCS.CredentialsFile` | `[runners.cache.gcs] -> CredentialsFile` | `--cache-gcs-credentials-file` | `$GOOGLE_APPLICATION_CREDENTIALS` |                                     |                          |                           |
@@ -678,14 +710,15 @@ The following parameters define S3 storage for cache.
 
 In GitLab Runner 11.2 and earlier, these settings were in the global `[runners.cache]` section.
 
-| Parameter        | Type             | Description |
-|------------------|------------------|-------------|
-| `ServerAddress`  | string           | A `host:port` for the S3-compatible server. If you are using a server other than AWS, consult the storage product documentation to determine the correct address. For DigitalOcean, the address must be in the format `spacename.region.digitaloceanspaces.com`. |
-| `AccessKey`      | string           | The access key specified for your S3 instance. |
-| `SecretKey`      | string           | The secret key specified for your S3 instance. |
-| `BucketName`     | string           | Name of the storage bucket where cache is stored. |
-| `BucketLocation` | string           | Name of S3 region. |
-| `Insecure`       | boolean          | Set to `true` if the S3 service is available by `HTTP`. Default is `false`. |
+| Parameter           | Type             | Description |
+|---------------------|------------------|-------------|
+| `ServerAddress`     | string           | A `host:port` for the S3-compatible server. If you are using a server other than AWS, consult the storage product documentation to determine the correct address. For DigitalOcean, the address must be in the format `spacename.region.digitaloceanspaces.com`. |
+| `AccessKey`         | string           | The access key specified for your S3 instance. |
+| `SecretKey`         | string           | The secret key specified for your S3 instance. |
+| `BucketName`        | string           | Name of the storage bucket where cache is stored. |
+| `BucketLocation`    | string           | Name of S3 region. |
+| `Insecure`          | boolean          | Set to `true` if the S3 service is available by `HTTP`. Default is `false`. |
+| `AuthenticationType`| string           | In GitLab 14.4 and later, set to `iam` or `access-key`. Default is `access-key` if `ServerAddress`, `AccessKey`, and `SecretKey` are all provided. Defaults to `iam` if `ServerAddress`, `AccessKey`, or `SecretKey` are missing. |
 
 Example:
 
@@ -703,13 +736,67 @@ Example:
     Insecure = false
 ```
 
-For Amazon S3, the `ServerAddress` should always be `s3.amazonaws.com`. The MinIO S3 client
-gets bucket metadata and modifies the URL to point to the valid region, for example `s3-eu-west-1.amazonaws.com`.
+If any of `ServerAddress`, `AccessKey` or `SecretKey` aren't specified and `AuthenticationType` is not provided, the S3 client uses the
+IAM instance profile available to the `gitlab-runner` instance. In an [autoscale](autoscale.md) configuration, this is not the on-demand machine
+that jobs are executed on. If `ServerAddress`, `AccessKey` and `SecretKey` are all specified but `AuthenticationType` is not provided,
+`access-key` will be used as the authentication type.
 
-If `ServerAddress`, `AccessKey` or `SecretKey` aren't specified, then the S3 client uses the
-IAM instance profile available to the `gitlab-runner` instance. In an
-[autoscale](autoscale.md) configuration, this is not the on-demand machine
-that jobs are executed on.
+When you use Helm charts to install GitLab Runner, and `rbac.create` is set to true
+in the `values.yaml` file, a ServiceAccount is created. This ServiceAccount's annotations are retrieved from the
+`rbac.serviceAccountAnnotations` section.
+
+For runners on Amazon EKS, you can specify an IAM role to
+assign to the service account. The specific annotation needed is:
+`eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/<IAM_ROLE_NAME>`.
+
+The IAM policy for this role must have permissions to do the following actions for the specified bucket:
+
+- "s3:PutObject"
+- "s3:GetObjectVersion"
+- "s3:GetObject"
+- "s3:DeleteObject"
+
+NOTE:
+The maximum size of a single file that can be uploaded to AWS S3 cache is 5 GB.
+A discussion about potential workarounds for this behavior is in [this issue](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26921).
+
+#### Use KMS key encryption in S3 bucket for runner cache
+
+The `GenerateDataKey` API uses the KMS symmetric key to create a data key for client-side encryption (<https://docs.aws.amazon.com/kms/latest/APIReference/API_GenerateDataKey.html>). KMS key configuration must be as follows:
+
+| Attribute         | Description         |
+|-------------------|---------------------|
+| Key Type          | Symmetric           | 
+| Origin            | `AWS_KMS`           |
+| Key Spec          | `SYMMETRIC_DEFAULT` |
+| Key Usage         | Encrypt and decrypt |
+
+The IAM policy for the role assigned to the ServiceAccount defined in `rbac.serviceAccountName` must have permissions to do the following actions for the KMS Key:
+
+- `kms:GetPublicKey`
+- `kms:Decrypt`
+- `kms:Encrypt`
+- `kms:DescribeKey`
+- `kms:GenerateDataKey`
+
+#### Enable IAM roles for Kubernetes ServiceAccount resources
+
+To use IAM roles for service accounts, an IAM OIDC provider [must exist for your cluster](https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html). After an IAM OIDC provider is associated with your cluster, you can create an IAM role to associate to the service account of the runner. 
+
+1. On the **Create Role** window, under **Select type of trusted entity**, select **Web Identity**.
+1. On the **Trusted Relationships tab** of the role:
+
+   - The **Trusted entities** section must have the format:
+     `arn:aws:iam::<ACCOUNT_ID>:oidc-provider/oidc.eks.<AWS_REGION>.amazonaws.com/id/<OIDC_ID>`.
+     The **OIDC ID** can be found on EKS cluster’s **Configuration** tab.
+
+   - The **Condition** section must have the GitLab Runner service account
+     defined in `rbac.serviceAccountName` or the default service account
+     created if `rbac.create` is set to `true`:
+
+     | Condition         | Key      | Value |
+     |-------------------|----------|-------|
+     | `StringEquals`    |`oidc.eks.<AWS_REGION>.amazonaws.com/id/<OIDC_ID>:sub` | `system:serviceaccount:<GITLAB_RUNNER_NAMESPACE>:<GITLAB_RUNNER_SERVICE_ACCOUNT>` |
 
 ### The `[runners.cache.gcs]` section
 
@@ -788,7 +875,7 @@ Example:
 > Introduced in GitLab Runner v1.6.0.
 
 The following parameters define Kubernetes behavior.
-For more parameters, see the [Kubernetes executor documentation](../executors/kubernetes.md).
+For more parameters, see the [documentation for the Kubernetes executor](../executors/kubernetes.md).
 
 | Parameter        | Type    | Description |
 |------------------|---------|-------------|
@@ -797,11 +884,13 @@ For more parameters, see the [Kubernetes executor documentation](../executors/ku
 | `key_file`       | string  | Optional. Kubernetes auth private key. |
 | `ca_file`        | string  | Optional. Kubernetes auth ca certificate. |
 | `image`          | string  | Default Docker image to use for jobs when none is specified. |
+| `allowed_images` | array   | Wildcard list of images that are allowed in `.gitlab-ci.yml`. If not present all images are allowed (equivalent to `["*/*:*"]`). See [Restrict Docker images and services](#restricting-docker-images-and-services). |
+| `allowed_services` | array | Wildcard list of services that are allowed in `.gitlab-ci.yml`. If not present all images are allowed (equivalent to `["*/*:*"]`). See [Restrict Docker images and services](#restricting-docker-images-and-services). |
 | `namespace`      | string  | Namespace to run Kubernetes jobs in. |
 | `privileged`     | boolean | Run all containers with the privileged flag enabled. |
 | `allow_privilege_escalation` | boolean | Optional. Runs all containers with the `allowPrivilegeEscalation` flag enabled. |
 | `node_selector`  | table   | A `table` of `key=value` pairs of `string=string`. Limits the creation of pods to Kubernetes nodes that match all the `key=value` pairs. |
-| `image_pull_secrets` | array | A list of secrets that are used to authenticate Docker image pulling. |
+| `image_pull_secrets` | array | An array of items containing the Kubernetes `docker-registry` secret names used to authenticate Docker image pulling from private registries. |
 
 Example:
 
@@ -814,7 +903,9 @@ Example:
   image = "golang:1.8"
   privileged = true
   allow_privilege_escalation = true
-  image_pull_secrets = ["docker-registry-credentials"]
+  image_pull_secrets = ["docker-registry-credentials", "optional-additional-credentials"]
+  allowed_images = ["ruby:*", "python:*", "php:*"]
+  allowed_services = ["postgres:9.4", "postgres:latest"]
   [runners.kubernetes.node_selector]
     gitlab = "true"
 ```
@@ -824,14 +915,20 @@ Example:
 When you use `docker`, `docker+machine`, or `kubernetes` executors, GitLab Runner uses a specific container
 to handle Git, artifacts, and cache operations. This container is created from an image named `helper image`.
 
-The helper image is based on Alpine Linux and is available for amd64, arm, arm64, and s390x architectures. It contains
+The helper image is available for amd64, arm, arm64, s390x, and ppc64le architectures. It contains
 a `gitlab-runner-helper` binary, which is a special compilation of GitLab Runner binary. It contains only a subset
-of available commands, as well as Git, Git LFS, SSL certificates store, and basic configuration of Alpine.
+of available commands, as well as Git, Git LFS, SSL certificates store.
+
+The helper image has a few flavors: `alpine`, `alpine3.12`, `alpine3.13`, `alpine3.14`, `alpine3.15`, and `ubuntu`. The `alpine` flavor uses the same version as `alpine3.12`. The `alpine` image is currently the default due to its small
+footprint but can have [DNS issues in some environments](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/4129).
+Using `helper_image_flavor = "ubuntu"` will select the `ubuntu` flavor of the helper image.
 
 When GitLab Runner is installed from the DEB/RPM packages, images for the supported architectures are installed on the host.
 When the runner prepares to execute the job, if the image in the specified version (based on the runner's Git
 revision) is not found on Docker Engine, it is automatically loaded. Both the
 `docker` and `docker+machine` executors work this way.
+
+For the alpine flavors, only the default `alpine` flavor image is included in the package. All other flavors will be downloaded from the registry.
 
 The `kubernetes` executor and manual installations of GitLab Runner work differently.
 
@@ -841,28 +938,48 @@ The `kubernetes` executor and manual installations of GitLab Runner work differe
 In both cases, GitLab Runner downloads the helper image from Docker Hub, from the official GitLab repository `gitlab/gitlab-runner-helper`.
 The GitLab Runner revision and architecture define which tag to download.
 
-### Migrate helper image to `registry.gitlab.com`
+### Runner images that use an old version of Alpine Linux
 
-> [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27196) in GitLab Runner 13.7.
+> [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/3122) in GitLab Runner 14.5.
 
-The helper image is currently hosted in [Docker
-Hub](https://hub.docker.com/r/gitlab/gitlab-runner-helper). With the new [Docker
-Hub limits](https://docs.docker.com/docker-hub/download-rate-limit/), we are
-migrating the helper image to
-[`registry.gitlab.com`](https://gitlab.com/gitlab-org/gitlab-runner/container_registry/1472754).
+Images are built with multiple versions of Alpine Linux, so you can use a newer version of Alpine, but at the same time use older versions as well.
 
-By default, the helper image is pulled from Docker Hub. If the
-`FF_GITLAB_REGISTRY_HELPER_IMAGE` [feature flag](feature-flags.md) is enabled
-the runner pulls the image from
-[`registry.gitlab.com`](https://gitlab.com/gitlab-org/gitlab-runner/container_registry/1472754)
-where the limits don't apply. You can enable the feature flag for:
+For the helper image, change the `helper_image_flavor` or read the [Helper image](#helper-image) section.
+
+For the GitLab Runner image, follow the same logic, where `alpine`, `alpine3.12`, `alpine3.13`, `alpine3.14`, or `alpine3.15` is used as a prefix in the image, before the version:
+
+```shell
+docker pull gitlab/gitlab-runner:alpine3.14-v14.4.0
+```
+
+### Alpine 3.14 and 3.15 pwsh images
+
+The [pwsh Docker images](https://hub.docker.com/_/microsoft-powershell) do not yet include Alpine 3.14 and 3.15.
+Currently, `alpine3.13` is the latest supported `pwsh` image.
+
+### Default registry
+
+The helper image is pulled from a specific registry location, based on your version of GitLab
+Runner and the `FF_GITLAB_REGISTRY_HELPER_IMAGE` [feature flag](feature-flags.md).
+
+In 14.0, `FF_GITLAB_REGISTRY_HELPER_IMAGE=true` [became the default](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27218)
+and helper images are pulled from GitLab Registry unless this feature flag is
+disabled.
+
+In 13.7, `FF_GITLAB_REGISTRY_HELPER_IMAGE`
+was [introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27196)
+but disabled by default.
+
+Prior to 13.7, the helper image was always pulled from
+[Docker Hub](https://hub.docker.com/r/gitlab/gitlab-runner-helper).
+
+This feature flag can be disabled for:
 
 - A [specific pipeline](feature-flags.md#enable-feature-flag-in-pipeline-configuration).
 - [Every job](feature-flags.md#enable-feature-flag-in-runner-environment-variables).
-
-If you are a runner administrator and don't want users to override it, you can set this
-feature flag by specifying
-[`[runners.feature_flags]`](feature-flags.md#enable-feature-flag-in-runner-configuration).
+- If you are a runner administrator and don't want users to override it, you can set this
+  feature flag by specifying
+  [`[runners.feature_flags]`](feature-flags.md#enable-feature-flag-in-runner-configuration).
 
 ### Override the helper image
 
@@ -942,7 +1059,7 @@ which contains PowerShell Core, is published with the `gitlab/gitlab-runner-help
 
 > [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/1267) in GitLab Runner 11.10.
 
-This section defines [custom build directories](https://docs.gitlab.com/ee/ci/yaml/README.html#custom-build-directories) parameters.
+This section defines [custom build directories](https://docs.gitlab.com/ee/ci/runners/configure_runners.html#custom-build-directories) parameters.
 
 This feature, if not configured explicitly, is
 enabled by default for `kubernetes`, `docker`, `docker-ssh`, `docker+machine`,
@@ -1029,6 +1146,38 @@ Metrics queries are in `canonical_name:query_string` format. The query string su
 | `{interval}` | Replaced with the `query_interval` parameter from the `[runners.referees.metrics]` configuration for this referee.            |
 
 For example, a shared GitLab Runner environment that uses the `docker-machine` executor would have a `{selector}` similar to `node=shared-runner-123`.
+
+## Restricting Docker images and services
+
+> Added for the Kubernetes executor in GitLab Runner 14.2.
+
+If you use the Docker or Kubernetes executors, you can restrict the Docker images which can
+be used to run your jobs. To do this, you specify wildcard patterns. For example, to allow images
+from your private Docker registry only:
+
+```toml
+[[runners]]
+  (...)
+  executor = "docker"
+  [runners.docker]
+    (...)
+    allowed_images = ["my.registry.tld:5000/*:*"]
+    allowed_services = ["my.registry.tld:5000/*:*"]
+```
+
+Or, to restrict to a specific list of images from this registry:
+
+```toml
+[[runners]]
+  (...)
+  executor = "docker"
+  [runners.docker]
+    (...)
+    allowed_images = ["my.registry.tld:5000/ruby:*", "my.registry.tld:5000/node:*"]
+    allowed_services = ["postgres:9.4", "postgres:latest"]
+```
+
+The allowed list also works with the Kubernetes executor (that is, if you use `[runners.kubernetes]` instead of `[runners.docker]`).
 
 ## Deploy to multiple servers using GitLab CI/CD
 

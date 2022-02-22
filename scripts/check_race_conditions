@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
-# This is the number of race conditions detected on master.
+# This is the number of race conditions detected on default branch.
 # This number is not allowed to increase, and it has to be lowered when we
 # fix existing race conditions
 max=24
 
 find .testoutput/
 
-cnt=$(cat .testoutput/*.race.output.txt | grep -E "^WARNING: DATA RACE$" -c)
+cnt=$(cat .testoutput/*/*.race.output.txt | grep -E "^WARNING: DATA RACE$" -c)
 echo "Found ${cnt} race conditions. Maximum allowed value is ${max}"
 
 if [ "${cnt}" -gt "${max}" ]; then

@@ -9,12 +9,10 @@ const (
 	// V1809 is the Windows version that is 1809 and also known as Windows 2019
 	// ltsc.
 	V1809 = "1809"
-	// V1903 is the Windows version that is 1903 sac.
-	V1903 = "1903"
-	// V1909 is the Windows version that is 1903 sac.
-	V1909 = "1909"
 	// V2004 is the Windows version that is 2004 sac.
 	V2004 = "2004"
+	// V20H2 is the Windows version that is 2009 sac.
+	V20H2 = "2009"
 )
 
 // UnsupportedWindowsVersionError represents that the version specified is not
@@ -39,9 +37,13 @@ func (e *UnsupportedWindowsVersionError) Is(err error) bool {
 
 var supportedWindowsVersions = []string{
 	V1809,
-	V1903,
-	V1909,
 	V2004,
+	V20H2,
+}
+
+var supportedWindowsBuilds = map[string]string{
+	"10.0.17763": V1809,
+	"10.0.19041": V2004,
 }
 
 // Version checks the specified operatingSystem to see if it's one of the
@@ -53,6 +55,11 @@ func Version(operatingSystem string) (string, error) {
 		if strings.Contains(operatingSystem, fmt.Sprintf(" %s ", windowsVersion)) {
 			return windowsVersion, nil
 		}
+	}
+
+	windowsVersion, ok := supportedWindowsBuilds[operatingSystem]
+	if ok {
+		return windowsVersion, nil
 	}
 
 	return "", NewUnsupportedWindowsVersionError(operatingSystem)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/net/context"
@@ -142,19 +143,15 @@ type podPhaseResponse struct {
 }
 
 func getPodPhase(c *kubernetes.Clientset, pod *api.Pod, out io.Writer) podPhaseResponse {
-	pod, err := c.CoreV1().Pods(pod.Namespace).Get(pod.Name, metav1.GetOptions{})
+	// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
+	pod, err := c.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
 	if err != nil {
 		return podPhaseResponse{true, api.PodUnknown, err}
 	}
 
 	ready, err := isRunning(pod)
-
-	if err != nil {
+	if err != nil || ready {
 		return podPhaseResponse{true, pod.Status.Phase, err}
-	}
-
-	if ready {
-		return podPhaseResponse{true, pod.Status.Phase, nil}
 	}
 
 	// check status of containers
@@ -174,7 +171,11 @@ func getPodPhase(c *kubernetes.Clientset, pod *api.Pod, out io.Writer) podPhaseR
 		case "ErrImagePull", "ImagePullBackOff":
 			msg := fmt.Sprintf("image pull failed: %s", waiting.Message)
 			imagePullErr := &pull.ImagePullError{Message: msg, Image: container.Image}
-			return podPhaseResponse{true, api.PodUnknown, &common.BuildError{Inner: imagePullErr}}
+			return podPhaseResponse{
+				true,
+				api.PodUnknown,
+				&common.BuildError{Inner: imagePullErr, FailureReason: common.ScriptFailure},
+			}
 		}
 	}
 
@@ -187,8 +188,7 @@ func getPodPhase(c *kubernetes.Clientset, pod *api.Pod, out io.Writer) podPhaseR
 	)
 
 	for _, condition := range pod.Status.Conditions {
-		// skip conditions with no reason, these are typically expected pod
-		// conditions
+		// skip conditions with no reason, these are typically expected pod conditions
 		if condition.Reason == "" {
 			continue
 		}
@@ -309,38 +309,31 @@ func buildVariables(bv common.JobVariables) []api.EnvVar {
 	return e
 }
 
-func getCapabilities(defaultCapDrop []string, capAdd []string, capDrop []string) *api.Capabilities {
-	enabled := make(map[string]bool)
-
-	for _, v := range defaultCapDrop {
-		enabled[v] = false
-	}
-
-	for _, v := range capAdd {
-		enabled[v] = true
-	}
-
-	for _, v := range capDrop {
-		enabled[v] = false
-	}
-
-	if len(enabled) < 1 {
-		return nil
-	}
-
-	return buildCapabilities(enabled)
-}
-
-func buildCapabilities(enabled map[string]bool) *api.Capabilities {
-	capabilities := new(api.Capabilities)
-
-	for c, add := range enabled {
-		if add {
-			capabilities.Add = append(capabilities.Add, api.Capability(c))
-			continue
+// Sanitize labels to match Kubernetes restrictions from https://kubernetes.io/
+// /docs/concepts/overview/working-with-objects/labels/#syntax-and-character-set
+//nolint:gocognit
+func sanitizeLabel(value string) string {
+	mapFn := func(r rune) rune {
+		if r >= 'a' && r <= 'z' ||
+			r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' ||
+			r == '-' || r == '_' || r == '.' {
+			return r
 		}
-		capabilities.Drop = append(capabilities.Drop, api.Capability(c))
+		return '_'
 	}
 
-	return capabilities
+	// only alphanumerics, dashes (-), underscores (_), dots (.) are valid
+	value = strings.Map(mapFn, value)
+
+	// must start/end with alphanumerics only
+	value = strings.Trim(value, "-_.")
+
+	// length must be <= 63 characters
+	if len(value) > 63 {
+		value = value[:63]
+	}
+
+	// trim again if required after shortening
+	return strings.Trim(value, "-_.")
 }

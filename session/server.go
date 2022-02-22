@@ -14,6 +14,10 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/certificate"
 )
 
+var (
+	ErrInvalidURL = errors.New("url not valid, scheme defined")
+)
+
 type sessionFinderFn func(url string) *Session
 
 type Server struct {
@@ -117,7 +121,7 @@ func (s *Server) setAdvertiseAddress() error {
 
 	if strings.HasPrefix(s.AdvertiseAddress, "https://") ||
 		strings.HasPrefix(s.AdvertiseAddress, "http://") {
-		return errors.New("url not valid, scheme defined")
+		return ErrInvalidURL
 	}
 
 	s.AdvertiseAddress = "https://" + s.AdvertiseAddress
@@ -131,13 +135,13 @@ func (s *Server) handleSessionRequest(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("Processing session request")
 
 	session := s.sessionFinder(r.RequestURI)
-	if session == nil || session.Mux() == nil {
+	if session == nil || session.Handler() == nil { //nolint:staticcheck
 		logger.Error("Mux handler not found")
 		http.NotFound(w, r)
 		return
 	}
 
-	session.Mux().ServeHTTP(w, r)
+	session.Handler().ServeHTTP(w, r)
 }
 
 func (s *Server) Start() error {

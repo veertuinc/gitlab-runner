@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package custom_test
 
 import (
@@ -20,7 +23,15 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/shells/shellstest"
 )
 
-var testExecutorFile string
+var (
+	testExecutorFile string
+	testJobInfo      = common.JobInfo{
+		Name:        "test job",
+		Stage:       "test",
+		ProjectID:   0,
+		ProjectName: "test project",
+	}
+)
 
 func TestMain(m *testing.M) {
 	code := 1
@@ -47,6 +58,8 @@ func newBuild(t *testing.T, jobResponse common.JobResponse, shell string) (*comm
 	require.NoError(t, err)
 
 	t.Log("Build directory:", dir)
+
+	jobResponse.JobInfo = testJobInfo
 
 	build := &common.Build{
 		JobResponse: jobResponse,
@@ -101,6 +114,23 @@ func TestBuildSuccess(t *testing.T) {
 
 		err = buildtest.RunBuild(t, build)
 		assert.NoError(t, err)
+	})
+}
+
+func TestBuildScriptSections(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		if shell == "cmd" || shell == "pwsh" || shell == "powershell" {
+			// support for pwsh and powershell tracked in https://gitlab.com/gitlab-org/gitlab-runner/-/issues/28119
+			t.Skip("CMD, pwsh, powershell not supported")
+		}
+		successfulBuild, err := common.GetSuccessfulBuild()
+		require.NoError(t, err)
+
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+
+		require.NoError(t, err)
+		buildtest.RunBuildWithSections(t, build)
 	})
 }
 
@@ -435,7 +465,7 @@ func TestBuildChangesBranchesWhenFetchingRepo(t *testing.T) {
 		build.GitInfo = common.GetLFSGitInfo(build.GitInfo.RepoURL)
 		out, err = buildtest.RunBuildReturningOutput(t, build)
 		assert.NoError(t, err)
-		assert.Contains(t, out, "Checking out 2371dd05 as add-lfs-object...")
+		assert.Contains(t, out, "Checking out c8f2a61d as add-lfs-object...")
 	})
 }
 
@@ -545,5 +575,90 @@ func TestBuildLogLimitExceeded(t *testing.T) {
 		defer cleanup()
 
 		buildtest.RunBuildWithJobOutputLimitExceeded(t, build.Runner, nil)
+	})
+}
+
+func TestBuildWithAccessToJobResponseFile(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		successfulBuild, err := common.GetSuccessfulBuild()
+		require.NoError(t, err)
+
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+
+		output, err := buildtest.RunBuildReturningOutput(t, build)
+		require.NoError(t, err)
+
+		assert.Contains(t, output, "job ID           => 0")
+		assert.Contains(t, output, fmt.Sprintf("job name         => %s", testJobInfo.Name))
+		assert.Contains(t, output, fmt.Sprintf("job stage        => %s", testJobInfo.Stage))
+		assert.Contains(t, output, fmt.Sprintf("job project ID   => %d", testJobInfo.ProjectID))
+		assert.Contains(t, output, fmt.Sprintf("job project name => %s", testJobInfo.ProjectName))
+	})
+}
+
+func TestCleanupProjectGitClone(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		successfulBuild, err := common.GetSuccessfulBuild()
+		require.NoError(t, err)
+
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+
+		buildtest.RunBuildWithCleanupGitClone(t, build)
+	})
+}
+
+func TestCleanupProjectGitFetch(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		untrackedFilename := "untracked"
+
+		successfulBuild, err := common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFilename, "", "")...,
+		)
+		require.NoError(t, err)
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+
+		buildtest.RunBuildWithCleanupGitFetch(t, build, untrackedFilename)
+	})
+}
+
+func TestCleanupProjectGitSubmoduleNormal(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		untrackedFile := "untracked"
+		untrackedSubmoduleFile := "untracked_submodule"
+
+		successfulBuild, err := common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFile, untrackedSubmoduleFile, "")...,
+		)
+		require.NoError(t, err)
+
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+
+		buildtest.RunBuildWithCleanupNormalSubmoduleStrategy(t, build, untrackedFile, untrackedSubmoduleFile)
+	})
+}
+
+func TestCleanupProjectGitSubmoduleRecursive(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		untrackedFile := "untracked"
+		untrackedSubmoduleFile := "untracked_submodule"
+		untrackedSubSubmoduleFile := "untracked_submodule_submodule"
+
+		successfulBuild, err := common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(
+				untrackedFile,
+				untrackedSubmoduleFile,
+				untrackedSubSubmoduleFile,
+			)...,
+		)
+
+		require.NoError(t, err)
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+
+		buildtest.RunBuildWithCleanupNormalSubmoduleStrategy(t, build, untrackedFile, untrackedSubmoduleFile)
 	})
 }

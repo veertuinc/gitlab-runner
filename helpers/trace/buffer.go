@@ -1,92 +1,142 @@
 package trace
 
 import (
-	"bufio"
-	"bytes"
+	"errors"
 	"fmt"
 	"hash"
 	"hash/crc32"
 	"io"
 	"io/ioutil"
 	"os"
+	"sort"
 	"sync"
+	"unicode/utf8"
 
-	"github.com/markelog/trie"
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/transform"
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 )
 
-const maskedText = "[MASKED]"
 const defaultBytesLimit = 4 * 1024 * 1024 // 4MB
 
+var errLogLimitExceeded = errors.New("log limit exceeded")
+
 type Buffer struct {
-	lock          sync.RWMutex
-	logSize       int
-	logWriter     *bufio.Writer
-	advanceBuffer bytes.Buffer
+	lock sync.RWMutex
+	lw   *limitWriter
+	w    io.WriteCloser
 
-	logFile    *os.File
-	bytesLimit int
-	checksum   hash.Hash32
+	logFile  *os.File
+	checksum hash.Hash32
+}
 
-	maskTree *trie.Trie
+type inverseLengthSort []string
+
+func (s inverseLengthSort) Len() int {
+	return len(s)
+}
+
+func (s inverseLengthSort) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func (s inverseLengthSort) Less(i, j int) bool {
+	return len(s[i]) > len(s[j])
 }
 
 func (b *Buffer) SetMasked(values []string) {
-	if len(values) == 0 {
-		b.maskTree = nil
-		return
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// close existing writer to flush data
+	if b.w != nil {
+		b.w.Close()
 	}
 
-	maskTree := trie.New()
-	for _, value := range values {
-		maskTree.Add(value, nil)
+	defaultTransformers := []transform.Transformer{
+		encoding.Replacement.NewEncoder(),
 	}
-	b.maskTree = maskTree
+
+	transformers := make([]transform.Transformer, 0, len(values)+len(defaultTransformers))
+
+	sort.Sort(inverseLengthSort(values))
+	seen := make(map[string]struct{})
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+
+		transformers = append(transformers, newPhraseTransform(value))
+	}
+
+	transformers = append(transformers, defaultTransformers...)
+
+	b.w = transform.NewWriter(b.lw, transform.Chain(transformers...))
 }
 
 func (b *Buffer) SetLimit(size int) {
 	b.lock.Lock()
-	b.bytesLimit = size
-	b.lock.Unlock()
+	defer b.lock.Unlock()
+
+	b.lw.limit = int64(size)
 }
 
 func (b *Buffer) Size() int {
 	b.lock.RLock()
 	defer b.lock.RUnlock()
 
-	return b.logSize
+	if b.lw == nil {
+		return 0
+	}
+	return int(b.lw.written)
 }
 
 func (b *Buffer) Bytes(offset, n int) ([]byte, error) {
-	b.lock.Lock()
-	defer b.lock.Unlock()
-
-	err := b.logWriter.Flush()
-	if err != nil {
-		return nil, err
-	}
-
 	return ioutil.ReadAll(io.NewSectionReader(b.logFile, int64(offset), int64(n)))
 }
 
-func (b *Buffer) Write(data []byte) (n int, err error) {
+func (b *Buffer) Write(p []byte) (int, error) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	for _, r := range bytes.Runes(data) {
-		_ = b.writeRuneUnsafe(r)
-	}
-	_ = b.advanceAllUnsafe()
+	src := p
+	var n int
+	for len(src) > 0 {
+		written, err := b.w.Write(src)
+		// if we get a log limit exceeded error, we've written the log limit
+		// notice out to the log and will now silently not write any additional
+		// data: we return len(p), nil so the caller continues as normal.
+		if err == errLogLimitExceeded {
+			return len(p), nil
+		}
+		if err != nil {
+			return n, err
+		}
 
-	return len(data), nil
+		// the text/transformer implementation can return n < len(p) without an
+		// error. For this reason, we continue writing whatever data is left
+		// unless nothing was written (therefore zero progress) on our call to
+		// Write().
+		if written == 0 {
+			return n, io.ErrShortWrite
+		}
+
+		src = src[written:]
+		n += written
+	}
+
+	return n, nil
 }
 
 func (b *Buffer) Finish() {
-	b.lock.Lock()
-	defer b.lock.Unlock()
+	b.lock.RLock()
+	defer b.lock.RUnlock()
 
-	_ = b.advanceAllUnsafe()
+	if b.w != nil {
+		_ = b.w.Close()
+	}
 }
 
 func (b *Buffer) Close() {
@@ -95,88 +145,97 @@ func (b *Buffer) Close() {
 }
 
 func (b *Buffer) Checksum() string {
+	b.lock.RLock()
+	defer b.lock.RUnlock()
+
 	return fmt.Sprintf("crc32:%08x", b.checksum.Sum32())
 }
 
-func (b *Buffer) advanceAllUnsafe() error {
-	n, err := b.advanceBuffer.WriteTo(b.logWriter)
-	b.logSize += int(n)
-	return err
+type limitWriter struct {
+	w       io.Writer
+	written int64
+	limit   int64
 }
 
-// advanceLogUnsafe is assumed to be run every character
-func (b *Buffer) advanceLogUnsafe() error {
-	// advance all if no masking is enabled
-	if b.maskTree == nil {
-		return b.advanceAllUnsafe()
+func (w *limitWriter) Write(p []byte) (int, error) {
+	capacity := w.limit - w.written
+
+	if capacity <= 0 {
+		return 0, errLogLimitExceeded
 	}
 
-	rest := b.advanceBuffer.String()
-	results := b.maskTree.Search(rest)
-	if len(results) == 0 {
-		// we can advance as no match was found
-		return b.advanceAllUnsafe()
+	if int64(len(p)) >= capacity {
+		p = truncateSafeUTF8(p, capacity)
+		n, err := w.w.Write(p)
+		if err == nil {
+			err = errLogLimitExceeded
+		}
+		if n < 0 {
+			n = 0
+		}
+		w.written += int64(n)
+		w.writeLimitExceededMessage()
+
+		return n, err
 	}
 
-	// full match was found
-	if len(results) == 1 && results[0].Key == rest {
-		b.advanceBuffer.Reset()
-		b.advanceBuffer.WriteString(maskedText)
-		return b.advanceAllUnsafe()
+	n, err := w.w.Write(p)
+	if n < 0 {
+		n = 0
 	}
-
-	// partial match, wait for more characters
-	return nil
+	w.written += int64(n)
+	return n, err
 }
 
-func (b *Buffer) limitExceededMessage() string {
-	return fmt.Sprintf(
+func (w *limitWriter) writeLimitExceededMessage() {
+	n, _ := fmt.Fprintf(
+		w.w,
 		"\n%sJob's log exceeded limit of %v bytes.\n"+
 			"Job execution will continue but no more output will be collected.%s\n",
 		helpers.ANSI_BOLD_YELLOW,
-		b.bytesLimit,
+		w.limit,
 		helpers.ANSI_RESET,
 	)
-}
-
-func (b *Buffer) writeRuneUnsafe(r rune) error {
-	// over trace limit
-	if b.logSize > b.bytesLimit {
-		return io.EOF
-	}
-
-	if _, err := b.advanceBuffer.WriteRune(r); err != nil {
-		return err
-	}
-
-	if err := b.advanceLogUnsafe(); err != nil {
-		return err
-	}
-
-	// under trace limit
-	if b.logSize < b.bytesLimit {
-		return nil
-	}
-
-	b.advanceBuffer.Reset()
-	b.advanceBuffer.WriteString(b.limitExceededMessage())
-	return b.advanceAllUnsafe()
+	w.written += int64(n)
 }
 
 func New() (*Buffer, error) {
-	logFile, err := ioutil.TempFile("", "trace")
+	logFile, err := newLogFile()
 	if err != nil {
 		return nil, err
 	}
 
-	checksum := crc32.NewIEEE()
-
 	buffer := &Buffer{
-		bytesLimit: defaultBytesLimit,
-		logFile:    logFile,
-		checksum:   checksum,
-		logWriter:  bufio.NewWriter(io.MultiWriter(logFile, checksum)),
+		logFile:  logFile,
+		checksum: crc32.NewIEEE(),
 	}
 
+	buffer.lw = &limitWriter{
+		w:       io.MultiWriter(buffer.logFile, buffer.checksum),
+		written: 0,
+		limit:   defaultBytesLimit,
+	}
+
+	buffer.SetMasked(nil)
+
 	return buffer, nil
+}
+
+func newLogFile() (*os.File, error) {
+	return ioutil.TempFile("", "trace")
+}
+
+// truncateSafeUTF8 truncates a job log at the capacity but avoids
+// breaking up a multi-byte UTF-8 character.
+func truncateSafeUTF8(p []byte, capacity int64) []byte {
+	for i := 0; i < 4; i++ {
+		r, s := utf8.DecodeLastRune(p[:capacity])
+		if r == utf8.RuneError && s == 1 {
+			capacity--
+			continue
+		}
+		break
+	}
+
+	return p[:capacity]
 }

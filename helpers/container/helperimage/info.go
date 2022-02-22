@@ -25,11 +25,15 @@ const (
 	// GitLabRegistryName is the name of the helper image hosted in registry.gitlab.com.
 	GitLabRegistryName = "registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper"
 
+	// DefaultFlavor is the default flavor of image we use for the helper.
+	DefaultFlavor = "alpine"
+
 	headRevision        = "HEAD"
 	latestImageRevision = "latest"
 )
 
 type Info struct {
+	OSType                  string
 	Architecture            string
 	Name                    string
 	Tag                     string
@@ -49,6 +53,7 @@ type Config struct {
 	OperatingSystem string
 	Shell           string
 	GitLabRegistry  bool
+	Flavor          string
 }
 
 type creator interface {
@@ -66,7 +71,10 @@ func Get(revision string, cfg Config) (Info, error) {
 		return Info{}, errors.NewErrOSNotSupported(cfg.OSType)
 	}
 
-	return factory.Create(imageRevision(revision), cfg)
+	info, err := factory.Create(imageRevision(revision), cfg)
+	info.OSType = cfg.OSType
+
+	return info, err
 }
 
 func imageRevision(revision string) string {
@@ -87,7 +95,6 @@ func imageName(gitlabRegistry bool) string {
 
 func getPowerShellCmd(shell string) []string {
 	if shell == "" {
-		// TODO: Replace with shells.SNPwsh in 14.0 in https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26419
 		shell = shells.SNPowershell
 	}
 

@@ -3,7 +3,9 @@ package helpers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -73,7 +75,7 @@ func (c *ArtifactsUploaderCommand) createReadStream() (string, io.ReadCloser, er
 	filename := c.artifactFilename(c.Name, format)
 	pr, pw := io.Pipe()
 
-	archiver, err := archive.NewArchiver(archive.Format(format), pw, c.wd, getCompressionLevel(c.CompressionLevel))
+	archiver, err := archive.NewArchiver(archive.Format(format), pw, c.wd, GetCompressionLevel(c.CompressionLevel))
 	if err != nil {
 		_ = pr.CloseWithError(err)
 		return filename, nil, err
@@ -114,9 +116,12 @@ func (c *ArtifactsUploaderCommand) Run() error {
 	)
 
 	// Upload the data
-	switch c.network.UploadRawArtifacts(c.JobCredentials, stream, options) {
+	resp, location := c.network.UploadRawArtifacts(c.JobCredentials, stream, options)
+	switch resp {
 	case common.UploadSucceeded:
 		return nil
+	case common.UploadRedirected:
+		return c.handleRedirect(location)
 	case common.UploadForbidden:
 		return os.ErrPermission
 	case common.UploadTooLarge:
@@ -128,6 +133,24 @@ func (c *ArtifactsUploaderCommand) Run() error {
 	default:
 		return os.ErrInvalid
 	}
+}
+
+func (c *ArtifactsUploaderCommand) handleRedirect(location string) error {
+	newURL, err := url.Parse(location)
+	if err != nil {
+		return retryableErr{err: fmt.Errorf("parsing new location URL: %w", err)}
+	}
+
+	newURL.RawQuery = ""
+	newURL.Path = ""
+
+	c.JobCredentials.URL = newURL.String()
+
+	logrus.WithField("location", location).
+		WithField("new-url", c.JobCredentials.URL).
+		Warning("Upload request redirected")
+
+	return retryableErr{err: fmt.Errorf("request redirected")}
 }
 
 func (c *ArtifactsUploaderCommand) ShouldRetry(tries int, err error) bool {

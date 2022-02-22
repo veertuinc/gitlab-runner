@@ -1,3 +1,529 @@
+## v14.8.0 (2022-02-20)
+
+### New features
+
+- Allow specifying maintenance-note on runner registration !3268
+- Support Apple Silicon (darwin/arm64) !2274
+- Add variable support for services (Stefano Tenuta @ST-Apps1) !3158
+
+### Bug fixes
+
+- Fix artifacts upload redirection support !3308
+- Handle redirects on artifact uploads !3303
+- Introduce non-reusable docker cache volumes !3269
+- Merge the config template before asking the user for configuration !2561 (Matthias Baur @m.baur)
+- Make use of build requests/limits for build permission init container !3321
+
+### Maintenance
+
+- Add details to docs on CI_SERVER_TLS_CA_FILE !3332 (Ben Bodenmiller @bbodenmiller)
+- Ensure shell writers terminate with newline flush !3329
+- Upgrade Go to 1.17.7 !3327
+- Install supported Go version for Windows prior to testing !3324
+- Upgrade minio to v7.0.21 !3323
+- Fix milestone ship date error for the idlescalefactor feature - docs !3317
+- Remove vendor/ directory !3314
+- Divide packages buildling jobs in the pipeline even more !3313
+- Use latest docs linting image for Markdown !3312
+- Docs: Update shell descriptions to use full names !3310 (Neil Roza @realtime-neil)
+- Bump version of Go for project to 1.17.6 !3305
+- Fix Azure caching example config !3300 (Stefan Asseg @stefanasseg)
+- Encourage use of K8s secrets !3299 (Christian Mäder @nxt.cma)
+- Update interactive example that was incorrectly set to non-interactive !3297 (Arran Walker @ajwalker)
+- Update support for session_server using helm chart !3296
+- Cleanup cache proxy pattern !3294
+- Adds details about how to limit the number of VMs when autoscaling !3289
+- Update linting configuration from GitLab project !3288
+- Replace ruby:2.6 in examples and test cases with ruby:2.7 !3287
+- Update runner security docs !3279
+- Update Page with more common -machine-machine-options for use with docker and amazon ec2 instances. !3259
+- Add information on how to connect to S3 from Runners on Amazon EKS with IAM Role for ServiceAccount !3251
+- Add version number to windows helper image tags !3217 (Florian Greinacher @fgreinacher)
+- Update docs/executors/shell.md !3208
+- To disable wait_for_services_timeout use -1 not 0 !3207
+- Add support for extra submodule update flags !3192 (Nejc Habjan @nejc)
+- Clarify that listed limitations are specific to Windows !3155
+- Ensure proper assumptions !3038 (Deniz Adrian @zined)
+- Update the security caveats about the usage of privileged mode !2482
+- Add debian/bullseye to packagecloud DEB_PLATFORMS !2940 (James Addison @jayaddison-collabora)
+
+### Documentation changes
+
+- Add details on concurrent parameter for docker executor - docs !3286
+- Add alpine 3.15 as new runner/helper-image flavor !3281 (Fabio Huser @fh1ch)
+
+## v14.7.0 (2022-01-19)
+
+### New features
+
+- Add RHEL/UBI amd64 FIPS support !3255
+
+### Bug fixes
+
+- Exclude stderr content from parsing UID/GID information within Docker executor !2768
+
+### Maintenance
+
+- Fix fips rpm package name to sign !3285
+- Mark "prepare go fips" job as optional !3284
+- Updating documentation linting images for project !3283
+- Fix external links from project and remove old redirects !3282
+- Restore git 1.8.3.1 tests !3278
+- Fix tests using gitlab-grack submodule !3272
+- Clarify how to configure network mode with docker executor !3264
+- Update golangci-lint !3261
+- Pass UPSTREAM_CI_COMMIT_REF to incept tests !3257
+- Update sentry library from raven-go to sentry-go !3199 (Markus Legner @mlegner)
+- Bump used Go version to 1.17 !3112
+- Show error details for failed artifact uploads !3240
+
+### GitLab Runner distribution
+
+- Fix the 'stable gitlab release' job !3252
+
+### Documentation changes
+
+- Point to Gitlab maintained fork of Docker Machine !3276 (Thameez Bodhanya @thameezbo)
+- Release of a FIPS Compliant runner !3274
+- Adds note about 5 GB S3 cache limit !3266
+- Added troubleshooting steps !3273
+- Fix broken external links !3270 (Niklas @Taucher2003)
+- Update to mention centos stream 8 instead of centos linux 8 !3267 (Ondřej Budai @ondrejbudai)
+- Document need for entrypoint to open shell !3256
+- Updated language for Kubernetes executor !3253
+- Update link to K8s pull policy !3254
+- Improve the cache documentation for k8s executor !3237
+- Update docs for GitLab Runner Helm Chart using ACS (retired) to AKS !3219
+- Remove trailing spaces for Jan 2022 TW monthly chores !3275
+
+## v14.6.0 (2021-12-17)
+
+### Bug fixes
+
+- Implement improved JSON termination mode for Kubernetes !3225
+
+### Maintenance
+
+- Add Vale rule updates from the GitLab project to this project !3249
+- Minor capitalization and style fix !3248
+- Trigger UBI images build also from security fork !3245
+- Add note about running docker runner with docker-machine functionality !3236 (Ihor Martyniuk @enoot)
+- Remove coverage reports from S3 release !3235
+- Add curl in alpine image !3233
+- Fix flaky garbage collection test !3230
+- Move the "static QA" job to the postrelease stage !3227
+- Automatically retry integration_k8s jobs !3226
+- Docs: Clarifying that it's "a" macOS machine, rather than "yours" !3223
+- Remove unneeded quotes from markdownlint config !3215
+- Run incept tests in the postrelease stage so that all binaries and images are available !3214
+- Update markdownlint and Vale rules from GitLab project !3213
+- Add additional docs and integration tests for cache.s3.AuthenticationType !3210
+- Docs: Changed "clean up" from noun to verb !3206
+- Docs: Clarify what Runner Cloud is !3205
+- Drop gorilla/mux in favour of http.ServeMux !3203
+- Add idle gitlab_runner_jobs metric per runner !3202
+- Fix links to shared runners documentation !3201
+- Add openssl command to download the cert !3200
+- Improve Runner container image size for ubuntu and alpine !3185 (Furkan Türkal @Dentrax)
+- Autoscale VMs based on a percentage of in-use VMs !3179
+- Use native go errors and drop pkg/errors !3104 (feistel   @feistel)
+- Fix the 'stable gitlab release' job !3252
+
+### GitLab Runner distribution
+
+- Push stable images built on security fork to canonical repository !3242
+- Update the GitLab Release job !3228
+
+### Documentation changes
+
+- Update lint-html image for docs !3239
+- Docs: Added OpenSSL SSL_connect: SSL_ERROR_SYSCALL troubleshooting topic !3229
+- Docs: Add pod cleanup info in the Kubernetes doc !3224
+- Update docs for installing runner from binary !3222 (Wojciech Pater @wpater)
+- Changed symbol in docs table !3220
+- Add Native Windows OpenSSH Server and Powershell support for Virtualbox and Parallels executors !3176 (Guillaume Chauvel @guillaume.chauvel)
+
+## v14.5.2 (2021-12-10)
+
+### Security fixes
+
+- Fix `syscall.forkExec` calling `close(fd=0)` on pipe error [!44](https://gitlab.com/gitlab-org/security/gitlab-runner/-/merge_requests/44)
+
+## v14.5.1 (2021-12-01)
+
+### Security fixes
+
+- Limit docker executor's container reads to prevent memory exhaustion [!37](https://gitlab.com/gitlab-org/security/gitlab-runner/-/merge_requests/37)
+
+## v14.5.0 (2021-11-21)
+
+### New features
+
+- Scrub the X-Amz-Security-Token parameter from query strings !3171 (Estelle Poulin @estelle.a.poulin)
+- Kubernetes executor container security context !3116
+
+### Bug fixes
+
+- Fix lockfile cleanup for submodules !2858 (Nejc Habjan @nejch1)
+
+### Maintenance
+
+- Docs: Added SSH executor disable_strict_host_key_checking details !3195
+- Fix releasing alpine 3.12 helper images !3193
+- Renamed enterprise_guide to fleet_scaling !3191
+- Add all available unix OS build tags to unix targeted go files !3189 (Arran Walker @ajwalker)
+- Fix gitlab grack to use our own repositories !3187
+- Use newer docs linting image !3186
+- Update changelog generator configuration !3183
+- Fix docker pulling image integration test !3182
+- Break out shell blocks to allow copy from button !3181
+- Add troubleshooting info to Runner installation with Agent !3180
+- Log errors when failing to close docker client !3178
+- gitlab-runner Dockerfile: clear /tmp of ubuntu docker image !3177 (Yalcin Ozhabes @trim_the_main)
+- Fix PVC volume config generation in Kubernetes executor !3174 (Sandra Tatarevićová @sandra17)
+- Add troubleshooting note for dind connection error on k8s executor !3173
+- Docs: Clarified concurrency setting !3172
+- Fixed broken external links !3168
+- Fix: typo in docs/register/index.md !3166 (David Duncan @duncan.davidii)
+- Docs: Clarify runner token !3165 (Stefan Schmalzhaf @the_s)
+- docs: add useful notes on setting session_server !3164 (Yang Liu @robturtle)
+- Updated broken external links !3163
+- Refactor images building and publishing jobs !3162
+- Add changeable config directory for root !3161 (Boris Korzun @boris.korzun)
+- Docs: Correct link to Windows shared runner info !3160
+- Use sync.Mutex rather than RWMutex for simple protections !3159
+- Remove need for Git in runner images !3152 (Ben Bodenmiller @bbodenmiller)
+- Suppress git hints about branch naming standards !3148
+- Update golang-cli-helpers library, support env namespaces !3147
+- Handle situations when neither `ntpdate` nor `sntp` is available !3143 (Alexander Kutelev @kutelev)
+- Docs: Small edits to enhance readability !3137 (Ankita Singh @ankita.singh.200020)
+- Better support for Powershell on Kubernetes !3119
+- Do not pass in bash detection script into build container !3095
+- Kubernetes executor should only used SharedBuildsDir behaviour when it is required !3078 (David Alger @davidalger)
+- [DOCS] - Improve image pull secrets documentation clarity !3047 (Aaron Johnson @acjohnson1985)
+- Document how to run jobs as non-root user for kubernetes and kubernetes with helm !2900
+- Allow finer-grained control over pod grace periods. !2130 (Dominic Bevacqua @dbevacqua)
+
+### GitLab Runner distribution
+
+- Provide docker images for alpine 3.12 (default), 3.13 and 3.14. !3122
+
+## v14.4.0 (2021-10-25)
+
+### Security fixes
+
+- Sanitize git folder after each build !3134
+
+### Bug fixes
+
+- Add Kubernetes pod label sanitization !3054 (Theodor van Nahl @t.vannahl)
+
+### Maintenance
+
+- Revert "Merge branch 'alpine-3-13' into 'main'" !3157
+- Consider all docker pull image system error as runner script failure !3142
+- Docker Executor: use Stop for graceful shutdown !3128 (Aaron Friel @frieltwochairs)
+- Update to minio-go v7.0.13 !3120 (Philip Schwartz @pschwar1)
+- Explicit configuration for cache s3 authentication type !3117
+- refactor: remove osext dependency !3101 (feistel @feistel)
+- Respect Docker Runtime setting for services !3063 (Jakob-Niklas See @networkException)
+
+### GitLab Runner distribution
+
+- Split packagecloud release by distribution flavor !3146
+
+### Documentation changes
+
+- Mark URLs compatible with markdownlint-cli 0.29.0 !3154
+- Remove Fedora 34 from list of packages - docs !3151
+- Fixed docs crosslink from Advanced Config !3149 (Raimund Hook @stingrayza)
+- Update Autoscale config due to docker machine deprecation docs !3144
+- Compatibility chart update !3141 (Alexander Kutelev @kutelev)
+- Update docker_machine.md - docs !3140
+- Change description for gitlab_runner_limit !3139
+- docs: Delete link to gitlab.com-config (target does not exist) !3138 (Stefan Schmalzhaf @the_s)
+- Fix yaml indention of GCS secretName !3136 (Kate @kate_stack11)
+- Replace incorrect terminology (storage -> bandwidth) !3135 (Jay Williams @codingJWilliams)
+- Docs: Updated Microsoft Service policy links !3133
+- Runner: fix some broken external links !3127
+- Additional step when install GitLab Runner using KAS !3126
+- Added info about code handling for Windows runner !1975
+
+## v14.3.0 (2021-09-21)
+
+### New features
+
+- Cleanup build directory with feature flag !3065
+- Consider only docker image pull system error as runner-system-failure !3060
+
+### Security fixes
+
+- Restrict accepted metric listener HTTP methods !3109
+
+### Bug fixes
+
+- Fix docker-machine executor check to reduce warning log spam for no runners able to process a job !3106 (Thomas Scully @tscully49)
+
+### Maintenance
+
+- Turn on FF_SCRIPT_SECTIONS for GitLab Runner pipelines !3124
+- Expose runner limit error message on registration !3108
+- Split linux packages into multiple jobs !3105
+- Upgrade minio to v7 !3099
+- Update runner docs tests !3096
+- Remove docker-machine feature flag !3093
+- Improve log line decoding for kubernetes !3091
+- Add strict host key checking to SSH config !3074
+- Upgrade alpine version to 3.13.6 !3057
+- Improved bash shell escaping (behavior, performance) !2882
+
+### Documentation changes
+
+- Added mac setup guide !3129
+- Fix trailing spaces in Runner docs !3125
+- Per-build networking is recommended !3118
+- Fixed typo in Dockerfile example for installing Runner with Docker !3113 (Markus Möslinger @metabytewien)
+- Update documentation template !3107
+- Use latest docs linting images !3100
+- Update feature-flags.md, fixed typo, runners.feature_flag -> runners.feature_flags !3098 (Joost van der Sluis @jvdsluis)
+- Reword so that docker services list "images" instead of "applications" !3094
+- Adds Linux register command for behind a proxy !3087 (Rui Duarte @P0w3rb0y)
+- Add info for DOCKER_HOST value in Using docker:dind !3085
+- Added docker image build steps for Alpine !3076
+- Add doc in FAQ about running Elasticsearch !3110
+- Fix typo in security process !3092
+
+## v14.2.0 (2021-08-22)
+
+### Bug fixes
+
+- Do not execute checks for windows integration test in docs only default branch pipeline !3070
+- Limit job log to ensure it contains UTF-8 valid data !3037
+- Fix ubuntu helper image builds to use correct platform (not always amd64) !3032 (Sneha Kanekar @skanekar1)
+- Fix trace short writes when large masks are configured !2979
+- Fix cleaning of removed sub-submodules when using fetch strategy !2883 (DmtiryK @dkozlov)
+
+### Maintenance
+
+- Update trace force send interval to be dynamically adjusted based on update interval !3064
+- Update rules for windows tests to fix docs pipeline !3062
+- wrap each line in a script block as a section !3051
+- Add new histogram metrics to docker+machine executor !3050
+- Do not ignore failure in Windows jobs due to timeout !3042
+- Fix release job to use JOB-TOKEN !3041
+- Support of kubernetes lifecycle hooks !3036
+- Add all of gl-docsteam to docs CODEOWNERS !3026
+- Add Evan and Marcel to docs CODEOWNERS !3025
+- Use CI_JOB_TOKEN to create releases !3023
+- Explicitly set kubernetes pull image failure as script failure !3015
+- Implement changes rules for executing full and docs-only pipelines !2978
+- Move build log's ANSI Reset to before newline to fix test output  !2977
+- Update configuration of changelog generator !2968
+- Update remaining only except to rules in pipeline !2938
+- Add support for determining helper image from node selector information !2840
+- Upgrade specified Git version to 2.30.2 !2825
+- Add allowed images restriction to Kubernetes executor !2669 (Yi Wei Pang @pangyiwei)
+- Allow CI image option to override base image name (VirtualBox & Parallels) !1257 (Alexander Kutelev @kutelev)
+
+### Documentation changes
+
+- Modified the runner troubleshooting page for confirming the GitLab version and runner version !3081
+- Update docs with the correct link about runner scope !3077
+- Clarify the need for max overwrite definitions when overwriting via CI/CD script !3075
+- Add troubleshooting entries for k8s-caused faults !3073
+- Docs: Recommend to use latest self-managed runners with .com !3072
+- Docs: Addded FREE tier badge !3069
+- Docs: Addded FREE tier badge !3068
+- Docs: Addded FREE tier badge !3067
+- Docs: Added code block end tag that was missing !3066
+- Docs: Fixed typo, changed "process" to "signal" !3061 (Igor @igordata)
+- Docs: Add how to log in as current user in the Terminal so gitlab-runner installs properly !3055
+- Improve wording of docs/security/index.md !3031 (Ed Sabol @esabol)
+- Docs update advanced configuration !3028
+- Update Vale rules with latest settings from GitLab project !3024
+- Fix outdated link to custom build directories in runner advanced configuration docs !3022 (zertrin @zertrin)
+- Docs: Add version for Kubernetes custom builds directory mount option !3016 (Ben Bodenmiller @bbodenmiller)
+- Capitalize CPU on line 187 !2893
+- Create Enterprise guide for deploying and scaling a GitLab Runner Fleet !2755
+
+### Other changes
+
+- Improve testKubernetesGarbageCollection integration test !3080
+- Update the Kubernetes executor's attach strategy to work with Windows pods !3059
+- Fix missing end quote in packagecloud script !3049
+- Fix incorrect Kubernetes Windows paths for artifacts and caches !3046
+- Set DOCS_REVIEW_APPS_DOMAIN in the CI config directly !3044
+- Updated CODEOWNERS for docs team members who are maintainers !3035
+- Update build versions for Fedora !3034
+- Enable container scanning for gitlab runner !3027
+- Garbage collection supports for kubernetes executor !2983
+- Fix flakiness of the TestAttachReconnectReadLogs test !2954
+
+## v14.1.0 (2021-07-20)
+
+### Bug fixes
+
+- Fix trace short writes for large log lines !2993
+- Confirm if docker is installed in `clear-docker-cache` !2961
+
+### Maintenance
+
+- Add CODEOWNERS for docs !3017 (Ben Bodenmiller @bbodenmiller)
+- Add TestBuildOnCustomDirectory/pwsh as test failure on windows 20h2 and 2004 and TestMachineIdleLimits on 1809 !3011
+- Allow KUBECONFIG and GITLAB_CI env in integration tests !3010
+- Fix vendor out of sync !3008
+- Use image's Powershell Core for Windows tests !3005
+- Remove explicit use of GOROOT/GOPATH now that we're using Go modules !3002
+- Remove unneeded test configuration !3001
+- Fail k8s integration tests when the check command fails !2999
+- Fix on-demand releasing of helper images !2998
+- Stop considering docker pull image as runner system failure !2995
+- Skip docker-machine provision on failure by default !2986
+- Fix make prepare_index read GPG_KEY from file !2985
+- Fail CI build if test failures not updated !2976
+- Only print necessary env vars in tests !2971
+- Update environment name for Linux docker images !2970
+- Don't run fuzz variable mask test for docs !2965
+- Add environment for gitlab stable release !2962
+- Add environment name for package jobs !2959
+- Use file based variables for GPG_KEY !2958
+- Update default branch from master to main !2930
+- Only allow failures with exit code 99 in Linux tests !2704
+- Test passing a config template to the RegisterCommand !2451
+- Make the variable type for the GitLab CI secret configurable !2414
+
+### GitLab Runner distribution
+
+- Add support for Windows Server core, version 20H2 [Semi-Annual Channel release] !2908
+
+### Documentation changes
+
+- Restructure markdownlint configuration !3012
+- Update sudo command for linux repository install !3009
+- Fix broken links in Runner docs !3007
+- Add note on IdleCount to autoscaling docs !3004
+- Update feature flag FF_SKIP_DOCKER_MACHINE_PROVISION_ON_CREATION_FAILURE grammar !3000
+- Docs: Complete sentence, link to general SSL troubleshooting info !2994
+- Update runner readmes to index !2990
+- Added note for Overwriting Kubernetes Namespace section !2984
+- Mention liveness project when adding Windows runners !2981
+- Add details on how to assign Runner Manager to security fork project !2974
+- Docs: Updated Shell topic titles to be more clear !2972
+- Update kubernetes execution strategy documentation !2966
+- Fix outdated VS Code package recommendation !2964
+- Add docs about DEB/RPM packages signature verification !2963
+- Docs: Specify exact Parallels product names !2960
+- Provide JSON job response file for custom executor. !2912 (Paul Bryant @paulbry)
+- Add instructions for proxying the GitLab registry !2865
+- Fix typo/incorrect grammar !2842 (Per Lundberg @perlun)
+
+## v14.0.0 (2021-06-19)
+
+### New features
+
+- Send GPU config string !2848
+- Add support for selective git submodule paths inclusion/exclusion !2249
+
+### Bug fixes
+
+- Fix race blocking goroutine in shell executor !2910
+- Order masked values by length to prevent longer values being partially revealed !2892
+- Kubernetes attach strategy hangs when log file is deleted !2824
+
+### Maintenance
+
+- Enable kubernetes attach strategy by default !2955
+- Add ASDF .tool-versions file !2948
+- Make check test directives depend on prepare_done !2947
+- Fix broken test output produced by MakeFatalToPanic !2929
+- Use main branch for docs reviews !2925
+- Disable windows anti-malware monitoring !2920
+- Remove FF_RESET_HELPER_IMAGE_ENTRYPOINT feature flag !2906
+- Remove legacy process termination for shell executor !2905
+- Pull helper image from GitLab registry by default !2904
+- Pwsh shell support for kubernetes when legacy execution strategy ff is set to false !2902
+- Remove offpeak settings docker autoscaling !2897
+- Add shell benchmarks !2894
+- Make pwsh the default shell for new registrations !2889
+- Remove FF_USE_GO_CLOUD_WITH_CACHE_ARCHIVER feature flag !2887
+- Remove deprecated Makefile targets !2885
+- Update Kubernetes client-go library to 0.21.1 !2878
+- Segregate `unit test` job into a separate `integration test` job !2783
+- Add supported failure reasons for build errors !2744
+- Upgrade kardianos service !2729
+- Enable fastzip & progress meter !2565
+- Allow building behind a proxy !2168 (dHannasch1 @dHannasch1)
+
+### GitLab Runner distribution
+
+- Remove support for Windows 1909 !2924
+- Remove support for Windows 1903 !2915
+- Remove ubuntu/eoan package !2888
+- Publish Windows helper image :latest tags !2879
+- Add Ubuntu-based runner-helper image !2835
+
+### Documentation changes
+
+- Add troubleshooting note on gitlab-runner symlink removal !2953
+- Disable skel directory usage by default for DEB/RPM installation !2942
+- Update PROCESS.md referencing runner release helper templates !2939
+- Add tlsctl to runner docs !2937
+- Remove old redirects !2933
+- Update troubleshooting documentation for old Docker versions on Windows Server !2927
+- Add remove_date to YAML frontmatter !2922
+- Revert (arch) change !2918
+- Shell executor: Link to latest available Git version !2917
+- Be more specific about Windows version support !2916
+- Made images smaller !2909
+- Add troubleshooting steps to gitlab runner operator !2901
+- Fix external links !2895
+- Fixed typo in docker runner documentation !2891
+- Use DNS option in TOML to avoid proxy and route in docs !2815
+- Change order of steps to configure autoscaling !2665
+- Update docs/executors/kubernetes.md !1903
+
+### Other changes
+
+- Remove conversion between failed and cancelled buildStage for prometheus metrics !2932
+- Delete unused 1909 allowed test failures !2928
+- Updated test case names for TestBuildJobStatusEnvVars !2907 (listout @listout)
+- Specify the working version for lsif-go image !2898
+- Remove /usr/lib/gitlab-runner symlink from packages !2890
+- Make git-lfs tar checksum usage coherent !2268
+
+## v13.12.0 (2021-05-20)
+
+### New features
+
+- Support git strategy with kubernetes executor !2862
+
+### Bug fixes
+
+- Add utf-8 invalid replacement encoder to trace transformers !2881
+- Pass Powershell scripts as a file to shell executor !2874
+- Add new eval execution strategy for capturing exit code !2818
+
+### Maintenance
+
+- Revert "Publish Windows helper image :latest tags" !2880
+- Use latest docs linting images for testing !2877
+- Ensure Docker client is in experimental mode !2870
+- Improve trace masking performance !2863
+- Use Powershell for resolving paths !2836
+- Move commands package integration tests to own files !2795
+- Allow whole Vault Secret configuration to be variable-expandable !2772
+- Update coverage and windows tests to rules !2756
+
+### Documentation changes
+
+- Changed ${arch} to $(arch) !2875
+- Fix TOML syntax in Kubernetes documentation !2872
+- Convert pull policies bolds into headers !2867
+- Update GitLab Runner connectivity !2866
+- Update Kubernetes pull policy documentation !2860
+- Document operator properties, custom installation and permissions !2847
+- Clarify, N-to-M relationship of Runners to GitLab instances !2788
+
 ## v13.11.0 (2021-04-20)
 
 ### New features
@@ -91,7 +617,7 @@
 - Runner: Update spelling exceptions list !2770
 - Docs for installing runner on a separate machine !2767
 - Update docs/monitoring/README.md !2766
-- Fix misspelling of "Force" in Powershell examples !2764 (Gabriel Smith @yodal_)
+- Fix misspelling of "Force" in Powershell examples !2764 (Gabriel Smith @yodal\_)
 - Add runner execution flow diagram !2760
 - Fix duplicate labels in CONTRIBUTING.md !2747 (h.yoshida @hirokiyoshida837)
 - Add backticks around --google-accelerator docs !2742
@@ -690,7 +1216,7 @@
 - Rename network manager file for docker executor !2147
 - Enable staticcheck linter !2136
 - Update GitLab CI image to include git lfs !2124
-- Implement Is for *BuildError !2121
+- Implement Is for \*BuildError !2121
 - Update log message for failure of removing network for build !2119 (Max Wittig @max-wittig)
 - Change license management to use rules !2096
 - Use Docker client's ContainerWait !2073
@@ -890,7 +1416,7 @@
 
 - Upgrade docker client to version 19.03.5 for CI image !1874
 - Fix docker machine executor test filename !1927
-- Remove executor_ prefix from filenames in the executors package !1902
+- Remove executor\_ prefix from filenames in the executors package !1902
 - Fix 'make all' target !1900
 - Replace changelog generator script !1888
 - Bump Minio to latest version !1881 (Tom Elliff @tomelliff)
@@ -1149,7 +1675,7 @@
 - docker.md: Correct Image Sizes !1542
 - Add note on shell-based Docker image requirement !1459
 - Fixed powershell commands for Windows Runner !1544
-- Remove the scripting  for release checklist issue creation !1556
+- Remove the scripting for release checklist issue creation !1556
 - Use new location for helm charts repo !1553
 - Make Notes look consistent !1555
 - Change markdownlint wildcard format !1554
@@ -1303,7 +1829,7 @@ Please look into linked issues for details.
 - Add configuration of access_level for runners on registration !1323
 - Remove doc notice for deprecated OSes !1384
 - Remove deprecated clone/fetch command !1372
-- Allow configuration of  Pod Security Context by Kubernetes Exeutor !1036
+- Allow configuration of Pod Security Context by Kubernetes Exeutor !1036
 - Fix case sensitivity for windows volumes !1389
 - Accept docker-windows as an option on register !1388
 - Add documentation for windows development !1183
@@ -1382,7 +1908,7 @@ All deprecations, with a detailed description, are listed at
 https://about.gitlab.com/2019/04/22/gitlab-11-10-released/#release-deprecations
 
 1. With version 11.10 we're deprecating the feature flag
-[FF_USE_LEGACY_GIT_CLEAN_STRATEGY](https://docs.gitlab.com/runner/configuration/feature-flags.html#available-feature-flags).
+   [FF_USE_LEGACY_GIT_CLEAN_STRATEGY](https://docs.gitlab.com/runner/configuration/feature-flags.html#available-feature-flags).
 
 **Release changes:**
 
@@ -1765,7 +2291,7 @@ https://about.gitlab.com/2019/03/22/gitlab-11-9-released/#release-deprecations
 - Use local GOPATH in Makefile !779
 - Move Bleeding Edge release from ubuntu/yakkety to ububut/artful !797
 - Fix data race in commands package unit tests !787
-- Fix data race in function common.(*Trace).Write() !784
+- Fix data race in function common.(\*Trace).Write() !784
 - Fix data races in executor/docker package !800
 - Fix data races in network package !775
 
@@ -1833,16 +2359,16 @@ https://about.gitlab.com/2019/03/22/gitlab-11-9-released/#release-deprecations
 ## v10.0.0 (2017-09-22)
 
 > **Note:** With 10.0, we've moved repository from https://gitlab.com/gitlab-org/gitlab-ci-multi-runner
-to https://gitlab.com/gitlab-org/gitlab-runner. Please update your Bookmarks!
+> to https://gitlab.com/gitlab-org/gitlab-runner. Please update your Bookmarks!
 
 > **Note:** Starting with 10.0, we're marking the `exec` and service-related commands as **deprecated**. They will
-be removed in one of the upcoming releases.
+> be removed in one of the upcoming releases.
 
 > **Note:** Starting with 10.0, we're marking the `docker-ssh` and `docker-ssh+machine` executors as **deprecated**.
-They will be removed in one of the upcoming releases.
+> They will be removed in one of the upcoming releases.
 
 > **Note:** Starting with 10.0, behavior of `register` command was slightly changed. Please look into
-https://gitlab.com/gitlab-org/gitlab-runner/merge_requests/657 for more details.
+> https://gitlab.com/gitlab-org/gitlab-runner/merge_requests/657 for more details.
 
 - Lock runners to project by default on registration !657
 - Update cli library !656
@@ -2391,6 +2917,7 @@ that even in edge cases you can always rely on them.
 - Remove LFS from prebuilt images
 
 ## v1.5.2 (2016-08-24)
+
 (no changes)
 
 ## v1.5.1 (2016-08-24)
@@ -2598,7 +3125,7 @@ that even in edge cases you can always rely on them.
 - Add internal command for uploading artifacts without the system dependencies
 - Use umask in docker build containers to fix running jobs as specific user
 - Fix problem with `cache` paths never being archived
-- Add support for [`cache:key`](http://doc.gitlab.com/ce/ci/yaml/README.html#cachekey)
+- Add support for [`cache:key`](http://doc.gitlab.com/ce/ci/yaml/index.html#cachekey)
 - Add warnings about using runner in `user-mode`
 - Push packages to all upcoming distributions (Debian/Ubuntu/Fedora)
 - Rewrite the shell support adding all features to all shells (makes possible to use artifacts and caching on Windows)

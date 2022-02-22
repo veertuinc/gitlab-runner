@@ -1,10 +1,10 @@
 stages:
 - prepare
+- fips helper binaries
 - prebuild
 - test
 - coverage
 - build
-- integration
 - package
 - release
 - postrelease
@@ -14,11 +14,11 @@ include:
 - local: /.gitlab/ci/_common.gitlab-ci.yml
 - local: /.gitlab/ci/_rules.gitlab-ci.yml
 - local: /.gitlab/ci/prepare.gitlab-ci.yml
+- local: /.gitlab/ci/fips-helper-binaries.gitlab-ci.yml
 - local: /.gitlab/ci/prebuild.gitlab-ci.yml
 - local: /.gitlab/ci/test.gitlab-ci.yml
 - local: /.gitlab/ci/coverage.gitlab-ci.yml
 - local: /.gitlab/ci/build.gitlab-ci.yml
-- local: /.gitlab/ci/integration.gitlab-ci.yml
 - local: /.gitlab/ci/package.gitlab-ci.yml
 - local: /.gitlab/ci/release.gitlab-ci.yml
 - local: /.gitlab/ci/postrelease.gitlab-ci.yml

@@ -1,12 +1,18 @@
-# The Docker executor
+---
+stage: Verify
+group: Runner
+info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
+---
+
+# The Docker executor **(FREE)**
 
 GitLab Runner can use Docker to run jobs on user provided images. This is
 possible with the use of **Docker** executor.
 
 The **Docker** executor when used with GitLab CI, connects to [Docker Engine](https://www.docker.com/products/container-runtime)
 and runs each build in a separate and isolated container using the predefined
-image that is [set up in `.gitlab-ci.yml`](https://docs.gitlab.com/ee/ci/yaml/README.html) and in accordance in
-[`config.toml`](../commands/README.md#configuration-file).
+image that is [set up in `.gitlab-ci.yml`](https://docs.gitlab.com/ee/ci/yaml/index.html) and in accordance in
+[`config.toml`](../commands/index.md#configuration-file).
 
 That way you can have a simple and reproducible build environment that can also
 run on your workstation. The added benefit is that you can test all the
@@ -55,7 +61,7 @@ configuring a Windows Docker executor.
 With the support for Powershell Core introduced in the Windows helper image, it is now possible to leverage
 the `nanoserver` variants for the helper image.
 
-### Limitations
+### Limitations of Docker executor on Windows
 
 The following are some limitations of using Windows containers with
 Docker executor:
@@ -95,9 +101,8 @@ GitLab Runner only supports the following versions of Windows which
 follows our [support lifecycle for
 Windows](../install/windows.md#windows-version-support-policy):
 
+- Windows Server 20H2.
 - Windows Server 2004.
-- Windows Server 1909.
-- Windows Server 1903.
 - Windows Server 1809.
 
 For future Windows Server versions, we have a [future version support
@@ -108,12 +113,10 @@ daemon is running on. For example, the following [`Windows Server
 Core`](https://hub.docker.com/_/microsoft-windows-servercore) images can
 be used:
 
+- `mcr.microsoft.com/windows/servercore:20H2`
+- `mcr.microsoft.com/windows/servercore:20H2-amd64`
 - `mcr.microsoft.com/windows/servercore:2004`
 - `mcr.microsoft.com/windows/servercore:2004-amd64`
-- `mcr.microsoft.com/windows/servercore:1909`
-- `mcr.microsoft.com/windows/servercore:1909-amd64`
-- `mcr.microsoft.com/windows/servercore:1903`
-- `mcr.microsoft.com/windows/servercore:1903-amd64`
 - `mcr.microsoft.com/windows/servercore:1809`
 - `mcr.microsoft.com/windows/servercore:1809-amd64`
 - `mcr.microsoft.com/windows/servercore:ltsc2019`
@@ -123,17 +126,13 @@ be used:
 A Windows Server running GitLab Runner must be running a recent version of Docker
 because GitLab Runner uses Docker to detect what version of Windows Server is running.
 
-A combination known not to work with GitLab Runner is Docker 17.06
-and Server 1909. Docker does not identify the version of Windows Server
-resulting in the following error:
+A known version of Docker that doesn't work with GitLab Runner is `Docker 17.06`
+since Docker does not identify the version of Windows Server resulting in the
+following error:
 
 ```plaintext
 unsupported Windows Version: Windows Server Datacenter
 ```
-
-This error should contain the Windows Server version. If you get this error,
-with no version specified, upgrade Docker. Try a Docker version of similar age,
-or later, than the Windows Server release.
 
 [Read more about troubleshooting this](../install/windows.md#docker-executor-unsupported-windows-version).
 
@@ -166,10 +165,9 @@ section.
 
 ### Services
 
-You can use [services](https://docs.gitlab.com/ee/ci/services/) by
-enabling [network per-build](#network-per-build) networking mode.
-[Available](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1042)
-since GitLab Runner 12.9.
+In [GitLab Runner 12.9 and later](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1042),
+you can use [services](https://docs.gitlab.com/ee/ci/services/) by
+enabling [a network for each job](#create-a-network-for-each-job).
 
 ## Workflow
 
@@ -201,8 +199,8 @@ create a container on which your build will run.
 If you don't specify the namespace, Docker implies `library` which includes all
 [official images](https://hub.docker.com/u/library/). That's why you'll see
 many times the `library` part omitted in `.gitlab-ci.yml` and `config.toml`.
-For example you can define an image like `image: ruby:2.6`, which is a shortcut
-for `image: library/ruby:2.6`.
+For example you can define an image like `image: ruby:2.7`, which is a shortcut
+for `image: library/ruby:2.7`.
 
 Then, for each Docker image there are tags, denoting the version of the image.
 These are defined with a colon (`:`) after the image name. For example, for
@@ -228,66 +226,68 @@ existing image and run it as an additional container than install `mysql` every
 time the project is built.
 
 You can see some widely used services examples in the relevant documentation of
-[CI services examples](https://gitlab.com/gitlab-org/gitlab-ce/tree/master/doc/ci/services/README.md).
+[CI services examples](https://docs.gitlab.com/ee/ci/services/).
 
 If needed, you can [assign an alias](https://docs.gitlab.com/ee/ci/docker/using_docker_images.html#available-settings-for-services)
 to each service.
 
 ## Networking
 
-Networking is required to connect services to the build job and may also be used to run build jobs in user-defined
-networks. Either legacy `network_mode` or `per-build` networking may be used.
+Networking is required to connect services to a CI/CD job. Networking can also be used to run jobs in user-defined
+networks. You can use either legacy container links, or create a network for each job.
+We recommend creating a network for each job.
 
 ### Legacy container links
 
 The default network mode uses [Legacy container links](https://docs.docker.com/network/links/) with
 the default Docker `bridge` mode to link the job container with the services.
 
-`network_mode` can be used to configure how the networking stack is set up for the containers
-using one of the following values:
+This mode can be used to configure how the networking stack is set up for the containers by using `network_mode`
+[configuration parameter](../configuration/advanced-configuration.md#the-runnersdocker-section)
+with one of the following values:
 
 - One of the standard Docker [networking modes](https://docs.docker.com/engine/reference/run/#network-settings):
   - `bridge`: use the bridge network (default)
   - `host`: use the host's network stack inside the container
   - `none`: no networking (not recommended)
-  - Any other `network_mode` value is taken as the name of an already existing
-    Docker network, which the build container should connect to.
+- Any other `network_mode` value is taken as the name of an already existing
+  Docker network, which the build container should connect to.
 
-For name resolution to work, Docker will manipulate the `/etc/hosts` file in the build
-job container to include the service container hostname (and alias). However,
-the service container will **not** be able to resolve the build job container
-name. To achieve that, use the `per-build` network mode.
+For name resolution to work, Docker manipulates the `/etc/hosts` file in the
+container to include the service container hostname and alias. However,
+the service container is **not** able to resolve the container
+name. To resolve the container name, create a network for each job.
 
 Linked containers share their environment variables.
 
-### Network per-build
+### Create a network for each job
 
 > [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1042) in GitLab Runner 12.9.
 
-This mode will create and use a new user-defined Docker bridge network per build.
+This networking mode creates and uses a new user-defined Docker bridge network for each job.
 [User-defined bridge networks](https://docs.docker.com/network/bridge/) are covered in detail in the Docker documentation.
 
 Unlike [legacy container links](#legacy-container-links) used in other network modes,
 Docker environment variables are **not** shared across the containers.
 
-Docker networks may conflict with other networks on the host, including other Docker networks,
+Docker networks might conflict with other networks on the host, including other Docker networks,
 if the CIDR ranges are already in use. The default Docker address pool can be configured
-via `default-address-pool` in [`dockerd`](https://docs.docker.com/engine/reference/commandline/dockerd/).
+by using `default-address-pool` in [`dockerd`](https://docs.docker.com/engine/reference/commandline/dockerd/).
 
-To enable this mode you need to enable the [`FF_NETWORK_PER_BUILD`
+To enable this mode you must enable the [`FF_NETWORK_PER_BUILD`
 feature flag](../configuration/feature-flags.md).
 
-When a job starts, a bridge network is created (similarly to `docker
-network create <network>`). Upon creation, the service container(s) and the
+When a job starts, a bridge network is created (similar to `docker network create <network>`).
+Upon creation, the service containers and the
 build job container are connected to this network.
 
-Both the build job container, and the service container(s) will be able to
-resolve each other's hostnames (and aliases). This functionality is
+Both the container running the job and the containers running the service can
+resolve each other's hostnames and aliases. This functionality is
 [provided by Docker](https://docs.docker.com/network/bridge/#differences-between-user-defined-bridges-and-the-default-bridge).
 
-The build container is resolvable via the `build` alias as well as it's GitLab assigned hostname.
+The job container is resolvable by using the `build` alias as well, because the hostname is assigned by GitLab.
 
-The network is removed at the end of the build job.
+The network is removed at the end of the job.
 
 ## Define image and services from `.gitlab-ci.yml`
 
@@ -295,7 +295,7 @@ You can simply define an image that will be used for all jobs and a list of
 services that you want to use during build time.
 
 ```yaml
-image: ruby:2.6
+image: ruby:2.7
 
 services:
   - postgres:9.3
@@ -335,7 +335,7 @@ Look for the `[runners.docker]` section:
 
 ```toml
 [runners.docker]
-  image = "ruby:2.6"
+  image = "ruby:2.7"
 
 [[runners.docker.services]]
   name = "mysql:latest"
@@ -439,12 +439,12 @@ See an issue: <https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1520>.
 ### PostgreSQL service example
 
 See the specific documentation for
-[using PostgreSQL as a service](https://gitlab.com/gitlab-org/gitlab-ce/blob/master/doc/ci/services/postgres.md).
+[using PostgreSQL as a service](https://docs.gitlab.com/ee/ci/services/postgres.html).
 
 ### MySQL service example
 
 See the specific documentation for
-[using MySQL as a service](https://gitlab.com/gitlab-org/gitlab-ce/blob/master/doc/ci/services/mysql.md).
+[using MySQL as a service](https://docs.gitlab.com/ee/ci/services/mysql.html).
 
 ### The services health check
 
@@ -452,7 +452,7 @@ After the service is started, GitLab Runner waits some time for the service to
 be responsive. Currently, the Docker executor tries to open a TCP connection to
 the first exposed service in the service container.
 
-You can see how it is implemented by checking this [Go command](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/commands/helpers/health_check.go).
+You can see how it is implemented by checking this [Go command](https://gitlab.com/gitlab-org/gitlab-runner/blob/main/commands/helpers/health_check.go).
 
 ## The builds and cache storage
 
@@ -471,7 +471,7 @@ directory as persistent by defining it in `volumes = ["/my/cache/"]` under the
 
 > Introduced in GitLab Runner 13.9, [all created runner resources cleaned up](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/2310).
 
-GitLab Runner provides the [`clear-docker-cache`](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/packaging/root/usr/share/gitlab-runner/clear-docker-cache)
+GitLab Runner provides the [`clear-docker-cache`](https://gitlab.com/gitlab-org/gitlab-runner/blob/main/packaging/root/usr/share/gitlab-runner/clear-docker-cache)
 script to remove old containers and volumes that can unnecessarily consume disk space.
 
 Run `clear-docker-cache` regularly (using `cron` once per week, for example),
@@ -490,7 +490,7 @@ The default option is `prune-volumes` which the script will remove all unused co
 
 ### Clearing old build images
 
-The [`clear-docker-cache`](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/packaging/root/usr/share/gitlab-runner/clear-docker-cache) script will not remove the Docker images as they are not tagged by the GitLab Runner. You can however confirm the space that can be reclaimed by running the script with the `space` option as illustrated below:
+The [`clear-docker-cache`](https://gitlab.com/gitlab-org/gitlab-runner/blob/main/packaging/root/usr/share/gitlab-runner/clear-docker-cache) script will not remove the Docker images as they are not tagged by the GitLab Runner. You can however confirm the space that can be reclaimed by running the script with the `space` option as illustrated below:
 
 ```shell
 clear-docker-cache space
@@ -658,16 +658,16 @@ Pulling docker image local_image:latest ...
 ERROR: Build failed: Error: image local_image:latest not found
 ```
 
-**When to use this pull policy?**
+#### When to use the `never` pull policy
 
-This pull policy should be used if you want or need to have a full
+The `never` pull policy should be used if you want or need to have a full
 control on which images are used by the runner's users. It is a good choice
 for private runners that are dedicated to a project where only specific images
 can be used (not publicly available on any registries).
 
-**When not to use this pull policy?**
+#### When not to use the `never` pull policy
 
-This pull policy will not work properly with most of [auto-scaled](../configuration/autoscale.md)
+The `never` pull policy will not work properly with most of [auto-scaled](../configuration/autoscale.md)
 Docker executor use cases. Because of how auto-scaling works, the `never`
 pull policy may be usable only when using a pre-defined cloud instance
 images for chosen cloud provider. The image needs to contain installed
@@ -679,9 +679,9 @@ When the `if-not-present` pull policy is used, the runner will first check
 if the image is present locally. If it is, then the local version of
 image will be used. Otherwise, the runner will try to pull the image.
 
-**When to use this pull policy?**
+#### When to use the `if-not-present` pull policy
 
-This pull policy is a good choice if you want to use images pulled from
+The `if-not-present` pull policy is a good choice if you want to use images pulled from
 remote registries, but you want to reduce time spent on analyzing image
 layers difference when using heavy and rarely updated images.
 In that case, you will need once in a while to manually remove the image
@@ -691,9 +691,9 @@ It is also the good choice if you need to use images that are built
 and available only locally, but on the other hand, also need to allow to
 pull images from remote registries.
 
-**When not to use this pull policy?**
+#### When not to use the `if-not-present` pull policy
 
-This pull policy should not be used if your builds use images that
+The `if-not-present` pull policy should not be used if your builds use images that
 are updated frequently and need to be used in most recent versions.
 In such a situation, the network load reduction created by this policy may
 be less worthy than the necessity of the very frequent deletion of local
@@ -733,9 +733,9 @@ WARNING: Locally found image will be used instead.
 
 This was [changed in GitLab Runner `v1.8`](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/1905).
 
-**When to use this pull policy?**
+#### When to use the `always` pull policy
 
-This pull policy should be used if your runner is publicly available
+The `always` pull policy should be used if your runner is publicly available
 and configured as a shared runner in your GitLab instance. It is the
 only pull policy that can be considered as secure when the runner will
 be used with private images.
@@ -746,9 +746,9 @@ the newest images.
 Also, this will be the best solution for an [auto-scaled](../configuration/autoscale.md)
 configuration of the runner.
 
-**When not to use this pull policy?**
+#### When not to use the `always` pull policy
 
-This pull policy will definitely not work if you need to use locally
+The `always` pull policy will definitely not work if you need to use locally
 stored images. In this case, the runner will skip the local copy of the image
 and try to pull it from the remote registry. If the image was built locally
 and doesn't exist in any public registry (and especially in the default
@@ -766,8 +766,6 @@ ERROR: Build failed: Error: image local_image:latest not found
 The `pull_policy` parameter allows you to specify a list of pull policies.
 The policies in the list will be attempted in order from left to right until a pull attempt
 is successful, or the list is exhausted.
-
-**When to use multiple pull policies?**
 
 This functionality can be useful when the Docker registry is not available
 and you need to increase job resiliency.

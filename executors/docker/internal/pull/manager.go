@@ -3,7 +3,6 @@ package pull
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -35,7 +34,7 @@ type pullLogger interface {
 
 type manager struct {
 	usedImages     map[string]string
-	usedImagesLock sync.RWMutex
+	usedImagesLock sync.Mutex
 
 	context             context.Context
 	config              ManagerConfig
@@ -95,8 +94,8 @@ func (m *manager) GetDockerImage(imageName string) (*types.ImageInspect, error) 
 }
 
 func (m *manager) wasImageUsed(imageName, imageID string) bool {
-	m.usedImagesLock.RLock()
-	defer m.usedImagesLock.RUnlock()
+	m.usedImagesLock.Lock()
+	defer m.usedImagesLock.Unlock()
 
 	return m.usedImages[imageName] == imageID
 }
@@ -201,12 +200,8 @@ func (m *manager) pullDockerImage(imageName string, ac *cli.AuthConfig) (*types.
 	options := types.ImagePullOptions{}
 	options.RegistryAuth, _ = auth.EncodeConfig(ac)
 
-	errorRegexp := regexp.MustCompile("(repository does not exist|not found)")
 	if err := m.client.ImagePullBlocking(m.context, ref, options); err != nil {
-		if errorRegexp.MatchString(err.Error()) {
-			return nil, &common.BuildError{Inner: err}
-		}
-		return nil, err
+		return nil, &common.BuildError{Inner: err, FailureReason: common.ScriptFailure}
 	}
 
 	image, _, err := m.client.ImageInspectWithRaw(m.context, imageName)

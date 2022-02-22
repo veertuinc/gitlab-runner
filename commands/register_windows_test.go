@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package commands
 
 import (
@@ -7,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
+	"gitlab.com/gitlab-org/gitlab-runner/shells"
 )
 
 func TestRegisterDefaultWindowsDockerCacheVolume(t *testing.T) {
@@ -55,15 +59,15 @@ func TestDefaultWindowsShell(t *testing.T) {
 		},
 		{
 			shell:         "powershell",
-			expectedShell: "powershell",
+			expectedShell: shells.SNPowershell,
 		},
 		{
 			shell:         "pwsh",
-			expectedShell: "pwsh",
+			expectedShell: shells.SNPwsh,
 		},
 		{
 			shell:         "",
-			expectedShell: "powershell",
+			expectedShell: shells.SNPwsh,
 		},
 	}
 

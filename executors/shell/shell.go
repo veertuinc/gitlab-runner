@@ -10,14 +10,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
-	"github.com/kardianos/osext"
 	"github.com/sirupsen/logrus"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/process"
 )
@@ -62,68 +59,42 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	return nil
 }
 
-// TODO: Remove in 14.0 https://gitlab.com/gitlab-org/gitlab-runner/issues/6413
-func (s *executor) killAndWait(cmd *exec.Cmd, waitCh chan error) error {
-	for {
-		s.Debugln("Aborting command...")
-		helpers.KillProcessGroup(cmd)
-		select {
-		case <-time.After(time.Second):
-		case err := <-waitCh:
-			return err
-		}
-	}
-}
-
 func (s *executor) Run(cmd common.ExecutorCommand) error {
-	if s.Build.IsFeatureFlagOn(featureflags.ShellExecutorUseLegacyProcessKill) {
-		return s.runLegacy(cmd)
+	s.BuildLogger.Debugln("Using new shell command execution")
+	cmdOpts := process.CommandOptions{
+		Env:                             append(os.Environ(), s.BuildShell.Environment...),
+		Stdout:                          s.Trace,
+		Stderr:                          s.Trace,
+		UseWindowsLegacyProcessStrategy: s.Build.IsFeatureFlagOn(featureflags.UseWindowsLegacyProcessStrategy),
 	}
 
-	return s.run(cmd)
-}
-
-// TODO: Remove in 14.0 https://gitlab.com/gitlab-org/gitlab-runner/issues/6413
-func (s *executor) runLegacy(cmd common.ExecutorCommand) error {
-	s.BuildLogger.Debugln("Using legacy command execution")
-	// Create execution command
-	c := exec.Command(s.BuildShell.Command, s.BuildShell.Arguments...)
-	if c == nil {
-		return errors.New("failed to generate execution command")
-	}
-
-	helpers.SetProcessGroup(c)
-	defer helpers.KillProcessGroup(c)
-
-	// Fill process environment variables
-	c.Env = append(os.Environ(), s.BuildShell.Environment...)
-	c.Stdout = s.Trace
-	c.Stderr = s.Trace
-
-	stdin, args, cleanup, err := s.shellScriptArgs(cmd, c.Args)
+	args := s.BuildShell.Arguments
+	stdin, args, cleanup, err := s.shellScriptArgs(cmd, args)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	c.Stdin = stdin
-	c.Args = args
+	cmdOpts.Stdin = stdin
+
+	// Create execution command
+	c := newCommander(s.BuildShell.Command, args, cmdOpts)
 
 	// Start a process
 	err = c.Start()
 	if err != nil {
-		return fmt.Errorf("starting process: %w", err)
+		return fmt.Errorf("failed to start process: %w", err)
 	}
 
 	// Wait for process to finish
-	waitCh := make(chan error)
+	waitCh := make(chan error, 1)
 	go func() {
-		err := c.Wait()
+		waitErr := c.Wait()
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			err = &common.BuildError{Inner: err, ExitCode: exitErr.ExitCode()}
+		if errors.As(waitErr, &exitErr) {
+			waitErr = &common.BuildError{Inner: waitErr, ExitCode: exitErr.ExitCode()}
 		}
-		waitCh <- err
+		waitCh <- waitErr
 	}()
 
 	// Support process abort
@@ -131,7 +102,9 @@ func (s *executor) runLegacy(cmd common.ExecutorCommand) error {
 	case err = <-waitCh:
 		return err
 	case <-cmd.Context.Done():
-		return s.killAndWait(c, waitCh)
+		logger := common.NewProcessLoggerAdapter(s.BuildLogger)
+		return newProcessKillWaiter(logger, s.Config.GetGracefulKillTimeout(), s.Config.GetForceKillTimeout()).
+			KillAndWait(c, waitCh)
 	}
 }
 
@@ -161,58 +134,9 @@ func (s *executor) shellScriptArgs(cmd common.ExecutorCommand, args []string) (i
 	return nil, append(args, scriptFile), cleanup, nil
 }
 
-func (s *executor) run(cmd common.ExecutorCommand) error {
-	s.BuildLogger.Debugln("Using new shell command execution")
-	cmdOpts := process.CommandOptions{
-		Env:                             append(os.Environ(), s.BuildShell.Environment...),
-		Stdout:                          s.Trace,
-		Stderr:                          s.Trace,
-		UseWindowsLegacyProcessStrategy: s.Build.IsFeatureFlagOn(featureflags.UseWindowsLegacyProcessStrategy),
-	}
-
-	args := s.BuildShell.Arguments
-	stdin, args, cleanup, err := s.shellScriptArgs(cmd, args)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
-	cmdOpts.Stdin = stdin
-
-	// Create execution command
-	c := newCommander(s.BuildShell.Command, args, cmdOpts)
-
-	// Start a process
-	err = c.Start()
-	if err != nil {
-		return fmt.Errorf("failed to start process: %w", err)
-	}
-
-	// Wait for process to finish
-	waitCh := make(chan error)
-	go func() {
-		waitErr := c.Wait()
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
-			waitErr = &common.BuildError{Inner: waitErr, ExitCode: exitErr.ExitCode()}
-		}
-		waitCh <- waitErr
-	}()
-
-	// Support process abort
-	select {
-	case err = <-waitCh:
-		return err
-	case <-cmd.Context.Done():
-		logger := common.NewProcessLoggerAdapter(s.BuildLogger)
-		return newProcessKillWaiter(logger, s.Config.GetGracefulKillTimeout(), s.Config.GetForceKillTimeout()).
-			KillAndWait(c, waitCh)
-	}
-}
-
 func init() {
 	// Look for self
-	runnerCommand, err := osext.Executable()
+	runnerCommand, err := os.Executable()
 	if err != nil {
 		logrus.Warningln(err)
 	}

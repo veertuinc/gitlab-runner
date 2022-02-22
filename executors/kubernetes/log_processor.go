@@ -17,7 +17,7 @@ import (
 )
 
 type logStreamer interface {
-	Stream(ctx context.Context, offset int64, output io.Writer) error
+	Stream(offset int64, output io.Writer) error
 	fmt.Stringer
 }
 
@@ -29,7 +29,7 @@ type kubernetesLogStreamer struct {
 	executor     RemoteExecutor
 }
 
-func (s *kubernetesLogStreamer) Stream(ctx context.Context, offset int64, output io.Writer) error {
+func (s *kubernetesLogStreamer) Stream(offset int64, output io.Writer) error {
 	exec := ExecOptions{
 		Namespace:     s.namespace,
 		PodName:       s.pod,
@@ -52,7 +52,7 @@ func (s *kubernetesLogStreamer) Stream(ctx context.Context, offset int64, output
 		Config:   s.clientConfig,
 	}
 
-	return exec.executeRequest(ctx)
+	return exec.executeRequest()
 }
 
 func (s *kubernetesLogStreamer) String() string {
@@ -62,7 +62,8 @@ func (s *kubernetesLogStreamer) String() string {
 type logProcessor interface {
 	// Process listens for log lines
 	// consumers must read from the channel until it's closed
-	Process(ctx context.Context) <-chan string
+	// consumers are also notified in case of error through the error channel
+	Process(ctx context.Context) (<-chan string, <-chan error)
 }
 
 type backoffCalculator interface {
@@ -108,21 +109,30 @@ func newKubernetesLogProcessor(
 	}
 }
 
-func (l *kubernetesLogProcessor) Process(ctx context.Context) <-chan string {
+func (l *kubernetesLogProcessor) Process(ctx context.Context) (<-chan string, <-chan error) {
 	outCh := make(chan string)
+	errCh := make(chan error)
 	go func() {
 		defer close(outCh)
-		l.attach(ctx, outCh)
+		defer close(errCh)
+		l.attach(ctx, outCh, errCh)
 	}()
 
-	return outCh
+	return outCh, errCh
 }
 
-func (l *kubernetesLogProcessor) attach(ctx context.Context, outCh chan string) {
-	var attempt float64 = -1
-	var backoffDuration time.Duration
+func (l *kubernetesLogProcessor) attach(ctx context.Context, outCh chan string, errCh chan error) {
+	var (
+		attempt         float64 = -1
+		backoffDuration time.Duration
+	)
 
 	for {
+		// We do not exit because we need the processLogs goroutine still running.
+		// Once the error message is sent, a new step cleanup variables is started.
+		// As the pod is still running, the processLogs goroutine is not launched anymore.
+		// This is why, even though the error is sent to fail the ongoing step,
+		// we keep trying to reconnect to the output log, as a new one is created for variables cleanup.
 		attempt++
 		if attempt > 0 {
 			backoffDuration = l.backoff.ForAttempt(attempt)
@@ -140,9 +150,17 @@ func (l *kubernetesLogProcessor) attach(ctx context.Context, outCh chan string) 
 			return
 		case <-time.After(backoffDuration):
 			err := l.processStream(ctx, outCh)
-			if err != nil {
+			exitCode := getExitCode(err)
+			switch {
+			case exitCode == outputLogFileNotExistsExitCode:
+				// The cleanup variables step recreates a new output.log file
+				// where the shells.TrapCommandExitStatus is written.
+				// To not miss this line, we need to have the offset reset when we reconnect to the newly created log
+				l.logsOffset = 0
+				errCh <- fmt.Errorf("output log file deleted, cannot continue %w", err)
+			case err != nil:
 				l.logger.Warningln(fmt.Sprintf("Error %v. Retrying...", err))
-			} else {
+			default:
 				l.logger.Debug("processStream exited with no error")
 			}
 		}
@@ -166,7 +184,7 @@ func (l *kubernetesLogProcessor) processStream(ctx context.Context, outCh chan s
 	gr.Go(func() error {
 		defer cancel()
 
-		err := l.logStreamer.Stream(ctx, logsOffset, writer)
+		err := l.logStreamer.Stream(logsOffset, writer)
 		// prevent printing an error that the container exited
 		// when the context is already cancelled
 		if errors.Is(ctx.Err(), context.Canceled) {

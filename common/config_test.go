@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package common
 
 import (
@@ -14,10 +17,10 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/process"
 )
 
-func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {
+func TestCacheS3Config_AuthType(t *testing.T) {
 	tests := map[string]struct {
-		s3                     CacheS3Config
-		shouldUseIAMCredential bool
+		s3       CacheS3Config
+		authType S3AuthType
 	}{
 		"Everything is empty": {
 			s3: CacheS3Config{
@@ -27,7 +30,7 @@ func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {
 				BucketName:     "name",
 				BucketLocation: "us-east-1a",
 			},
-			shouldUseIAMCredential: true,
+			authType: S3AuthTypeIAM,
 		},
 		"Both AccessKey & SecretKey are empty": {
 			s3: CacheS3Config{
@@ -37,7 +40,7 @@ func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {
 				BucketName:     "name",
 				BucketLocation: "us-east-1a",
 			},
-			shouldUseIAMCredential: true,
+			authType: S3AuthTypeIAM,
 		},
 		"SecretKey is empty": {
 			s3: CacheS3Config{
@@ -47,7 +50,7 @@ func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {
 				BucketName:     "name",
 				BucketLocation: "us-east-1a",
 			},
-			shouldUseIAMCredential: true,
+			authType: S3AuthTypeIAM,
 		},
 		"AccessKey is empty": {
 			s3: CacheS3Config{
@@ -57,7 +60,7 @@ func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {
 				BucketName:     "name",
 				BucketLocation: "us-east-1a",
 			},
-			shouldUseIAMCredential: true,
+			authType: S3AuthTypeIAM,
 		},
 		"ServerAddress is empty": {
 			s3: CacheS3Config{
@@ -67,7 +70,7 @@ func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {
 				BucketName:     "name",
 				BucketLocation: "us-east-1a",
 			},
-			shouldUseIAMCredential: true,
+			authType: S3AuthTypeIAM,
 		},
 		"ServerAddress & AccessKey are empty": {
 			s3: CacheS3Config{
@@ -77,7 +80,7 @@ func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {
 				BucketName:     "name",
 				BucketLocation: "us-east-1a",
 			},
-			shouldUseIAMCredential: true,
+			authType: S3AuthTypeIAM,
 		},
 		"ServerAddress & SecretKey are empty": {
 			s3: CacheS3Config{
@@ -87,7 +90,7 @@ func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {
 				BucketName:     "name",
 				BucketLocation: "us-east-1a",
 			},
-			shouldUseIAMCredential: true,
+			authType: S3AuthTypeIAM,
 		},
 		"Nothing is empty": {
 			s3: CacheS3Config{
@@ -97,18 +100,54 @@ func TestCacheS3Config_ShouldUseIAMCredentials(t *testing.T) {
 				BucketName:     "name",
 				BucketLocation: "us-east-1a",
 			},
-			shouldUseIAMCredential: false,
+			authType: S3AuthTypeAccessKey,
+		},
+		"IAM set as auth type": {
+			s3: CacheS3Config{
+				ServerAddress:      "s3.amazonaws.com",
+				AccessKey:          "TOKEN",
+				SecretKey:          "TOKEN",
+				AuthenticationType: S3AuthTypeIAM,
+				BucketName:         "name",
+				BucketLocation:     "us-east-1a",
+			},
+			authType: S3AuthTypeIAM,
+		},
+		"Root credentials set as auth type": {
+			s3: CacheS3Config{
+				AccessKey:          "TOKEN",
+				SecretKey:          "TOKEN",
+				AuthenticationType: S3AuthTypeAccessKey,
+				BucketName:         "name",
+				BucketLocation:     "us-east-1a",
+			},
+			authType: S3AuthTypeAccessKey,
+		},
+		"Explicitly set invalid auth type": {
+			s3: CacheS3Config{
+				AccessKey:          "TOKEN",
+				SecretKey:          "TOKEN",
+				AuthenticationType: "invalid",
+				BucketName:         "name",
+				BucketLocation:     "us-east-1a",
+			},
+			authType: "",
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tt.shouldUseIAMCredential, tt.s3.ShouldUseIAMCredentials())
+			assert.Equal(t, tt.s3.AuthType(), tt.authType)
 		})
 	}
 }
 
 func TestConfigParse(t *testing.T) {
+	httpHeaders := []KubernetesLifecycleHTTPGetHeader{
+		{Name: "header_name_1", Value: "header_value_1"},
+		{Name: "header_name_2", Value: "header_value_2"},
+	}
+
 	tests := map[string]struct {
 		config         string
 		validateConfig func(t *testing.T, config *Config)
@@ -295,6 +334,173 @@ func TestConfigParse(t *testing.T) {
 				assert.Equal(t, []string{"e2e-az1"}, nodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[1].MatchFields[0].Values)
 			},
 		},
+
+		//nolint:lll
+		"check pod affinities": {
+			config: `
+				[[runners]]
+					[runners.kubernetes]
+						[runners.kubernetes.affinity]
+							[runners.kubernetes.affinity.pod_affinity]
+								[[runners.kubernetes.affinity.pod_affinity.required_during_scheduling_ignored_during_execution]]
+									topology_key = "failure-domain.beta.kubernetes.io/zone"
+									namespaces = ["namespace_1", "namespace_2"]
+									[runners.kubernetes.affinity.pod_affinity.required_during_scheduling_ignored_during_execution.label_selector]
+										[[runners.kubernetes.affinity.pod_affinity.required_during_scheduling_ignored_during_execution.label_selector.match_expressions]]
+											key = "security"
+											operator = "In"
+											values = ["S1"]
+									[runners.kubernetes.affinity.pod_affinity.required_during_scheduling_ignored_during_execution.namespace_selector]
+										[[runners.kubernetes.affinity.pod_affinity.required_during_scheduling_ignored_during_execution.namespace_selector.match_expressions]]
+											key = "security"
+											operator = "In"
+											values = ["S1"]
+
+								[[runners.kubernetes.affinity.pod_affinity.preferred_during_scheduling_ignored_during_execution]]
+								weight = 100
+								[runners.kubernetes.affinity.pod_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term]
+									topology_key = "failure-domain.beta.kubernetes.io/zone"
+									[runners.kubernetes.affinity.pod_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term.label_selector]
+										[[runners.kubernetes.affinity.pod_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term.label_selector.match_expressions]]
+											key = "security_2"
+											operator = "In"
+											values = ["S2"]
+									[runners.kubernetes.affinity.pod_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term.namespace_selector]
+										[[runners.kubernetes.affinity.pod_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term.namespace_selector.match_expressions]]
+											key = "security_2"
+											operator = "In"
+											values = ["S2"]
+			`,
+			validateConfig: func(t *testing.T, config *Config) {
+				require.Len(t, config.Runners, 1)
+				require.NotNil(t, config.Runners[0].Kubernetes.Affinity)
+				require.NotNil(t, config.Runners[0].Kubernetes.Affinity.PodAffinity)
+
+				podAffinity := config.Runners[0].Kubernetes.Affinity.PodAffinity
+				require.Len(t, podAffinity.RequiredDuringSchedulingIgnoredDuringExecution, 1)
+				required := podAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+
+				assert.Equal(t, "failure-domain.beta.kubernetes.io/zone", required[0].TopologyKey)
+				assert.Equal(t, []string{"namespace_1", "namespace_2"}, required[0].Namespaces)
+
+				require.NotNil(t, required[0].LabelSelector)
+				require.Len(t, required[0].LabelSelector.MatchExpressions, 1)
+				requiredMatchExp := required[0].LabelSelector.MatchExpressions[0]
+				assert.Equal(t, "security", requiredMatchExp.Key)
+				assert.Equal(t, "In", requiredMatchExp.Operator)
+				assert.Equal(t, []string{"S1"}, requiredMatchExp.Values)
+
+				require.NotNil(t, required[0].NamespaceSelector)
+				require.Len(t, required[0].NamespaceSelector.MatchExpressions, 1)
+				requiredMatchExp = required[0].NamespaceSelector.MatchExpressions[0]
+				assert.Equal(t, "security", requiredMatchExp.Key)
+				assert.Equal(t, "In", requiredMatchExp.Operator)
+				assert.Equal(t, []string{"S1"}, requiredMatchExp.Values)
+
+				require.Len(t, podAffinity.PreferredDuringSchedulingIgnoredDuringExecution, 1)
+				preferred := podAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+				assert.Equal(t, int32(100), preferred[0].Weight)
+				assert.Empty(t, preferred[0].PodAffinityTerm.Namespaces)
+				assert.Equal(t, "failure-domain.beta.kubernetes.io/zone", preferred[0].PodAffinityTerm.TopologyKey)
+
+				require.NotNil(t, preferred[0].PodAffinityTerm.LabelSelector)
+				require.Len(t, preferred[0].PodAffinityTerm.LabelSelector.MatchExpressions, 1)
+				preferredMatchExp := preferred[0].PodAffinityTerm.LabelSelector.MatchExpressions[0]
+				assert.Equal(t, "security_2", preferredMatchExp.Key)
+				assert.Equal(t, "In", preferredMatchExp.Operator)
+				assert.Equal(t, []string{"S2"}, preferredMatchExp.Values)
+
+				require.NotNil(t, preferred[0].PodAffinityTerm.NamespaceSelector)
+				require.Len(t, preferred[0].PodAffinityTerm.NamespaceSelector.MatchExpressions, 1)
+				preferredMatchExp = preferred[0].PodAffinityTerm.NamespaceSelector.MatchExpressions[0]
+				assert.Equal(t, "security_2", preferredMatchExp.Key)
+				assert.Equal(t, "In", preferredMatchExp.Operator)
+				assert.Equal(t, []string{"S2"}, preferredMatchExp.Values)
+			},
+		},
+		//nolint:lll
+		"check pod anti affinities": {
+			config: `
+				[[runners]]
+					[runners.kubernetes]
+						[runners.kubernetes.affinity]
+							[runners.kubernetes.affinity.pod_anti_affinity]
+								[[runners.kubernetes.affinity.pod_anti_affinity.required_during_scheduling_ignored_during_execution]]
+									topology_key = "failure-domain.beta.kubernetes.io/zone"
+									namespaces = ["namespace_1", "namespace_2"]
+									[runners.kubernetes.affinity.pod_anti_affinity.required_during_scheduling_ignored_during_execution.label_selector]
+										[[runners.kubernetes.affinity.pod_anti_affinity.required_during_scheduling_ignored_during_execution.label_selector.match_expressions]]
+											key = "security"
+											operator = "In"
+											values = ["S1"]
+									[runners.kubernetes.affinity.pod_anti_affinity.required_during_scheduling_ignored_during_execution.namespace_selector]
+										[[runners.kubernetes.affinity.pod_anti_affinity.required_during_scheduling_ignored_during_execution.namespace_selector.match_expressions]]
+											key = "security"
+											operator = "In"
+											values = ["S1"]
+
+								[[runners.kubernetes.affinity.pod_anti_affinity.preferred_during_scheduling_ignored_during_execution]]
+								weight = 100
+								[runners.kubernetes.affinity.pod_anti_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term]
+									topology_key = "failure-domain.beta.kubernetes.io/zone"
+									[runners.kubernetes.affinity.pod_anti_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term.label_selector]
+										[[runners.kubernetes.affinity.pod_anti_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term.label_selector.match_expressions]]
+											key = "security_2"
+											operator = "In"
+											values = ["S2"]
+									[runners.kubernetes.affinity.pod_anti_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term.namespace_selector]
+										[[runners.kubernetes.affinity.pod_anti_affinity.preferred_during_scheduling_ignored_during_execution.pod_affinity_term.namespace_selector.match_expressions]]
+											key = "security_2"
+											operator = "In"
+											values = ["S2"]
+			`,
+			validateConfig: func(t *testing.T, config *Config) {
+				require.Len(t, config.Runners, 1)
+				require.NotNil(t, config.Runners[0].Kubernetes.Affinity)
+				require.NotNil(t, config.Runners[0].Kubernetes.Affinity.PodAntiAffinity)
+
+				podAntiAffinity := config.Runners[0].Kubernetes.Affinity.PodAntiAffinity
+				require.Len(t, podAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution, 1)
+				required := podAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
+
+				assert.Equal(t, "failure-domain.beta.kubernetes.io/zone", required.TopologyKey)
+				assert.Equal(t, []string{"namespace_1", "namespace_2"}, required.Namespaces)
+
+				require.NotNil(t, required.LabelSelector)
+				require.Len(t, required.LabelSelector.MatchExpressions, 1)
+				requiredMatchExp := required.LabelSelector.MatchExpressions[0]
+				assert.Equal(t, "security", requiredMatchExp.Key)
+				assert.Equal(t, "In", requiredMatchExp.Operator)
+				assert.Equal(t, []string{"S1"}, requiredMatchExp.Values)
+
+				require.NotNil(t, required.NamespaceSelector)
+				require.Len(t, required.NamespaceSelector.MatchExpressions, 1)
+				requiredMatchExp = required.NamespaceSelector.MatchExpressions[0]
+				assert.Equal(t, "security", requiredMatchExp.Key)
+				assert.Equal(t, "In", requiredMatchExp.Operator)
+				assert.Equal(t, []string{"S1"}, requiredMatchExp.Values)
+
+				require.Len(t, podAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution, 1)
+				preferred := podAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution[0]
+				assert.Equal(t, int32(100), preferred.Weight)
+				assert.Empty(t, preferred.PodAffinityTerm.Namespaces)
+				assert.Equal(t, "failure-domain.beta.kubernetes.io/zone", preferred.PodAffinityTerm.TopologyKey)
+
+				require.NotNil(t, preferred.PodAffinityTerm.LabelSelector)
+				require.Len(t, preferred.PodAffinityTerm.LabelSelector.MatchExpressions, 1)
+				preferredMatchExp := preferred.PodAffinityTerm.LabelSelector.MatchExpressions[0]
+				assert.Equal(t, "security_2", preferredMatchExp.Key)
+				assert.Equal(t, "In", preferredMatchExp.Operator)
+				assert.Equal(t, []string{"S2"}, preferredMatchExp.Values)
+
+				require.NotNil(t, preferred.PodAffinityTerm.NamespaceSelector)
+				require.Len(t, preferred.PodAffinityTerm.NamespaceSelector.MatchExpressions, 1)
+				preferredMatchExp = preferred.PodAffinityTerm.NamespaceSelector.MatchExpressions[0]
+				assert.Equal(t, "security_2", preferredMatchExp.Key)
+				assert.Equal(t, "In", preferredMatchExp.Operator)
+				assert.Equal(t, []string{"S2"}, preferredMatchExp.Values)
+			},
+		},
 		"check that GracefulKillTimeout and ForceKillTimeout can't be set": {
 			config: `
 				[[runners]]
@@ -388,6 +594,152 @@ func TestConfigParse(t *testing.T) {
 				dnsPolicy, err := config.Runners[0].Kubernetes.DNSPolicy.Get()
 				assert.NoError(t, err)
 				assert.Equal(t, api.DNSClusterFirst, dnsPolicy)
+			},
+		},
+		"check empty container lifecycle": {
+			config: `
+				[[runners]]
+					[runners.kubernetes]
+						namespace = "default"
+			`,
+			validateConfig: func(t *testing.T, config *Config) {
+				require.Len(t, config.Runners, 1)
+
+				lifecycleCfg := config.Runners[0].Kubernetes.GetContainerLifecycle()
+				assert.Nil(t, lifecycleCfg.PostStart)
+				assert.Nil(t, lifecycleCfg.PreStop)
+			},
+		},
+		"check postStart execAction configuration": {
+			config: `
+				[[runners]]
+					[runners.kubernetes]
+						namespace = "default"
+						[runners.kubernetes.container_lifecycle.post_start.exec]
+							command = ["ls", "-l"]
+			`,
+			validateConfig: func(t *testing.T, config *Config) {
+				require.Len(t, config.Runners, 1)
+
+				lifecycleCfg := config.Runners[0].Kubernetes.GetContainerLifecycle()
+				assert.NotNil(t, lifecycleCfg.PostStart)
+
+				assert.Equal(t, []string{"ls", "-l"}, lifecycleCfg.PostStart.Exec.Command)
+				assert.Nil(t, nil, lifecycleCfg.PostStart.HTTPGet)
+				assert.Nil(t, nil, lifecycleCfg.PostStart.TCPSocket)
+			},
+		},
+		"check postStart httpGetAction configuration": {
+			config: `
+				[[runners]]
+					[runners.kubernetes]
+						namespace = "default"
+						[runners.kubernetes.container_lifecycle.post_start.http_get]
+							port = 8080
+							host = "localhost"
+							path = "/test"
+							[[runners.kubernetes.container_lifecycle.post_start.http_get.http_headers]]
+								name = "header_name_1"
+								value = "header_value_1"
+							[[runners.kubernetes.container_lifecycle.post_start.http_get.http_headers]]
+								name = "header_name_2"
+								value = "header_value_2"
+			`,
+			validateConfig: func(t *testing.T, config *Config) {
+				require.Len(t, config.Runners, 1)
+
+				lifecycleCfg := config.Runners[0].Kubernetes.GetContainerLifecycle()
+				assert.NotNil(t, lifecycleCfg.PostStart)
+
+				assert.Equal(t, 8080, lifecycleCfg.PostStart.HTTPGet.Port)
+				assert.Equal(t, "localhost", lifecycleCfg.PostStart.HTTPGet.Host)
+				assert.Equal(t, "/test", lifecycleCfg.PostStart.HTTPGet.Path)
+				assert.Equal(t, httpHeaders, lifecycleCfg.PostStart.HTTPGet.HTTPHeaders)
+			},
+		},
+		"check postStart tcpSocketAction configuration": {
+			config: `
+				[[runners]]
+					[runners.kubernetes]
+						namespace = "default"
+						[runners.kubernetes.container_lifecycle.post_start.tcp_socket]
+							port = 8080
+							host = "localhost"
+			`,
+			validateConfig: func(t *testing.T, config *Config) {
+				require.Len(t, config.Runners, 1)
+
+				lifecycleCfg := config.Runners[0].Kubernetes.GetContainerLifecycle()
+				assert.NotNil(t, lifecycleCfg.PostStart)
+
+				assert.Equal(t, 8080, lifecycleCfg.PostStart.TCPSocket.Port)
+				assert.Equal(t, "localhost", lifecycleCfg.PostStart.TCPSocket.Host)
+			},
+		},
+		"check preStop execAction configuration": {
+			config: `
+				[[runners]]
+					[runners.kubernetes]
+						namespace = "default"
+						[runners.kubernetes.container_lifecycle.pre_stop.exec]
+							command = ["ls", "-l"]
+			`,
+			validateConfig: func(t *testing.T, config *Config) {
+				require.Len(t, config.Runners, 1)
+
+				lifecycleCfg := config.Runners[0].Kubernetes.GetContainerLifecycle()
+				assert.NotNil(t, lifecycleCfg.PreStop)
+
+				assert.Equal(t, []string{"ls", "-l"}, lifecycleCfg.PreStop.Exec.Command)
+				assert.Nil(t, nil, lifecycleCfg.PreStop.HTTPGet)
+				assert.Nil(t, nil, lifecycleCfg.PreStop.TCPSocket)
+			},
+		},
+		"check preStop httpGetAction configuration": {
+			config: `
+				[[runners]]
+					[runners.kubernetes]
+						namespace = "default"
+						[runners.kubernetes.container_lifecycle.pre_stop.http_get]
+						port = 8080
+						host = "localhost"
+						path = "/test"
+						[[runners.kubernetes.container_lifecycle.pre_stop.http_get.http_headers]]
+							name = "header_name_1"
+							value = "header_value_1"
+						[[runners.kubernetes.container_lifecycle.pre_stop.http_get.http_headers]]
+							name = "header_name_2"
+							value = "header_value_2"
+			`,
+			validateConfig: func(t *testing.T, config *Config) {
+				require.Len(t, config.Runners, 1)
+
+				lifecycleCfg := config.Runners[0].Kubernetes.GetContainerLifecycle()
+				assert.NotNil(t, lifecycleCfg.PreStop)
+
+				assert.Equal(t, 8080, lifecycleCfg.PreStop.HTTPGet.Port)
+				assert.Equal(t, "localhost", lifecycleCfg.PreStop.HTTPGet.Host)
+				assert.Equal(t, "/test", lifecycleCfg.PreStop.HTTPGet.Path)
+				assert.Equal(t, httpHeaders, lifecycleCfg.PreStop.HTTPGet.HTTPHeaders)
+			},
+		},
+		"check preStop tcpSocketAction configuration": {
+			config: `
+				[[runners]]
+					[runners.kubernetes]
+						namespace = "default"
+						[runners.kubernetes.container_lifecycle.pre_stop.tcp_socket]
+							port = 8080
+							host = "localhost"
+			`,
+			validateConfig: func(t *testing.T, config *Config) {
+				require.Len(t, config.Runners, 1)
+
+				lifecycleCfg := config.Runners[0].Kubernetes.GetContainerLifecycle()
+				assert.NotNil(t, lifecycleCfg.PreStop)
+
+				assert.Equal(t, 8080, lifecycleCfg.PreStop.TCPSocket.Port)
+				assert.Equal(t, "localhost", lifecycleCfg.PreStop.TCPSocket.Host)
 			},
 		},
 	}
@@ -574,7 +926,7 @@ func TestDockerMachine(t *testing.T) {
 			expectedIdleCount: 1,
 			expectedIdleTime:  1000,
 		},
-		"offpeak active": {
+		"offpeak active ignored": {
 			config: &DockerMachine{
 				IdleCount:        1,
 				IdleTime:         1000,
@@ -582,10 +934,10 @@ func TestDockerMachine(t *testing.T) {
 				OffPeakIdleCount: 2,
 				OffPeakIdleTime:  2000,
 			},
-			expectedIdleCount: 2,
-			expectedIdleTime:  2000,
+			expectedIdleCount: 1,
+			expectedIdleTime:  1000,
 		},
-		"offpeak inactive": {
+		"offpeak inactive ignored": {
 			config: &DockerMachine{
 				IdleCount:        1,
 				IdleTime:         1000,
@@ -596,17 +948,14 @@ func TestDockerMachine(t *testing.T) {
 			expectedIdleCount: 1,
 			expectedIdleTime:  1000,
 		},
-		"offpeak invalid format": {
+		"offpeak invalid format ignored": {
 			config: &DockerMachine{
-				IdleCount:        1,
-				IdleTime:         1000,
 				OffPeakPeriods:   invalidTimePeriod,
 				OffPeakIdleCount: 2,
 				OffPeakIdleTime:  2000,
 			},
 			expectedIdleCount: 0,
 			expectedIdleTime:  0,
-			expectedErr:       new(InvalidTimePeriodsError),
 		},
 		"autoscaling config active": {
 			config: &DockerMachine{
@@ -954,6 +1303,404 @@ func TestRunnerSettings_IsFeatureFlagOn(t *testing.T) {
 
 			on := cfg.IsFeatureFlagOn(tt.name)
 			assert.Equal(t, tt.expectedValue, on)
+		})
+	}
+}
+
+func TestEffectivePrivilege(t *testing.T) {
+	tests := map[string]struct {
+		pod       bool
+		container bool
+		expected  bool
+	}{
+		"pod and container privileged": {
+			pod:       true,
+			container: true,
+			expected:  true,
+		},
+		"pod privileged": {
+			pod:       true,
+			container: false,
+			expected:  false,
+		},
+		"container privileged": {
+			pod:       false,
+			container: true,
+			expected:  true,
+		},
+		"all unprivileged": {
+			pod:       false,
+			container: false,
+			expected:  false,
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			effectivePrivileged := getContainerSecurityContextEffectiveFlagValue(&tt.container, &tt.pod)
+			require.NotNil(t, effectivePrivileged)
+			assert.Equal(t, tt.expected, *effectivePrivileged)
+		})
+	}
+}
+
+func TestContainerSecurityContext(t *testing.T) {
+	boolPtr := func(v bool) *bool {
+		return &v
+	}
+
+	int64Ptr := func(v int64) *int64 {
+		return &v
+	}
+
+	tests := map[string]struct {
+		getSecurityContext                  func(c *KubernetesConfig) *api.SecurityContext
+		getExpectedContainerSecurityContext func() *api.SecurityContext
+	}{
+		"no container security context": {
+			getSecurityContext: func(c *KubernetesConfig) *api.SecurityContext {
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{})
+			},
+			getExpectedContainerSecurityContext: func() *api.SecurityContext {
+				return &api.SecurityContext{}
+			},
+		},
+		"run as user - container security context": {
+			getSecurityContext: func(c *KubernetesConfig) *api.SecurityContext {
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					RunAsUser: int64Ptr(1000),
+				})
+			},
+			getExpectedContainerSecurityContext: func() *api.SecurityContext {
+				runAsUser := int64(1000)
+				return &api.SecurityContext{
+					RunAsUser: &runAsUser,
+				}
+			},
+		},
+		"privileged - container security context": {
+			getSecurityContext: func(c *KubernetesConfig) *api.SecurityContext {
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					Privileged: boolPtr(true),
+				})
+			},
+			getExpectedContainerSecurityContext: func() *api.SecurityContext {
+				return &api.SecurityContext{
+					Privileged: boolPtr(true),
+				}
+			},
+		},
+		"container privileged override - container security context": {
+			getSecurityContext: func(c *KubernetesConfig) *api.SecurityContext {
+				c.Privileged = boolPtr(true)
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					Privileged: boolPtr(false),
+					RunAsUser:  int64Ptr(65535),
+				})
+			},
+			getExpectedContainerSecurityContext: func() *api.SecurityContext {
+				runAsUser := int64(65535)
+				return &api.SecurityContext{
+					Privileged: boolPtr(false),
+					RunAsUser:  &runAsUser,
+				}
+			},
+		},
+		"allow privilege escalation - not set on container security context": {
+			getSecurityContext: func(c *KubernetesConfig) *api.SecurityContext {
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					AllowPrivilegeEscalation: boolPtr(true),
+				})
+			},
+			getExpectedContainerSecurityContext: func() *api.SecurityContext {
+				return &api.SecurityContext{
+					AllowPrivilegeEscalation: boolPtr(true),
+				}
+			},
+		},
+		"allow privilege escalation - set on container security context": {
+			getSecurityContext: func(c *KubernetesConfig) *api.SecurityContext {
+				c.AllowPrivilegeEscalation = boolPtr(true)
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					AllowPrivilegeEscalation: boolPtr(false),
+				})
+			},
+			getExpectedContainerSecurityContext: func() *api.SecurityContext {
+				return &api.SecurityContext{
+					AllowPrivilegeEscalation: boolPtr(false),
+				}
+			},
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			config := new(KubernetesConfig)
+			scExpected := tt.getExpectedContainerSecurityContext()
+			scActual := tt.getSecurityContext(config)
+			assert.Equal(t, scExpected, scActual)
+		})
+	}
+}
+
+func TestContainerSecurityCapabilities(t *testing.T) {
+	tests := map[string]struct {
+		getCapabilitiesFn    func(c *KubernetesConfig) *api.Capabilities
+		expectedCapabilities *api.Capabilities
+	}{
+		"container add": {
+			getCapabilitiesFn: func(c *KubernetesConfig) *api.Capabilities {
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					Capabilities: &KubernetesContainerCapabilities{
+						Add: []api.Capability{"SYS_TIME"},
+					},
+				}).Capabilities
+			},
+			expectedCapabilities: &api.Capabilities{
+				Add:  []api.Capability{"SYS_TIME"},
+				Drop: nil,
+			},
+		},
+		"container drop": {
+			getCapabilitiesFn: func(c *KubernetesConfig) *api.Capabilities {
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					Capabilities: &KubernetesContainerCapabilities{
+						Drop: []api.Capability{"SYS_TIME"},
+					},
+				}).Capabilities
+			},
+			expectedCapabilities: &api.Capabilities{
+				Add:  nil,
+				Drop: []api.Capability{"SYS_TIME"},
+			},
+		},
+		"container add and drop": {
+			getCapabilitiesFn: func(c *KubernetesConfig) *api.Capabilities {
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					Capabilities: &KubernetesContainerCapabilities{
+						Add:  []api.Capability{"SYS_TIME"},
+						Drop: []api.Capability{"SYS_TIME"},
+					},
+				}).Capabilities
+			},
+			expectedCapabilities: &api.Capabilities{
+				Add:  []api.Capability{"SYS_TIME"},
+				Drop: []api.Capability{"SYS_TIME"},
+			},
+		},
+		"container empty": {
+			getCapabilitiesFn: func(c *KubernetesConfig) *api.Capabilities {
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{}).Capabilities
+			},
+		},
+		"container when capAdd and capDrop exist": {
+			getCapabilitiesFn: func(c *KubernetesConfig) *api.Capabilities {
+				c.CapAdd = []string{"add"}
+				c.CapDrop = []string{"drop"}
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{}).Capabilities
+			},
+			expectedCapabilities: &api.Capabilities{
+				Add:  []api.Capability{"add"},
+				Drop: []api.Capability{"drop"},
+			},
+		},
+		"container when capAdd and container capabilities exist": {
+			getCapabilitiesFn: func(c *KubernetesConfig) *api.Capabilities {
+				c.CapAdd = []string{"add"}
+				c.CapDrop = []string{"drop"}
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					Capabilities: &KubernetesContainerCapabilities{
+						Add: []api.Capability{"add container"},
+					},
+				}).Capabilities
+			},
+			expectedCapabilities: &api.Capabilities{
+				Add:  []api.Capability{"add container"},
+				Drop: []api.Capability{"drop"},
+			},
+		},
+		"container when capDrop and container capabilities exist": {
+			getCapabilitiesFn: func(c *KubernetesConfig) *api.Capabilities {
+				c.CapAdd = []string{"add"}
+				c.CapDrop = []string{"drop"}
+				return c.GetContainerSecurityContext(KubernetesContainerSecurityContext{
+					Capabilities: &KubernetesContainerCapabilities{
+						Drop: []api.Capability{"drop container"},
+					},
+				}).Capabilities
+			},
+			expectedCapabilities: &api.Capabilities{
+				Add:  []api.Capability{"add"},
+				Drop: []api.Capability{"drop container"},
+			},
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			config := new(KubernetesConfig)
+			c := tt.getCapabilitiesFn(config)
+			assert.Equal(t, tt.expectedCapabilities, c)
+		})
+	}
+}
+
+func TestGetCapabilities(t *testing.T) {
+	tests := map[string]struct {
+		defaultCapDrop     []string
+		capAdd             []string
+		capDrop            []string
+		assertCapabilities func(t *testing.T, a *api.Capabilities)
+	}{
+		"no data provided": {
+			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
+				assert.Nil(t, a)
+			},
+		},
+		"only default_cap_drop provided": {
+			defaultCapDrop: []string{"CAP_1", "CAP_2"},
+			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
+				require.NotNil(t, a)
+				assert.Empty(t, a.Add)
+				assert.Len(t, a.Drop, 2)
+				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
+				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
+			},
+		},
+		"only custom cap_add provided": {
+			capAdd: []string{"CAP_1", "CAP_2"},
+			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
+				require.NotNil(t, a)
+				assert.Len(t, a.Add, 2)
+				assert.Contains(t, a.Add, api.Capability("CAP_1"))
+				assert.Contains(t, a.Add, api.Capability("CAP_2"))
+				assert.Empty(t, a.Drop)
+			},
+		},
+		"only custom cap_drop provided": {
+			capDrop: []string{"CAP_1", "CAP_2"},
+			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
+				require.NotNil(t, a)
+				assert.Empty(t, a.Add)
+				assert.Len(t, a.Drop, 2)
+				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
+				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
+			},
+		},
+		"default_cap_drop and custom cap_drop sums": {
+			defaultCapDrop: []string{"CAP_1", "CAP_2"},
+			capDrop:        []string{"CAP_3", "CAP_4"},
+			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
+				require.NotNil(t, a)
+				assert.Empty(t, a.Add)
+				assert.Len(t, a.Drop, 4)
+				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
+				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
+				assert.Contains(t, a.Drop, api.Capability("CAP_3"))
+				assert.Contains(t, a.Drop, api.Capability("CAP_4"))
+			},
+		},
+		"default_cap_drop and custom cap_drop duplicate": {
+			defaultCapDrop: []string{"CAP_1", "CAP_2"},
+			capDrop:        []string{"CAP_2", "CAP_3"},
+			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
+				require.NotNil(t, a)
+				assert.Empty(t, a.Add)
+				assert.Len(t, a.Drop, 3)
+				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
+				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
+				assert.Contains(t, a.Drop, api.Capability("CAP_3"))
+			},
+		},
+		"default_cap_drop and custom cap_add intersect": {
+			defaultCapDrop: []string{"CAP_1", "CAP_2"},
+			capAdd:         []string{"CAP_2", "CAP_3"},
+			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
+				require.NotNil(t, a)
+				assert.Len(t, a.Add, 2)
+				assert.Contains(t, a.Add, api.Capability("CAP_2"))
+				assert.Contains(t, a.Add, api.Capability("CAP_3"))
+				assert.Len(t, a.Drop, 1)
+				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
+			},
+		},
+		"default_cap_drop and custom cap_add intersect and cap_drop forces": {
+			defaultCapDrop: []string{"CAP_1", "CAP_2"},
+			capAdd:         []string{"CAP_2", "CAP_3"},
+			capDrop:        []string{"CAP_2", "CAP_4"},
+			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
+				require.NotNil(t, a)
+				assert.Len(t, a.Add, 1)
+				assert.Contains(t, a.Add, api.Capability("CAP_3"))
+				assert.Len(t, a.Drop, 3)
+				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
+				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
+				assert.Contains(t, a.Drop, api.Capability("CAP_4"))
+			},
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			c := KubernetesConfig{
+				CapAdd:  tt.capAdd,
+				CapDrop: tt.capDrop,
+			}
+
+			tt.assertCapabilities(t, c.getCapabilities(tt.defaultCapDrop))
+		})
+	}
+}
+
+func TestKubernetesTerminationPeriod(t *testing.T) {
+	tests := map[string]struct {
+		cfg                                      KubernetesConfig
+		expectedPodTerminationGracePeriodSeconds *int64
+		expectedCleanupGracePeriodSeconds        *int64
+	}{
+		"all default values": {
+			cfg:                                      KubernetesConfig{},
+			expectedPodTerminationGracePeriodSeconds: Int64Ptr(0),
+			expectedCleanupGracePeriodSeconds:        nil,
+		},
+		"only TerminationGracePeriodSeconds is specified": {
+			cfg: KubernetesConfig{
+				TerminationGracePeriodSeconds: Int64Ptr(10),
+			},
+			expectedPodTerminationGracePeriodSeconds: Int64Ptr(10),
+			expectedCleanupGracePeriodSeconds:        Int64Ptr(10),
+		},
+		"all specified": {
+			cfg: KubernetesConfig{
+				TerminationGracePeriodSeconds:    Int64Ptr(10),
+				CleanupGracePeriodSeconds:        Int64Ptr(5),
+				PodTerminationGracePeriodSeconds: Int64Ptr(3),
+			},
+			expectedPodTerminationGracePeriodSeconds: Int64Ptr(10),
+			expectedCleanupGracePeriodSeconds:        Int64Ptr(10),
+		},
+		"only CleanupGracePeriodSeconds and PodTerminationGracePeriodSeconds specified": {
+			cfg: KubernetesConfig{
+				CleanupGracePeriodSeconds:        Int64Ptr(8),
+				PodTerminationGracePeriodSeconds: Int64Ptr(10),
+			},
+			expectedCleanupGracePeriodSeconds:        Int64Ptr(8),
+			expectedPodTerminationGracePeriodSeconds: Int64Ptr(10),
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			assert.EqualValues(
+				t,
+				tt.expectedPodTerminationGracePeriodSeconds,
+				tt.cfg.GetPodTerminationGracePeriodSeconds(),
+			)
+			assert.EqualValues(
+				t,
+				tt.expectedCleanupGracePeriodSeconds,
+				tt.cfg.GetCleanupGracePeriodSeconds(),
+			)
 		})
 	}
 }

@@ -4,7 +4,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#designated-technical-writers
 ---
 
-# Install GitLab Runner on Windows
+# Install GitLab Runner on Windows **(FREE)**
 
 To install and run GitLab Runner on Windows you need:
 
@@ -94,30 +94,28 @@ rmdir /s GitLab-Runner
 
 ## Windows version support policy
 
-We follow the same lifecycle policy as Microsoft's [Servicing
-Channels](https://docs.microsoft.com/en-us/windows-server/get-started-19/servicing-channels-19).
+We follow the same lifecycle policy as Microsoft [Servicing
+Channels](https://docs.microsoft.com/en-us/windows/deployment/update/waas-overview#servicing-channels).
 
 This means that we support:
 
 - [Long-Term Servicing
-  Channel](https://docs.microsoft.com/en-us/windows-server/get-started-19/servicing-channels-19#long-term-servicing-channel-ltsc),
+  Channel](https://docs.microsoft.com/en-us/windows/deployment/update/waas-overview#long-term-servicing-channel),
   versions for 5 years after their release date. Note that we don't
   support versions that are on extended support.
 - [Semi-Annual
-  Channel](https://docs.microsoft.com/en-us/windows-server/get-started-19/servicing-channels-19#semi-annual-channel)
+  Channel](https://docs.microsoft.com/en-us/windows/deployment/update/waas-overview#semi-annual-channel)
   versions for 18 months after their release date. We don't support
   these versions after mainstream support ends.
 
 This is the case for both the [Windows binaries](#installation) that we
-distribute, and also for the [Docker
-executor](../executors/docker.md#supported-windows-versions).
+distribute, and also for the [Docker executor](../executors/docker.md#supported-windows-versions).
 
 NOTE:
 The Docker executor for Windows containers has strict version
 requirements, because containers have to match the version of the host
-OS. See the [list of supported Windows
-containers](../executors/docker.md#supported-windows-versions) for more
-information.
+OS. See the [list of supported Windows containers](../executors/docker.md#supported-windows-versions)
+for more information.
 
 After a Windows version no longer receives mainstream support from
 Microsoft, we officially [deprecate the
@@ -146,21 +144,21 @@ date:
 ### Future releases
 
 Microsoft releases new Windows Server products in the [Semi-Annual
-Channel](https://docs.microsoft.com/en-us/windows-server/get-started-19/servicing-channels-19#semi-annual-channel)
+Channel](https://docs.microsoft.com/en-us/windows-server/get-started/servicing-channels-comparison#semi-annual-channel)
 twice a year, and every 2 - 3 years a new major version of Windows Sever
 is released in the [Long-Term Servicing Channel
-(LTSC)](https://docs.microsoft.com/en-us/windows-server/get-started-19/servicing-channels-19#long-term-servicing-channel-ltsc).
+(LTSC)](https://docs.microsoft.com/en-us/windows-server/get-started/servicing-channels-comparison#long-term-servicing-channel-ltsc).
 
 GitLab aims to test and release new GitLab Runner helper images that
 include the latest Windows Server version (Semi-Annual Channel) within 1
-month of the official Microsoft release date. Refer to the [Windows
+month of the official Microsoft release date on the Google Cloud Platform. Refer to the [Windows
 Server current versions by servicing option
 list](https://docs.microsoft.com/en-us/windows-server/get-started/windows-server-release-info#windows-server-current-versions-by-servicing-option)
 for availability dates.
 
 ## Windows troubleshooting
 
-Make sure that you read the [FAQ](../faq/README.md) section which describes
+Make sure that you read the [FAQ](../faq/index.md) section which describes
 some of the most common problems with GitLab Runner.
 
 If you encounter an error like _The account name is invalid_ try to add `.\` before the username:
@@ -288,6 +286,57 @@ After adding the `SeServiceLogonRight` for the user used in service configuratio
 the command `gitlab-runner start` should finish without failures
 and the service should be started properly.
 
+### Job marked as success or failed incorrectly
+
+Most Windows programs output `exit code 0` for success. However, some programs don't
+return an exit code or have a different value for success. An example is the Windows
+tool `robocopy`. The following `.gitlab-ci.yml` fails, even though it should be successful,
+due to the exit code output by `robocopy`:
+
+```yaml
+test:
+  stage: test
+  script:
+    - New-Item -type Directory -Path ./source
+    - New-Item -type Directory -Path ./dest
+    - Write-Output "Hello World!" > ./source/file.txt
+    - robocopy ./source ./dest
+  tags:
+    - windows
+```
+
+In the case above, you need to manually add an exit code check to the `script:`. For example,
+you can create a powershell script:
+
+```powershell
+$exitCodes = 0,1
+
+robocopy ./source ./dest
+
+if ( $exitCodes.Contains($LastExitCode) ) {
+    exit 0
+} else {
+    exit 1
+}
+```
+
+And change the `.gitlab-ci.yml` file to:
+
+```yaml
+test:
+  stage: test
+  script:
+    - New-Item -type Directory -Path ./source
+    - New-Item -type Directory -Path ./dest
+    - Write-Output "Hello World!" > ./source/file.txt
+    - ./robocopyCommand.ps1
+  tags:
+    - windows
+```
+
+Also, be careful of the difference between `return` and `exit` when using PowerShell
+functions. While `exit 1` will mark a job as failed, `return 1` will **not**.
+
 ### Job marked as success and terminated midway using Kubernetes executor
 
 Please see [Job execution](../executors/kubernetes.md#job-execution).
@@ -310,18 +359,18 @@ The error should contain detailed information about the Windows Server
 version, which is then compared with the versions that GitLab Runner supports.
 
 ```plaintext
-unsupported Windows Version: Windows Server Datacenter Version 1909 (OS Build 18363.720)
+unsupported Windows Version: Windows Server Datacenter Version (OS Build 18363.720)
 ```
 
-Docker 17.06.2 on Windows Server 1909 returns the following in the output
+Docker 17.06.2 on Windows Server returns the following in the output
 of `docker info`.
 
 ```plaintext
 Operating System: Windows Server Datacenter
 ```
 
-The fix in this case is to upgrade the Docker version. [Read more about supported
-Docker versions](../executors/docker.md#supported-docker-versions).
+The fix in this case is to upgrade the Docker version of similar age, or later,
+than the Windows Server release.
 
 ### I'm using a mapped network drive and my build cannot find the correct path
 
@@ -335,6 +384,7 @@ of your drive instead.
 
 ### The build container is unable to connect to service containers
 
-[Network-per-build](../executors/docker.md#network-per-build)
-is required to use services with Windows containers. Ensure that the `FF_NETWORK_PER_BUILD`
-feature flag is set.
+To use services with Windows containers:
+
+- Use the networking mode that [creates a network for each job](../executors/docker.md#create-a-network-for-each-job).
+- Ensure that the `FF_NETWORK_PER_BUILD` feature flag is enabled.

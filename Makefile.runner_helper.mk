@@ -15,11 +15,41 @@ TAR_XZ_ARGS ?= -f -0
 # Tar files that we want to generate from the Docker file system, this is
 # generally used for linux based Dockerfiles.
 BASE_TAR_PATH := out/helper-images/prebuilt
-TAR_XZ += ${BASE_TAR_PATH}-x86_64.tar.xz
-TAR_XZ += ${BASE_TAR_PATH}-x86_64-pwsh.tar.xz
-TAR_XZ += ${BASE_TAR_PATH}-arm.tar.xz
-TAR_XZ += ${BASE_TAR_PATH}-arm64.tar.xz
-TAR_XZ += ${BASE_TAR_PATH}-s390x.tar.xz
+
+TAR_XZ_ALPINE += ${BASE_TAR_PATH}-alpine-x86_64.tar.xz
+TAR_XZ_ALPINE += ${BASE_TAR_PATH}-alpine-x86_64-pwsh.tar.xz
+TAR_XZ_ALPINE += ${BASE_TAR_PATH}-alpine-arm.tar.xz
+TAR_XZ_ALPINE += ${BASE_TAR_PATH}-alpine-arm64.tar.xz
+TAR_XZ_ALPINE += ${BASE_TAR_PATH}-alpine-s390x.tar.xz
+TAR_XZ_ALPINE += ${BASE_TAR_PATH}-alpine-ppc64le.tar.xz
+
+TAR_XZ_ALPINE_313 += ${BASE_TAR_PATH}-alpine3.13-x86_64.tar.xz
+TAR_XZ_ALPINE_313 += ${BASE_TAR_PATH}-alpine3.13-x86_64-pwsh.tar.xz
+TAR_XZ_ALPINE_313 += ${BASE_TAR_PATH}-alpine3.13-arm.tar.xz
+TAR_XZ_ALPINE_313 += ${BASE_TAR_PATH}-alpine3.13-arm64.tar.xz
+TAR_XZ_ALPINE_313 += ${BASE_TAR_PATH}-alpine3.13-s390x.tar.xz
+TAR_XZ_ALPINE_313 += ${BASE_TAR_PATH}-alpine3.13-ppc64le.tar.xz
+
+TAR_XZ_ALPINE_314 += ${BASE_TAR_PATH}-alpine3.14-x86_64.tar.xz
+TAR_XZ_ALPINE_314 += ${BASE_TAR_PATH}-alpine3.14-arm.tar.xz
+TAR_XZ_ALPINE_314 += ${BASE_TAR_PATH}-alpine3.14-arm64.tar.xz
+TAR_XZ_ALPINE_314 += ${BASE_TAR_PATH}-alpine3.14-s390x.tar.xz
+TAR_XZ_ALPINE_314 += ${BASE_TAR_PATH}-alpine3.14-ppc64le.tar.xz
+
+TAR_XZ_ALPINE_315 += ${BASE_TAR_PATH}-alpine3.15-x86_64.tar.xz
+TAR_XZ_ALPINE_315 += ${BASE_TAR_PATH}-alpine3.15-arm.tar.xz
+TAR_XZ_ALPINE_315 += ${BASE_TAR_PATH}-alpine3.15-arm64.tar.xz
+TAR_XZ_ALPINE_315 += ${BASE_TAR_PATH}-alpine3.15-s390x.tar.xz
+TAR_XZ_ALPINE_315 += ${BASE_TAR_PATH}-alpine3.15-ppc64le.tar.xz
+
+TAR_XZ_UBUNTU += ${BASE_TAR_PATH}-ubuntu-x86_64.tar.xz
+TAR_XZ_UBUNTU += ${BASE_TAR_PATH}-ubuntu-x86_64-pwsh.tar.xz
+TAR_XZ_UBUNTU += ${BASE_TAR_PATH}-ubuntu-arm.tar.xz
+TAR_XZ_UBUNTU += ${BASE_TAR_PATH}-ubuntu-arm64.tar.xz
+TAR_XZ_UBUNTU += ${BASE_TAR_PATH}-ubuntu-s390x.tar.xz
+TAR_XZ_UBUNTU += ${BASE_TAR_PATH}-ubuntu-ppc64le.tar.xz
+
+TAR_XZ_FIPS += ${BASE_TAR_PATH}-ubi-fips-x86_64.tar.xz
 
 # Binaries that we support for the helper image. We are using the following
 # pattern match:
@@ -32,6 +62,7 @@ BINARIES += ${BASE_BINARY_PATH}.x86_64
 BINARIES += ${BASE_BINARY_PATH}.arm
 BINARIES += ${BASE_BINARY_PATH}.arm64
 BINARIES += ${BASE_BINARY_PATH}.s390x
+BINARIES += ${BASE_BINARY_PATH}.ppc64le
 
 # Define variables with the architecture for each matching binary. We are using
 # the following pattern match GO_ARCH_{{arch}}-{{os}}, these should match up
@@ -40,10 +71,13 @@ GO_ARCH_x86_64 = linux/amd64
 GO_ARCH_arm = linux/arm
 GO_ARCH_arm64 = linux/arm64
 GO_ARCH_s390x = linux/s390x
+GO_ARCH_ppc64le = linux/ppc64le
 GO_ARCH_x86_64-windows = windows/amd64
 
+GO_ARCH_NAME_amd64 = x86_64
+
 # Go files that are used to create the helper binary.
-HELPER_GO_FILES ?= $(shell find common network vendor -name '*.go')
+HELPER_GO_FILES ?= $(shell find common network -name '*.go')
 
 # Build the Runner Helper binaries for the host platform.
 .PHONY: helper-bin-host
@@ -53,26 +87,69 @@ helper-bin-host: ${BASE_BINARY_PATH}.$(shell uname -m)
 .PHONY: helper-bin
 helper-bin: $(BINARIES)
 
+# Make sure the fips target is first since it's less general
+${BASE_BINARY_PATH}-fips: export GOOS ?= linux
+${BASE_BINARY_PATH}-fips: export GOARCH ?= amd64
+${BASE_BINARY_PATH}-fips: $(HELPER_GO_FILES)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=1 go build \
+    		   -tags boringcrypto \
+    		   -ldflags "$(GO_LDFLAGS)" \
+    		   -o="${BASE_BINARY_PATH}.$(GO_ARCH_NAME_$(GOARCH))-fips" \
+    		   $(PKG)/apps/gitlab-runner-helper
+
+${BASE_BINARY_PATH}-fips-docker: export GOOS ?= linux
+${BASE_BINARY_PATH}-fips-docker: export GOARCH ?= amd64
+${BASE_BINARY_PATH}-fips-docker: export GO_VERSION ?= 1.17
+${BASE_BINARY_PATH}-fips-docker: $(HELPER_GO_FILES)
+	# Building $(NAME)-helper in version $(VERSION) for FIPS $(GOOS) $(GOARCH)
+	@docker build -t gitlab-runner-helper-fips --build-arg GOOS="$(GOOS)" --build-arg GOARCH="$(GOARCH)" --build-arg GO_VERSION="$(GO_VERSION)" -f dockerfiles/fips/helper.fips.Dockerfile .
+	@docker rm -f gitlab-runner-helper-fips && docker create -it --name gitlab-runner-helper-fips gitlab-runner-helper-fips
+	@docker cp gitlab-runner-helper-fips:/gitlab-runner-helper-fips "${BASE_BINARY_PATH}.$(GO_ARCH_NAME_$(GOARCH))-fips"
+	@docker rm -f gitlab-runner-helper-fips
+
 ${BASE_BINARY_PATH}.%: $(HELPER_GO_FILES) $(GOX)
 	$(GOX) -osarch=$(GO_ARCH_$*) -ldflags "$(GO_LDFLAGS)" -output=$@ $(PKG)/apps/gitlab-runner-helper
 
 # Build the Runner Helper tar files for host platform.
 .PHONY: _helper-dockerarchive-host
-_helper-dockerarchive-host: ${BASE_TAR_PATH}-$(shell uname -m)$(IMAGE_VARIANT_SUFFIX).tar.xz
+_helper-dockerarchive-host: ${BASE_TAR_PATH}-$(IMAGE_TARGET_FLAVOUR)-$(shell uname -m)$(IMAGE_VARIANT_SUFFIX).tar.xz
 	@ # NOTE: The ENTRYPOINT metadata is not preserved on export, so we need to reapply this metadata on import.
 	@ # See https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/2058#note_388341301
-	docker import ${BASE_TAR_PATH}-$(shell uname -m)$(IMAGE_VARIANT_SUFFIX).tar.xz \
+	docker import ${BASE_TAR_PATH}-$(IMAGE_TARGET_FLAVOUR)-$(shell uname -m)$(IMAGE_VARIANT_SUFFIX).tar.xz \
 		--change "ENTRYPOINT [\"/usr/bin/dumb-init\", \"/entrypoint\"]" \
-		gitlab/gitlab-runner-helper:$(shell uname -m)-$(REVISION)$(IMAGE_VARIANT_SUFFIX)
+		gitlab/gitlab-runner-helper:$(IMAGE_VARIANT_PREFIX)$(shell uname -m)-$(REVISION)$(IMAGE_VARIANT_SUFFIX)
 
 .PHONY: helper-dockerarchive-host
 helper-dockerarchive-host:
-	@$(MAKE) _helper-dockerarchive-host IMAGE_VARIANT_SUFFIX=''
-	@$(MAKE) _helper-dockerarchive-host IMAGE_VARIANT_SUFFIX='-pwsh'
+	@$(MAKE) _helper-dockerarchive-host IMAGE_TARGET_FLAVOUR='alpine' IMAGE_VARIANT_PREFIX='' IMAGE_VARIANT_SUFFIX=''
+	@$(MAKE) _helper-dockerarchive-host IMAGE_TARGET_FLAVOUR='alpine' IMAGE_VARIANT_PREFIX='' IMAGE_VARIANT_SUFFIX='-pwsh'
+	@$(MAKE) _helper-dockerarchive-host IMAGE_TARGET_FLAVOUR='ubuntu' IMAGE_VARIANT_PREFIX='ubuntu-' IMAGE_VARIANT_SUFFIX=''
+	@$(MAKE) _helper-dockerarchive-host IMAGE_TARGET_FLAVOUR='ubuntu' IMAGE_VARIANT_PREFIX='ubuntu-' IMAGE_VARIANT_SUFFIX='-pwsh'
 
 # Build the Runner Helper tar files for all supported platforms.
 .PHONY: helper-dockerarchive
-helper-dockerarchive: $(TAR_XZ)
+helper-dockerarchive: helper-dockerarchive-alpine helper-dockerarchive-alpine3.13 helper-dockerarchive-alpine3.14 helper-dockerarchive-alpine3.15 helper-dockerarchive-ubuntu
+
+.PHONY: helper-dockerarchive-alpine
+helper-dockerarchive-alpine: $(TAR_XZ_ALPINE)
+
+.PHONY: helper-dockerarchive-alpine3.13
+helper-dockerarchive-alpine3.13: $(TAR_XZ_ALPINE_313)
+
+.PHONY: helper-dockerarchive-alpine3.14
+helper-dockerarchive-alpine3.14: $(TAR_XZ_ALPINE_314)
+
+.PHONY: helper-dockerarchive-alpine3.15
+helper-dockerarchive-alpine3.15: $(TAR_XZ_ALPINE_315)
+
+.PHONY: helper-dockerarchive-ubuntu
+helper-dockerarchive-ubuntu: $(TAR_XZ_UBUNTU)
+
+.PHONY: helper-dockerarchive-ubi-fips
+helper-dockerarchive-ubi-fips: $(TAR_XZ_FIPS)
+
+${BASE_TAR_PATH}-ubi-fips-%.tar.xz: ${BASE_TAR_PATH}-ubi-fips-%.tar
+	xz $(TAR_XZ_ARGS) $<
 
 ${BASE_TAR_PATH}-%-pwsh.tar.xz: ${BASE_TAR_PATH}-%-pwsh.tar
 	xz $(TAR_XZ_ARGS) $<
@@ -80,16 +157,59 @@ ${BASE_TAR_PATH}-%-pwsh.tar.xz: ${BASE_TAR_PATH}-%-pwsh.tar
 ${BASE_TAR_PATH}-%.tar.xz: ${BASE_TAR_PATH}-%.tar
 	xz $(TAR_XZ_ARGS) $<
 
-# See https://github.com/PowerShell/powershell/releases for values of PWSH_VERSION/PWSH_IMAGE_DATE
-${BASE_TAR_PATH}-%-pwsh.tar: export PWSH_VERSION ?= 7.1.1
-${BASE_TAR_PATH}-%-pwsh.tar: export PWSH_ALPINE_IMAGE_VERSION ?= 3.12
-${BASE_TAR_PATH}-%-pwsh.tar: export PWSH_IMAGE_DATE ?= 20210114
-${BASE_TAR_PATH}-%-pwsh.tar: export IMAGE_SHELL := pwsh
-${BASE_TAR_PATH}-%-pwsh.tar: ${BASE_BINARY_PATH}.%
+${BASE_TAR_PATH}-ubi-fips-%.tar: export TARGET_FLAVOR_IMAGE_VERSION ?= 8.5-214
+${BASE_TAR_PATH}-ubi-fips-%.tar: export TARGET_DOCKERFILE ?= Dockerfile.fips
+${BASE_TAR_PATH}-ubi-fips-%.tar: export HELPER_BINARY_POSTFIX ?= -fips
+${BASE_TAR_PATH}-ubi-fips-%.tar:
 	@mkdir -p $$(dirname $@_)
-	@./ci/build_helper_docker $* $@
+	@./ci/build_helper_docker redhat/ubi8 $* $@
 
-${BASE_TAR_PATH}-%.tar: export ALPINE_IMAGE_VERSION ?= 3.12.0
-${BASE_TAR_PATH}-%.tar: ${BASE_BINARY_PATH}.%
+# See https://github.com/PowerShell/powershell/releases for values of PWSH_VERSION/PWSH_IMAGE_DATE
+${BASE_TAR_PATH}-alpine-%-pwsh.tar: export IMAGE_SHELL := pwsh
+${BASE_TAR_PATH}-alpine-%-pwsh.tar: export PWSH_VERSION ?= 7.1.1
+${BASE_TAR_PATH}-alpine-%-pwsh.tar: export PWSH_IMAGE_DATE ?= 20210114
+${BASE_TAR_PATH}-alpine-%-pwsh.tar: export PWSH_TARGET_FLAVOR_IMAGE_VERSION ?= 3.12
+${BASE_TAR_PATH}-alpine-%-pwsh.tar: ${BASE_BINARY_PATH}.%
 	@mkdir -p $$(dirname $@_)
-	@./ci/build_helper_docker $* $@
+	@./ci/build_helper_docker alpine $* $@
+
+${BASE_TAR_PATH}-alpine3.13-%-pwsh.tar: export IMAGE_SHELL := pwsh
+${BASE_TAR_PATH}-alpine3.13-%-pwsh.tar: export PWSH_VERSION ?= 7.1.4
+${BASE_TAR_PATH}-alpine3.13-%-pwsh.tar: export PWSH_IMAGE_DATE ?= 20210927
+${BASE_TAR_PATH}-alpine3.13-%-pwsh.tar: export PWSH_TARGET_FLAVOR_IMAGE_VERSION ?= 3.13
+${BASE_TAR_PATH}-alpine3.13-%-pwsh.tar: ${BASE_BINARY_PATH}.%
+	@mkdir -p $$(dirname $@_)
+	@./ci/build_helper_docker alpine $* $@
+
+${BASE_TAR_PATH}-ubuntu-%-pwsh.tar: export IMAGE_SHELL := pwsh
+${BASE_TAR_PATH}-ubuntu-%-pwsh.tar: export PWSH_VERSION ?= 7.1.1
+${BASE_TAR_PATH}-ubuntu-%-pwsh.tar: export PWSH_IMAGE_DATE ?= 20210114
+${BASE_TAR_PATH}-ubuntu-%-pwsh.tar: export PWSH_TARGET_FLAVOR_IMAGE_VERSION ?= 20.04
+${BASE_TAR_PATH}-ubuntu-%-pwsh.tar: ${BASE_BINARY_PATH}.%
+	@mkdir -p $$(dirname $@_)
+	@./ci/build_helper_docker ubuntu $* $@
+
+${BASE_TAR_PATH}-alpine-%.tar: export TARGET_FLAVOR_IMAGE_VERSION ?= 3.12.0
+${BASE_TAR_PATH}-alpine-%.tar: ${BASE_BINARY_PATH}.%
+	@mkdir -p $$(dirname $@_)
+	@./ci/build_helper_docker alpine $* $@
+
+${BASE_TAR_PATH}-alpine3.13-%.tar: export TARGET_FLAVOR_IMAGE_VERSION ?= 3.13.6
+${BASE_TAR_PATH}-alpine3.13-%.tar: ${BASE_BINARY_PATH}.%
+	@mkdir -p $$(dirname $@_)
+	@./ci/build_helper_docker alpine $* $@
+
+${BASE_TAR_PATH}-alpine3.14-%.tar: export TARGET_FLAVOR_IMAGE_VERSION ?= 3.14.2
+${BASE_TAR_PATH}-alpine3.14-%.tar: ${BASE_BINARY_PATH}.%
+	@mkdir -p $$(dirname $@_)
+	@./ci/build_helper_docker alpine $* $@
+
+${BASE_TAR_PATH}-alpine3.15-%.tar: export TARGET_FLAVOR_IMAGE_VERSION ?= 3.15.0
+${BASE_TAR_PATH}-alpine3.15-%.tar: ${BASE_BINARY_PATH}.%
+	@mkdir -p $$(dirname $@_)
+	@./ci/build_helper_docker alpine $* $@
+
+${BASE_TAR_PATH}-ubuntu-%.tar: export TARGET_FLAVOR_IMAGE_VERSION ?= 20.04
+${BASE_TAR_PATH}-ubuntu-%.tar: ${BASE_BINARY_PATH}.%
+	@mkdir -p $$(dirname $@_)
+	@./ci/build_helper_docker ubuntu $* $@

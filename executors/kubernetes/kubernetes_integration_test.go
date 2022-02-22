@@ -1,19 +1,28 @@
+//go:build integration && kubernetes
+// +build integration,kubernetes
+
 package kubernetes_test
 
 import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	k8s "k8s.io/client-go/kubernetes"
@@ -25,8 +34,71 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/container/helperimage"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/retry"
 	"gitlab.com/gitlab-org/gitlab-runner/session"
+	"gitlab.com/gitlab-org/gitlab-runner/shells"
+	"gitlab.com/gitlab-org/gitlab-runner/shells/shellstest"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
+func generateRandomNamespace(prefix string) string {
+	// If running tests inside a local cluster the following command can be used to clean-up integration namespaces:
+	// kubectl get namespaces -o name| grep k8s-integration| xargs kubectl delete
+	return fmt.Sprintf("k8s-integration-%s-%d", prefix, rand.Uint64())
+}
+
+type kubernetesNamespaceManagerAction int64
+
+const (
+	createNamespace kubernetesNamespaceManagerAction = iota
+	deleteNamespace
+)
+
+type namespaceManager struct {
+	action      kubernetesNamespaceManagerAction
+	namespace   string
+	client      *k8s.Clientset
+	maxAttempts int
+	timeout     time.Duration
+}
+
+func newNamespaceManager(client *k8s.Clientset, action kubernetesNamespaceManagerAction, namespace string) namespaceManager {
+	return namespaceManager{
+		namespace:   namespace,
+		action:      action,
+		client:      client,
+		maxAttempts: 3,
+		timeout:     time.Minute,
+	}
+}
+
+func (n namespaceManager) Run() error {
+	var err error
+	ctx, cancel := context.WithTimeout(context.Background(), n.timeout)
+	defer cancel()
+
+	switch n.action {
+	case createNamespace:
+		k8sNamespace := &v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:         n.namespace,
+				GenerateName: n.namespace,
+			},
+		}
+		_, err = n.client.CoreV1().Namespaces().Create(ctx, k8sNamespace, metav1.CreateOptions{})
+	case deleteNamespace:
+		err = n.client.CoreV1().Namespaces().Delete(ctx, n.namespace, metav1.DeleteOptions{})
+	}
+
+	return err
+}
+
+func (n namespaceManager) ShouldRetry(tries int, err error) bool {
+	return tries < n.maxAttempts && err != nil
+}
 
 type featureFlagTest func(t *testing.T, flagName string, flagValue bool)
 
@@ -52,6 +124,12 @@ func TestRunIntegrationTestsWithFeatureFlag(t *testing.T) {
 		"testKubernetesReplaceEnvFeatureFlag":                     testKubernetesReplaceEnvFeatureFlag,
 		"testKubernetesReplaceMissingEnvVarFeatureFlag":           testKubernetesReplaceMissingEnvVarFeatureFlag,
 		"testKubernetesWithNonRootSecurityContext":                testKubernetesWithNonRootSecurityContext,
+		"testBuildsDirDefaultVolumeFeatureFlag":                   testBuildsDirDefaultVolumeFeatureFlag,
+		"testBuildsDirVolumeMountEmptyDirFeatureFlag":             testBuildsDirVolumeMountEmptyDirFeatureFlag,
+		"testBuildsDirVolumeMountHostPathFeatureFlag":             testBuildsDirVolumeMountHostPathFeatureFlag,
+		"testKubernetesBashFeatureFlag":                           testKubernetesBashFeatureFlag,
+		"testKubernetesContainerHookFeatureFlag":                  testKubernetesContainerHookFeatureFlag,
+		"testKubernetesGarbageCollection":                         testKubernetesGarbageCollection,
 	}
 
 	featureFlags := []string{
@@ -80,6 +158,75 @@ func testKubernetesSuccessRunFeatureFlag(t *testing.T, featureFlagName string, f
 
 	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	assert.NoError(t, err)
+}
+
+func TestBuildScriptSections(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		if shell == "cmd" || shell == "pwsh" || shell == "powershell" {
+			// support for pwsh and powershell tracked in https://gitlab.com/gitlab-org/gitlab-runner/-/issues/28119
+			t.Skip("CMD, pwsh, powershell not supported")
+		}
+
+		build := getTestBuild(t, common.GetRemoteSuccessfulBuild)
+		build.Runner.RunnerSettings.Shell = shell
+
+		buildtest.RunBuildWithSections(t, build)
+	})
+}
+
+func TestEntrypointNotIgnored(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	testCases := map[string]struct {
+		useHonorEntrypointFF bool
+		expectedOutputLines  []string
+	}{
+		"feature flag off": {
+			useHonorEntrypointFF: false,
+			expectedOutputLines:  []string{"I am now root", "file not found"},
+		},
+		"feature flag on": {
+			useHonorEntrypointFF: true,
+			expectedOutputLines:  []string{"I am now nobody", "this has been executed through a custom entrypoint"},
+		},
+	}
+
+	for tn, tc := range testCases {
+		t.Run(tn, func(t *testing.T) {
+			build := getTestBuildWithImage(t, common.TestAlpineEntrypointImage, func() (common.JobResponse, error) {
+				job, err := common.GetRemoteBuildResponse(
+					"if [ -f /tmp/debug.log ]; then",
+					"cat /tmp/debug.log",
+					"else",
+					"echo 'file not found'",
+					"fi",
+					"echo \"I am now `whoami`\"",
+				)
+
+				job.Image = common.Image{
+					Name: common.TestAlpineEntrypointImage,
+				}
+
+				return job, err
+			})
+
+			build.Variables = append(
+				build.Variables,
+				common.JobVariable{Key: featureflags.KubernetesHonorEntrypoint, Value: strconv.FormatBool(tc.useHonorEntrypointFF)},
+			)
+
+			out, err := buildtest.RunBuildReturningOutput(t, build)
+			require.NoError(t, err)
+
+			t.Log(out)
+
+			for _, expectedLine := range tc.expectedOutputLines {
+				assert.Contains(t, out, expectedLine)
+			}
+		})
+	}
 }
 
 func testKubernetesMultistepRunFeatureFlag(t *testing.T, featureFlagName string, featureFlagValue bool) {
@@ -303,8 +450,7 @@ func testKubernetesMissingImageFeatureFlag(t *testing.T, featureFlagName string,
 
 	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	require.Error(t, err)
-	var buildErr *common.BuildError
-	assert.ErrorAs(t, err, &buildErr)
+	assert.ErrorIs(t, err, &common.BuildError{FailureReason: common.ScriptFailure})
 	assert.Contains(t, err.Error(), "image pull failed")
 }
 
@@ -317,8 +463,7 @@ func testKubernetesMissingTagFeatureFlag(t *testing.T, featureFlagName string, f
 
 	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	require.Error(t, err)
-	var buildErr *common.BuildError
-	assert.ErrorAs(t, err, &buildErr)
+	assert.ErrorIs(t, err, &common.BuildError{FailureReason: common.ScriptFailure})
 	assert.Contains(t, err.Error(), "image pull failed")
 }
 
@@ -428,7 +573,7 @@ func testInteractiveTerminalFeatureFlag(t *testing.T, featureFlagName string, fe
 	}
 
 	client := getTestKubeClusterClient(t)
-	secrets, err := client.CoreV1().Secrets("default").List(metav1.ListOptions{})
+	secrets, err := client.CoreV1().Secrets("default").List(context.Background(), metav1.ListOptions{})
 	require.NoError(t, err)
 
 	build := getTestBuild(t, func() (common.JobResponse, error) {
@@ -458,13 +603,13 @@ func testInteractiveTerminalFeatureFlag(t *testing.T, featureFlagName string, fe
 		outCh <- outBuffer.String()
 	}()
 
-	for build.Session.Mux() == nil {
+	for build.Session.Handler() == nil {
 		time.Sleep(10 * time.Millisecond)
 	}
 
 	time.Sleep(5 * time.Second)
 
-	srv := httptest.NewServer(build.Session.Mux())
+	srv := httptest.NewServer(build.Session.Handler())
 	defer srv.Close()
 
 	u := url.URL{
@@ -517,6 +662,301 @@ func testKubernetesReplaceMissingEnvVarFeatureFlag(t *testing.T, featureFlagName
 	assert.Contains(t, err.Error(), "image pull failed: Failed to apply default image tag \"alpine:\"")
 }
 
+func testBuildsDirDefaultVolumeFeatureFlag(t *testing.T, featureFlagName string, featureFlagValue bool) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	build := getTestBuild(t, common.GetRemoteSuccessfulBuild)
+	build.Image.Name = common.TestDockerGitImage
+	build.Runner.BuildsDir = "/path/to/builds/dir"
+	buildtest.SetBuildFeatureFlag(build, featureFlagName, featureFlagValue)
+
+	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+	assert.NoError(t, err)
+
+	assert.Equal(t, "/path/to/builds/dir/gitlab-org/ci-cd/gitlab-runner-pipeline-tests/gitlab-test", build.BuildDir)
+}
+
+func testBuildsDirVolumeMountEmptyDirFeatureFlag(t *testing.T, featureFlagName string, featureFlagValue bool) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	build := getTestBuild(t, common.GetRemoteSuccessfulBuild)
+	build.Image.Name = common.TestDockerGitImage
+	buildtest.SetBuildFeatureFlag(build, featureFlagName, featureFlagValue)
+	build.Runner.BuildsDir = "/path/to/builds/dir"
+	build.Runner.Kubernetes.Volumes = common.KubernetesVolumes{
+		EmptyDirs: []common.KubernetesEmptyDir{
+			{
+				Name:      "repo",
+				MountPath: "/path/to/builds/dir",
+				Medium:    "Memory",
+			},
+		},
+	}
+
+	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+	assert.NoError(t, err)
+
+	assert.Equal(t, "/path/to/builds/dir/gitlab-org/ci-cd/gitlab-runner-pipeline-tests/gitlab-test", build.BuildDir)
+}
+
+func testBuildsDirVolumeMountHostPathFeatureFlag(t *testing.T, featureFlagName string, featureFlagValue bool) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	build := getTestBuild(t, common.GetRemoteSuccessfulBuild)
+	build.Image.Name = common.TestDockerGitImage
+	buildtest.SetBuildFeatureFlag(build, featureFlagName, featureFlagValue)
+	build.Runner.Kubernetes.Volumes = common.KubernetesVolumes{
+		HostPaths: []common.KubernetesHostPath{
+			{
+				Name:      "repo-host",
+				MountPath: "/builds",
+				HostPath:  "/tmp/builds",
+			},
+		},
+	}
+
+	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+	assert.NoError(t, err)
+
+	allVariables := build.GetAllVariables()
+
+	assert.Equal(t, fmt.Sprintf("/builds/%s/gitlab-org/ci-cd/gitlab-runner-pipeline-tests/gitlab-test", allVariables.Get("CI_CONCURRENT_ID")), build.BuildDir)
+}
+
+// testKubernetesGarbageCollection tests the deletion of resources via garbage collector once the owning pod is deleted
+func testKubernetesGarbageCollection(t *testing.T, featureFlagName string, featureFlagValue bool) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	ctxTimeout := time.Minute
+	client := getTestKubeClusterClient(t)
+
+	validateResourcesCreated := func(
+		t *testing.T,
+		client *k8s.Clientset,
+		featureFlagValue bool,
+		namespace string,
+		podName string,
+	) {
+		credentials, err := getSecrets(client, namespace, podName)
+		require.NoError(t, err)
+		configMaps, err := getConfigMaps(client, namespace, podName)
+		require.NoError(t, err)
+
+		assert.NotEmpty(t, credentials)
+		if !featureFlagValue {
+			assert.NotEmpty(t, configMaps)
+		} else {
+			assert.Empty(t, configMaps)
+		}
+	}
+
+	validateResourcesDeleted := func(t *testing.T, client *k8s.Clientset, namespace string, podName string) {
+		credentials, err := getSecrets(client, namespace, podName)
+		require.NoError(t, err)
+		configMaps, err := getConfigMaps(client, namespace, podName)
+		require.NoError(t, err)
+
+		assert.Empty(t, credentials)
+		assert.Empty(t, configMaps)
+	}
+
+	tests := map[string]struct {
+		namespace string
+		init      func(t *testing.T, build *common.Build, client *k8s.Clientset, namespace string)
+		finalize  func(t *testing.T, client *k8s.Clientset, namespace string)
+	}{
+		"pod deletion during build step": {
+			namespace: "default",
+		},
+		"pod deletion during prepare step": {
+			namespace: "default",
+		},
+		"pod deletion during prepare stage in custom namespace": {
+			namespace: generateRandomNamespace("gc"),
+			init: func(t *testing.T, build *common.Build, client *k8s.Clientset, namespace string) {
+				err := retry.New(newNamespaceManager(client, createNamespace, namespace)).Run()
+				require.NoError(t, err)
+
+				credentials, err := getSecrets(client, namespace, "")
+				require.NoError(t, err)
+				configMaps, err := getConfigMaps(client, namespace, "")
+				require.NoError(t, err)
+
+				assert.Empty(t, credentials)
+				assert.Empty(t, configMaps)
+			},
+			finalize: func(t *testing.T, client *k8s.Clientset, namespace string) {
+				err := retry.New(newNamespaceManager(client, deleteNamespace, namespace)).Run()
+				require.NoError(t, err)
+			},
+		},
+	}
+
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			build := getTestBuild(t, func() (common.JobResponse, error) {
+				jobResponse, err := common.GetRemoteBuildResponse(
+					"sleep 5000",
+				)
+				require.NoError(t, err)
+
+				jobResponse.Credentials = []common.Credentials{
+					{
+						Type:     "registry",
+						URL:      "http://example.com",
+						Username: "user",
+						Password: "password",
+					},
+				}
+
+				return jobResponse, nil
+			})
+			build.Runner.Kubernetes.Namespace = tc.namespace
+			buildtest.SetBuildFeatureFlag(build, featureFlagName, featureFlagValue)
+
+			if tc.init != nil {
+				tc.init(t, build, client, tc.namespace)
+			}
+
+			deletedPodNameCh := make(chan string)
+			defer buildtest.OnUserStage(build, func() {
+				ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
+				defer cancel()
+				pods, err := client.CoreV1().Pods(tc.namespace).List(
+					ctx,
+					metav1.ListOptions{
+						LabelSelector: labels.Set(build.Runner.Kubernetes.PodLabels).String(),
+					},
+				)
+				require.NoError(t, err)
+				require.NotEmpty(t, pods.Items)
+				pod := pods.Items[0]
+
+				validateResourcesCreated(t, client, featureFlagValue, tc.namespace, pod.Name)
+
+				err = client.
+					CoreV1().
+					Pods(tc.namespace).
+					Delete(ctx, pod.Name, metav1.DeleteOptions{
+						PropagationPolicy: &kubernetes.PropagationPolicy,
+					})
+				require.NoError(t, err)
+
+				deletedPodNameCh <- pod.Name
+			})()
+
+			out, err := buildtest.RunBuildReturningOutput(t, build)
+
+			podName := <-deletedPodNameCh
+
+			if !featureFlagValue {
+				assert.True(t, kubernetes.IsKubernetesPodNotFoundError(err), "expected err NotFound, but got %T", err)
+				assert.Contains(
+					t,
+					out,
+					"ERROR: Job failed (system failure):",
+				)
+			} else {
+				assert.Errorf(t, err, "command terminated with exit code 137")
+			}
+
+			assert.Contains(
+				t,
+				out,
+				fmt.Sprintf("pods %q not found", podName),
+			)
+
+			validateResourcesDeleted(t, client, tc.namespace, podName)
+
+			if tc.finalize != nil {
+				tc.finalize(t, client, tc.namespace)
+			}
+		})
+	}
+}
+
+// TestLogDeletionAttach tests the outcome when the log files are all deleted
+func TestLogDeletionAttach(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	t.Skip("Log deletion test temporary skipped: issue https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27755")
+
+	tests := []struct {
+		stage            string
+		outputAssertions func(t *testing.T, out string, pod string)
+	}{
+		{
+			stage: "step_", // Any script the user defined
+			outputAssertions: func(t *testing.T, out string, pod string) {
+				assert.Contains(
+					t,
+					out,
+					"ERROR: Job failed: command terminated with exit code 100",
+				)
+			},
+		},
+		{
+			stage: string(common.BuildStagePrepare),
+			outputAssertions: func(t *testing.T, out string, pod string) {
+				assert.Contains(
+					t,
+					out,
+					"ERROR: Job failed: command terminated with exit code 100",
+				)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.stage, func(t *testing.T) {
+			build := getTestBuild(t, func() (common.JobResponse, error) {
+				return common.GetRemoteBuildResponse(
+					"sleep 5000",
+				)
+			})
+			buildtest.SetBuildFeatureFlag(build, featureflags.UseLegacyKubernetesExecutionStrategy, false)
+
+			deletedPodNameCh := make(chan string)
+			defer buildtest.OnUserStage(build, func() {
+				client := getTestKubeClusterClient(t)
+				pods, err := client.
+					CoreV1().
+					Pods("default").
+					List(context.Background(), metav1.ListOptions{
+						LabelSelector: labels.Set(build.Runner.Kubernetes.PodLabels).String(),
+					})
+				require.NoError(t, err)
+				require.NotEmpty(t, pods.Items)
+				pod := pods.Items[0]
+				config, err := kubernetes.GetKubeClientConfig(new(common.KubernetesConfig))
+				require.NoError(t, err)
+				logsPath := fmt.Sprintf("/logs-%d-%d", build.JobInfo.ProjectID, build.JobResponse.ID)
+				opts := kubernetes.ExecOptions{
+					Namespace: pod.Namespace,
+					PodName:   pod.Name,
+					Client:    client,
+					Stdin:     true,
+					In:        strings.NewReader(fmt.Sprintf("rm -rf %s/*", logsPath)),
+					Out:       ioutil.Discard,
+					Command:   []string{"/bin/sh"},
+					Config:    config,
+					Executor:  &kubernetes.DefaultRemoteExecutor{},
+				}
+				err = opts.Run()
+				require.NoError(t, err)
+
+				deletedPodNameCh <- pod.Name
+			})()
+
+			out, err := buildtest.RunBuildReturningOutput(t, build)
+			require.Error(t, err)
+			assert.True(t, err != nil, "No error returned")
+
+			tt.outputAssertions(t, out, <-deletedPodNameCh)
+		})
+	}
+}
+
 // This test reproduces the bug reported in https://gitlab.com/gitlab-org/gitlab-runner/issues/2583
 func TestPrepareIssue2583(t *testing.T) {
 	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
@@ -548,6 +988,7 @@ func TestPrepareIssue2583(t *testing.T) {
 
 	e := kubernetes.NewDefaultExecutorForTest()
 
+	// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
 	prepareOptions := common.ExecutorPrepareOptions{
 		Config:  runnerConfig,
 		Build:   build,
@@ -632,25 +1073,31 @@ func TestDeletedPodSystemFailureDuringExecution(t *testing.T) {
 			// It's not possible to get this kind of information on the legacy execution path.
 			buildtest.SetBuildFeatureFlag(build, featureflags.UseLegacyKubernetesExecutionStrategy, false)
 
-			deletedPodCh := make(chan string)
+			deletedPodNameCh := make(chan string)
 			defer buildtest.OnStage(build, tt.stage, func() {
 				client := getTestKubeClusterClient(t)
-				pods, err := client.CoreV1().Pods("default").List(metav1.ListOptions{
-					LabelSelector: labels.Set(build.Runner.Kubernetes.PodLabels).String(),
-				})
+				pods, err := client.CoreV1().Pods("default").List(
+					context.Background(),
+					metav1.ListOptions{
+						LabelSelector: labels.Set(build.Runner.Kubernetes.PodLabels).String(),
+					},
+				)
 				require.NoError(t, err)
 				require.NotEmpty(t, pods.Items)
 				pod := pods.Items[0]
-				err = client.CoreV1().Pods("default").Delete(pod.Name, &metav1.DeleteOptions{})
+				err = client.
+					CoreV1().
+					Pods("default").
+					Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
 				require.NoError(t, err)
 
-				deletedPodCh <- pod.Name
+				deletedPodNameCh <- pod.Name
 			})()
 
 			out, err := buildtest.RunBuildReturningOutput(t, build)
 			assert.True(t, kubernetes.IsKubernetesPodNotFoundError(err), "expected err NotFound, but got %T", err)
 
-			tt.outputAssertions(t, out, <-deletedPodCh)
+			tt.outputAssertions(t, out, <-deletedPodNameCh)
 		})
 	}
 }
@@ -677,7 +1124,167 @@ func testKubernetesWithNonRootSecurityContext(t *testing.T, featureFlagName stri
 	assert.Contains(t, out, fmt.Sprintf("uid=%d gid=0(root)", runAsUser))
 }
 
-func getTestBuild(t *testing.T, getJobResponse func() (common.JobResponse, error)) *common.Build {
+func testKubernetesBashFeatureFlag(t *testing.T, featureFlagName string, featureFlagValue bool) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	tests := []struct {
+		script              string
+		expectedContent     string
+		expectedErrExitCode int
+	}{
+		{
+			script:          "export hello=world; echo \"hello $hello\"",
+			expectedContent: "hello world",
+		},
+		{
+			script:              "return 129",
+			expectedErrExitCode: 129,
+		},
+		{
+			script:              "exit 128",
+			expectedErrExitCode: 128,
+		},
+		{
+			script:              "eco 'function error'",
+			expectedErrExitCode: 127,
+		},
+		{
+			script:              "{{}",
+			expectedErrExitCode: 127,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run("", func(t *testing.T) {
+			build := getTestBuild(t, common.GetRemoteSuccessfulBuild)
+			buildtest.SetBuildFeatureFlag(build, featureFlagName, featureFlagValue)
+
+			build.Image.Name = common.TestAlpineImage
+			build.Runner.Shell = "bash"
+			build.JobResponse.Steps = common.Steps{
+				common.Step{
+					Name:   common.StepNameScript,
+					Script: []string{tc.script},
+				},
+			}
+
+			out, err := buildtest.RunBuildReturningOutput(t, build)
+			assert.Contains(t, out, tc.expectedContent)
+
+			if tc.expectedErrExitCode != 0 {
+				var buildError *common.BuildError
+				if assert.ErrorAs(t, err, &buildError) {
+					assert.Equal(t, tc.expectedErrExitCode, buildError.ExitCode)
+				}
+			}
+		})
+	}
+}
+
+func testKubernetesContainerHookFeatureFlag(t *testing.T, featureFlagName string, featureFlagValue bool) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	build := getTestBuild(t, common.GetRemoteSuccessfulBuild)
+	buildtest.SetBuildFeatureFlag(build, featureFlagName, featureFlagValue)
+
+	build.Image.Name = common.TestAlpineImage
+
+	tests := map[string]struct {
+		image           string
+		shell           string
+		lifecycleCfg    common.KubernetesContainerLifecyle
+		steps           common.Steps
+		validateOutputs func(t *testing.T, out string, err error)
+	}{
+		"invalid hook configuration: more than one handler type": {
+			lifecycleCfg: common.KubernetesContainerLifecyle{
+				PreStop: &common.KubernetesLifecycleHandler{
+					Exec: &common.KubernetesLifecycleExecAction{
+						Command: []string{"touch", "/builds/postStart.txt"},
+					},
+					HTTPGet: &common.KubernetesLifecycleHTTPGet{
+						Host: "localhost",
+						Port: 8080,
+					},
+				},
+			},
+			validateOutputs: func(t *testing.T, out string, err error) {
+				require.Error(t, err)
+				assert.Contains(t, out, "ERROR: Job failed (system failure):")
+				assert.Contains(t, out, "may not specify more than 1 handler type")
+			},
+		},
+		"postStart exec hook bash": {
+			steps: common.Steps{
+				common.Step{
+					Name: common.StepNameScript,
+					Script: []string{
+						"ls -l /builds",
+					},
+				},
+			},
+			lifecycleCfg: common.KubernetesContainerLifecyle{
+				PostStart: &common.KubernetesLifecycleHandler{
+					Exec: &common.KubernetesLifecycleExecAction{
+						Command: []string{"touch", "/builds/postStart.txt"},
+					},
+				},
+			},
+			validateOutputs: func(t *testing.T, out string, err error) {
+				require.NoError(t, err)
+				assert.Contains(t, out, "Job succeeded")
+				assert.Contains(t, out, "postStart.txt")
+			},
+		},
+		"postStart exec hook pwsh": {
+			image: common.TestPwshImage,
+			shell: shells.SNPwsh,
+			steps: common.Steps{
+				common.Step{
+					Name: common.StepNameScript,
+					Script: []string{
+						"Get-ChildItem /builds",
+					},
+				},
+			},
+			lifecycleCfg: common.KubernetesContainerLifecyle{
+				PostStart: &common.KubernetesLifecycleHandler{
+					Exec: &common.KubernetesLifecycleExecAction{
+						Command: []string{"touch", "/builds/postStart.txt"},
+					},
+				},
+			},
+			validateOutputs: func(t *testing.T, out string, err error) {
+				require.NoError(t, err)
+				assert.Contains(t, out, "Job succeeded")
+				assert.Contains(t, out, "postStart.txt")
+			},
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			build.Runner.RunnerSettings.Kubernetes.ContainerLifecycle = tt.lifecycleCfg
+
+			if tt.image != "" {
+				build.Image.Name = tt.image
+			}
+
+			if tt.shell != "" {
+				build.Runner.Shell = tt.shell
+			}
+
+			if tt.steps != nil {
+				build.JobResponse.Steps = tt.steps
+			}
+
+			out, err := buildtest.RunBuildReturningOutput(t, build)
+			tt.validateOutputs(t, out, err)
+		})
+	}
+}
+
+func getTestBuildWithImage(t *testing.T, image string, getJobResponse func() (common.JobResponse, error)) *common.Build {
 	jobResponse, err := getJobResponse()
 	assert.NoError(t, err)
 
@@ -690,7 +1297,7 @@ func getTestBuild(t *testing.T, getJobResponse func() (common.JobResponse, error
 			RunnerSettings: common.RunnerSettings{
 				Executor: "kubernetes",
 				Kubernetes: &common.KubernetesConfig{
-					Image:      common.TestAlpineImage,
+					Image:      image,
 					PullPolicy: common.StringOrArray{common.PullPolicyIfNotPresent},
 					PodLabels: map[string]string{
 						"test.k8s.gitlab.com/name": podUUID,
@@ -699,6 +1306,11 @@ func getTestBuild(t *testing.T, getJobResponse func() (common.JobResponse, error
 			},
 		},
 	}
+
+}
+
+func getTestBuild(t *testing.T, getJobResponse func() (common.JobResponse, error)) *common.Build {
+	return getTestBuildWithImage(t, common.TestAlpineImage, getJobResponse)
 }
 
 func getTestKubeClusterClient(t *testing.T) *k8s.Clientset {
@@ -708,6 +1320,56 @@ func getTestKubeClusterClient(t *testing.T) *k8s.Clientset {
 	require.NoError(t, err)
 
 	return client
+}
+
+// getSecrets retrieves all the secrets found in the given namespace
+// with at least one ownerReference name matching the name given
+// If ownerName is an empty string, all the secrets resources found are returned
+func getSecrets(client *k8s.Clientset, namespace, ownerName string) ([]v1.Secret, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	credList, err := client.CoreV1().Secrets(namespace).List(
+		ctx,
+		metav1.ListOptions{},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	credentials := []v1.Secret{}
+	for _, cred := range credList.Items {
+		if len(cred.OwnerReferences) == 1 && cred.OwnerReferences[0].Name == ownerName {
+			credentials = append(credentials, cred)
+		}
+	}
+
+	return credentials, nil
+}
+
+// getConfigMaps retrieves all the configMaps found in the given namespace
+// with at least one ownerReference name matching the name given
+// If ownerName is an empty string, all the configMaps resources found are returned
+func getConfigMaps(client *k8s.Clientset, namespace, ownerName string) ([]v1.ConfigMap, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	configMapList, err := client.CoreV1().ConfigMaps(namespace).List(
+		ctx,
+		metav1.ListOptions{},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	configMaps := []v1.ConfigMap{}
+	for _, cfg := range configMapList.Items {
+		if len(cfg.OwnerReferences) == 1 && cfg.OwnerReferences[0].Name == ownerName {
+			configMaps = append(configMaps, cfg)
+		}
+	}
+
+	return configMaps, nil
 }
 
 func runMultiPullPolicyBuild(t *testing.T, build *common.Build) error {
@@ -720,8 +1382,7 @@ func runMultiPullPolicyBuild(t *testing.T, build *common.Build) error {
 
 	err := build.Run(&common.Config{}, &common.Trace{Writer: outBuffer})
 	require.Error(t, err)
-	var buildErr *common.BuildError
-	assert.ErrorAs(t, err, &buildErr)
+	assert.ErrorIs(t, err, &common.BuildError{FailureReason: common.ScriptFailure})
 
 	assert.Regexp(
 		t,
@@ -733,4 +1394,236 @@ func runMultiPullPolicyBuild(t *testing.T, build *common.Build) error {
 	)
 
 	return err
+}
+
+func TestKubernetesAllowedImages(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	type testDef struct {
+		AllowedImages []string
+		Image         string
+		VerifyFn      func(*testing.T, error)
+	}
+	tests := map[string]testDef{
+		// allowed image case
+		"allowed image case": {
+			AllowedImages: []string{"alpine"},
+			Image:         "alpine",
+			VerifyFn: func(t *testing.T, err error) {
+				assert.NoError(t, err)
+			},
+		},
+		// disallowed image case
+		"disallowed image case": {
+			AllowedImages: []string{"alpine"},
+			Image:         "ubuntu",
+			VerifyFn: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, common.ErrDisallowedImage)
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			successfulBuild, err := common.GetRemoteSuccessfulBuild()
+			assert.NoError(t, err)
+			build := &common.Build{
+				JobResponse: successfulBuild,
+				Runner: &common.RunnerConfig{
+					RunnerSettings: common.RunnerSettings{
+						Executor: "kubernetes",
+						Kubernetes: &common.KubernetesConfig{
+							AllowedImages: test.AllowedImages,
+						},
+					},
+				},
+			}
+			build.Image.Name = test.Image
+
+			err = build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+
+			test.VerifyFn(t, err)
+		})
+	}
+}
+
+func TestKubernetesAllowedServices(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	type testDef struct {
+		AllowedServices []string
+		Services        common.Services
+		VerifyFn        func(*testing.T, error)
+	}
+	tests := map[string]testDef{
+		"allowed service case": {
+			AllowedServices: []string{"alpine", "debian"},
+			Services: common.Services{
+				common.Image{Name: "alpine"},
+			},
+			VerifyFn: func(t *testing.T, err error) {
+				assert.NoError(t, err)
+			},
+		},
+		"disallowed service case": {
+			AllowedServices: []string{"alpine", "debian"},
+			Services: common.Services{
+				common.Image{Name: "alpine"},
+				common.Image{Name: "ubuntu"},
+			},
+			VerifyFn: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, common.ErrDisallowedImage)
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			successfulBuild, err := common.GetRemoteSuccessfulBuild()
+			assert.NoError(t, err)
+			build := &common.Build{
+				JobResponse: successfulBuild,
+				Runner: &common.RunnerConfig{
+					RunnerSettings: common.RunnerSettings{
+						Executor: "kubernetes",
+						Kubernetes: &common.KubernetesConfig{
+							AllowedServices: test.AllowedServices,
+						},
+					},
+				},
+			}
+			build.Image.Name = "alpine"
+			build.Services = test.Services
+
+			err = build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+
+			test.VerifyFn(t, err)
+		})
+	}
+}
+
+func TestCleanupProjectGitClone(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	buildtest.RunBuildWithCleanupGitClone(t, getTestBuild(t, common.GetRemoteSuccessfulBuild))
+}
+
+func TestCleanupProjectGitFetch(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	untrackedFilename := "untracked"
+
+	build := getTestBuild(t, func() (common.JobResponse, error) {
+		return common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFilename, "", "")...,
+		)
+	})
+
+	buildtest.RunBuildWithCleanupGitFetch(t, build, untrackedFilename)
+}
+
+func TestCleanupProjectGitSubmoduleNormal(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	untrackedFile := "untracked"
+	untrackedSubmoduleFile := "untracked_submodule"
+
+	build := getTestBuild(t, func() (common.JobResponse, error) {
+		return common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFile, untrackedSubmoduleFile, "")...,
+		)
+	})
+
+	buildtest.RunBuildWithCleanupNormalSubmoduleStrategy(t, build, untrackedFile, untrackedSubmoduleFile)
+}
+
+func TestCleanupProjectGitSubmoduleRecursive(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	untrackedFile := "untracked"
+	untrackedSubmoduleFile := "untracked_submodule"
+	untrackedSubSubmoduleFile := "untracked_submodule_submodule"
+
+	build := getTestBuild(t, func() (common.JobResponse, error) {
+		return common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(
+				untrackedFile,
+				untrackedSubmoduleFile,
+				untrackedSubSubmoduleFile)...,
+		)
+	})
+
+	buildtest.RunBuildWithCleanupRecursiveSubmoduleStrategy(
+		t,
+		build,
+		untrackedFile,
+		untrackedSubmoduleFile,
+		untrackedSubSubmoduleFile,
+	)
+}
+
+func TestKubernetesPwshFeatureFlag(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "kubectl", "cluster-info")
+
+	tests := []struct {
+		script              string
+		expectedRegexp      string
+		expectedErrExitCode int
+	}{
+		{
+			script:         "Write-Output $PSVersionTable",
+			expectedRegexp: "PSEdition +Core",
+		},
+		{
+			script:         "return 129",
+			expectedRegexp: "Job succeeded",
+		},
+		{
+			script:              "Write-Error 'should fail'",
+			expectedErrExitCode: 1,
+		},
+		{
+			script:              "Exit 128",
+			expectedErrExitCode: 128,
+		},
+		{
+			script:              "$host.SetShouldExit(130)",
+			expectedErrExitCode: 130,
+		},
+		{
+			script:              "eco 'function error'",
+			expectedErrExitCode: 1,
+		},
+		{
+			script:              "syntax error {{}",
+			expectedErrExitCode: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run("", func(t *testing.T) {
+			build := getTestBuild(t, common.GetRemoteSuccessfulBuild)
+
+			build.Image.Name = common.TestPwshImage
+			build.Runner.Shell = shells.SNPwsh
+			build.JobResponse.Steps = common.Steps{
+				common.Step{
+					Name:   common.StepNameScript,
+					Script: []string{tc.script},
+				},
+			}
+
+			out, err := buildtest.RunBuildReturningOutput(t, build)
+			assert.Regexp(t, regexp.MustCompile(tc.expectedRegexp), out)
+
+			if tc.expectedErrExitCode != 0 {
+				var buildError *common.BuildError
+				if assert.ErrorAs(t, err, &buildError) {
+					assert.Equal(t, tc.expectedErrExitCode, buildError.ExitCode)
+				}
+			}
+		})
+	}
 }

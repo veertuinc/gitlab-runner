@@ -4,7 +4,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
 ---
 
-# Using libvirt with the Custom executor
+# Using libvirt with the Custom executor **(FREE)**
 
 Using [libvirt](https://libvirt.org/), the Custom executor driver will
 create a new disk and VM for every job it executes, after which the disk
@@ -16,9 +16,9 @@ to add libvirt as a GitLab Runner executor.
 
 This document does not try to explain how to set up libvirt, since it's
 out of scope. However, this driver was tested using [GCP Nested
-Virtualization](https://cloud.google.com/compute/docs/instances/enable-nested-virtualization-vm-instances),
+Virtualization](https://cloud.google.com/compute/docs/instances/nested-virtualization/overview),
 which also has [details on how to setup
-libvirt](https://cloud.google.com/compute/docs/instances/enable-nested-virtualization-vm-instances#starting_a_private_bridge_between_the_host_and_nested_vms)
+libvirt](https://cloud.google.com/compute/docs/instances/nested-virtualization/overview#starting_a_private_bridge_between_the_host_and_nested_vms)
 with bridge networking. This example will use the `default` network that
 comes with when installing libvirt so make sure it's running.
 

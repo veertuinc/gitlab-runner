@@ -1,9 +1,38 @@
 trigger UBI images build:
   stage: postrelease
+  extends:
+  - .rules:release:stable:branch
+  - .rules:release:bleeding-edge
   variables:
     BUILD_RELEASE: ${CI_COMMIT_REF_NAME}
   trigger: gitlab-org/ci-cd/gitlab-runner-ubi-images
-  only:
-    refs:
-    - master@gitlab-org/gitlab-runner
-    - /\Av[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?\Z/@gitlab-org/gitlab-runner
+
+trigger runner-incept tests:
+  extends:
+    - .rules:merge_request_pipelines:no_docs
+  needs:
+    - job: "prepare runner-incept variables"
+      artifacts: true
+    - "binaries: [linux/386 linux/arm]"
+    - "binaries: [linux/amd64 linux/arm64]"
+    - "binaries: [linux/s390x linux/ppc64le]"
+    - "helper images: [alpine]"
+  stage: postrelease
+  variables:
+    UPSTREAM_CI_COMMIT_REF: $UPSTREAM_CI_COMMIT_REF
+  trigger: gitlab-org/ci-cd/tests/runner-incept
+
+static QA:
+  extends:
+  - .rules:merge_request_pipelines:no_docs
+  - .no_cache
+  stage: postrelease
+  image: alpine:3.14.2
+  needs:
+  - code_quality
+  script: |
+    if [ "$(cat gl-code-quality-report.json)" != "[]" ] ; then
+      apk add -U --no-cache jq > /dev/null
+      jq -C . gl-code-quality-report.json
+      exit 1
+    fi

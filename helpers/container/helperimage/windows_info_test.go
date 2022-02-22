@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package helperimage
 
 import (
@@ -8,13 +11,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/container/windows"
+	"gitlab.com/gitlab-org/gitlab-runner/shells"
 )
 
 func Test_windowsInfo_create(t *testing.T) {
 	revision := "4011f186"
 
-	for _, shell := range []string{"", "powershell", "pwsh"} {
+	for _, shell := range []string{"", shells.SNPowershell, shells.SNPwsh} {
 		expectedPowershellCmdLine := getPowerShellCmd(shell)
+		if shell == "" {
+			assert.Equal(t, shells.SNPowershell, expectedPowershellCmdLine[0])
+		}
 
 		tests := []struct {
 			operatingSystem string
@@ -25,6 +32,24 @@ func Test_windowsInfo_create(t *testing.T) {
 		}{
 			{
 				operatingSystem: "Windows Server 2019 Datacenter Evaluation Version 1809 (OS Build 17763.316)",
+				gitlabRegistry:  true,
+				expectedInfo: Info{
+					Architecture: windowsSupportedArchitecture,
+					Name:         GitLabRegistryName,
+					Tag: fmt.Sprintf(
+						"%s-%s-%s",
+						windowsSupportedArchitecture,
+						revision,
+						baseImage1809,
+					),
+					IsSupportingLocalImport: false,
+					Cmd:                     expectedPowershellCmdLine,
+				},
+				expectedErr: nil,
+			},
+			{
+				operatingSystem: "Windows Server 2019 Datacenter Evaluation Version 1809 (OS Build 17763.316)",
+				gitlabRegistry:  false,
 				expectedInfo: Info{
 					Architecture: windowsSupportedArchitecture,
 					Name:         DockerHubName,
@@ -41,9 +66,10 @@ func Test_windowsInfo_create(t *testing.T) {
 			},
 			{
 				operatingSystem: "Windows Server Datacenter Version 1809 (OS Build 1803.590)",
+				gitlabRegistry:  true,
 				expectedInfo: Info{
 					Architecture: windowsSupportedArchitecture,
-					Name:         DockerHubName,
+					Name:         GitLabRegistryName,
 					Tag: fmt.Sprintf(
 						"%s-%s-%s",
 						windowsSupportedArchitecture,
@@ -56,39 +82,7 @@ func Test_windowsInfo_create(t *testing.T) {
 				expectedErr: nil,
 			},
 			{
-				operatingSystem: "Windows Server Datacenter Version 1903 (OS Build 18362.592)",
-				expectedInfo: Info{
-					Architecture: windowsSupportedArchitecture,
-					Name:         DockerHubName,
-					Tag: fmt.Sprintf(
-						"%s-%s-%s",
-						windowsSupportedArchitecture,
-						revision,
-						baseImage1903,
-					),
-					IsSupportingLocalImport: false,
-					Cmd:                     expectedPowershellCmdLine,
-				},
-				expectedErr: nil,
-			},
-			{
-				operatingSystem: "Windows Server Datacenter Version 1909 (OS Build 18363.720)",
-				expectedInfo: Info{
-					Architecture: windowsSupportedArchitecture,
-					Name:         DockerHubName,
-					Tag: fmt.Sprintf(
-						"%s-%s-%s",
-						windowsSupportedArchitecture,
-						revision,
-						baseImage1909,
-					),
-					IsSupportingLocalImport: false,
-					Cmd:                     expectedPowershellCmdLine,
-				},
-				expectedErr: nil,
-			},
-			{
-				operatingSystem: "Windows Server Datacenter Version 1909 (OS Build 18363.720)",
+				operatingSystem: "Windows 10 Pro Version 2004 (OS Build 19041.329)",
 				gitlabRegistry:  true,
 				expectedInfo: Info{
 					Architecture: windowsSupportedArchitecture,
@@ -97,7 +91,7 @@ func Test_windowsInfo_create(t *testing.T) {
 						"%s-%s-%s",
 						windowsSupportedArchitecture,
 						revision,
-						baseImage1909,
+						baseImage2004,
 					),
 					IsSupportingLocalImport: false,
 					Cmd:                     expectedPowershellCmdLine,
@@ -105,7 +99,7 @@ func Test_windowsInfo_create(t *testing.T) {
 				expectedErr: nil,
 			},
 			{
-				operatingSystem: "Windows 10 Pro Version 2004 (OS Build 19041.329)",
+				operatingSystem: "Windows Server Datacenter Version 2009 (OS Build 19042.985)",
 				expectedInfo: Info{
 					Architecture: windowsSupportedArchitecture,
 					Name:         DockerHubName,
@@ -113,7 +107,7 @@ func Test_windowsInfo_create(t *testing.T) {
 						"%s-%s-%s",
 						windowsSupportedArchitecture,
 						revision,
-						baseImage2004,
+						baseImage20H2,
 					),
 					IsSupportingLocalImport: false,
 					Cmd:                     expectedPowershellCmdLine,

@@ -1,8 +1,13 @@
+//go:build integration
+// +build integration
+
 package parallels_test
 
 import (
 	"os"
 	"testing"
+
+	"gitlab.com/gitlab-org/gitlab-runner/shells/shellstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -44,6 +49,37 @@ func TestParallelsSuccessRun(t *testing.T) {
 
 	err = build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	assert.NoError(t, err, "Make sure that you have done 'make development_setup'")
+}
+
+func TestBuildScriptSections(t *testing.T) {
+	helpers.SkipIntegrationTests(t, prlCtl, "--version")
+
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		if shell == "cmd" || shell == "pwsh" || shell == "powershell" {
+			// support for pwsh and powershell tracked in https://gitlab.com/gitlab-org/gitlab-runner/-/issues/28119
+			t.Skip("CMD, pwsh, powershell not supported")
+		}
+
+		successfulBuild, err := common.GetRemoteBuildResponse("echo Hello World")
+
+		build := &common.Build{
+			JobResponse: successfulBuild,
+			Runner: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Executor: "parallels",
+					Parallels: &common.ParallelsConfig{
+						BaseName:         prlImage,
+						DisableSnapshots: true,
+					},
+					SSH:   prlSSHConfig,
+					Shell: shell,
+				},
+			},
+		}
+
+		require.NoError(t, err)
+		buildtest.RunBuildWithSections(t, build)
+	})
 }
 
 func TestParallelsSuccessRunRawVariable(t *testing.T) {
@@ -194,4 +230,83 @@ func TestParallelsBuildMasking(t *testing.T) {
 	}
 
 	buildtest.RunBuildWithMasking(t, config, nil)
+}
+
+func getTestBuild(t *testing.T, getJobResp func() (common.JobResponse, error)) *common.Build {
+	jobResponse, err := getJobResp()
+	require.NoError(t, err)
+
+	return &common.Build{
+		JobResponse: jobResponse,
+		Runner: &common.RunnerConfig{
+			RunnerSettings: common.RunnerSettings{
+				Executor: "parallels",
+				Parallels: &common.ParallelsConfig{
+					BaseName:         prlImage,
+					DisableSnapshots: true,
+				},
+				SSH: prlSSHConfig,
+			},
+		},
+	}
+}
+
+func TestCleanupProjectGitClone(t *testing.T) {
+	helpers.SkipIntegrationTests(t, prlCtl, "--version")
+
+	buildtest.RunBuildWithCleanupGitClone(t, getTestBuild(t, common.GetRemoteSuccessfulBuild))
+}
+
+func TestCleanupProjectGitFetch(t *testing.T) {
+	helpers.SkipIntegrationTests(t, prlCtl, "--version")
+
+	untrackedFilename := "untracked"
+
+	build := getTestBuild(t, func() (common.JobResponse, error) {
+		return common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFilename, "", "")...,
+		)
+	})
+
+	buildtest.RunBuildWithCleanupGitFetch(t, build, untrackedFilename)
+}
+
+func TestCleanupProjectGitSubmoduleNormal(t *testing.T) {
+	helpers.SkipIntegrationTests(t, prlCtl, "--version")
+
+	untrackedFile := "untracked"
+	untrackedSubmoduleFile := "untracked_submodule"
+
+	build := getTestBuild(t, func() (common.JobResponse, error) {
+		return common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFile, untrackedSubmoduleFile, "")...,
+		)
+	})
+
+	buildtest.RunBuildWithCleanupNormalSubmoduleStrategy(t, build, untrackedFile, untrackedSubmoduleFile)
+}
+
+func TestCleanupProjectGitSubmoduleRecursive(t *testing.T) {
+	helpers.SkipIntegrationTests(t, prlCtl, "--version")
+
+	untrackedFile := "untracked"
+	untrackedSubmoduleFile := "untracked_submodule"
+	untrackedSubSubmoduleFile := "untracked_submodule_submodule"
+
+	build := getTestBuild(t, func() (common.JobResponse, error) {
+		return common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(
+				untrackedFile,
+				untrackedSubmoduleFile,
+				untrackedSubSubmoduleFile)...,
+		)
+	})
+
+	buildtest.RunBuildWithCleanupRecursiveSubmoduleStrategy(
+		t,
+		build,
+		untrackedFile,
+		untrackedSubmoduleFile,
+		untrackedSubSubmoduleFile,
+	)
 }

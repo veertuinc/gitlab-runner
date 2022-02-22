@@ -1,66 +1,105 @@
-.release_docker_images:
+.release_docker_images_base:
+  stage: release
   extends:
   - .docker
   - .docker_qemu
-  stage: release
+  - .linux-dependency-checksums
   variables:
     PUBLISH_IMAGES: "true"
     PUSH_TO_DOCKER_HUB: "true"
     PUSH_TO_ECR_PUBLIC: "true"
-    TARGET_ARCHS: "amd64,arm64,s390x"
-    DOCKER_MACHINE_AMD64_CHECKSUM: "a7f7cbb842752b12123c5a5447d8039bf8dccf62ec2328853583e68eb4ffb097"
-    DOCKER_MACHINE_ARM64_CHECKSUM: "109f534bfb8b9b852c938cad978e60a86b13f5ecf92da5e24320dacd2a7216ac"
-    DUMB_INIT_AMD64_CHECKSUM: "37f2c1f0372a45554f1b89924fbb134fc24c3756efaedf11e07f599494e0eff9"
-    DUMB_INIT_ARM64_CHECKSUM: "45b1bbf56cc03edda81e4220535a025bfe3ed6e93562222b9be4471005b3eeb3"
-    DUMB_INIT_S390X_CHECKSUM: "8b3808c3c06d008b8f2eeb2789c7c99e0450b678d94fb50fd446b8f6a22e3a9d"
-    GIT_LFS_AMD64_CHECKSUM: "f48f45cf8ca600cdde4a8f27b16faf761e2ab944eaf1b0d9a38f66e9979b7df0"
-    GIT_LFS_ARM64_CHECKSUM: "b7e65e7f336c465c7049b538f1bc829146f511237f83a55b5d27e51e2e2fcbf7"
-    GIT_LFS_S390X_CHECKSUM: "8d3d5bb5ed98fe8df788011e890e2d47351ccec8bf47b679576b375840eb0610"
-  dependencies:
-  - 'helper images'
-  - 'ecr public token'
-  - 'binaries linux/386 linux/amd64 linux/arm linux/arm64 linux/s390x'
-  - 'package-deb'
-  script:
+  before_script:
   - source ci/touch_make_dependencies
-  - make release_docker_images
   retry: 2
+
+.release_docker_images:
+  extends:
+  - .release_docker_images_base
+  dependencies:
+  - 'ecr public token'
+  - 'binaries'
+  - 'package-deb'
+  - 'binaries-fips'
+  - 'package-rpm: [package-rpm-fips]'
+  script:
+  - make release_docker_images
+  parallel:
+    matrix:
+    - IMAGE_FLAVOR: ubi-fips
+      TARGET_ARCHS: amd64
+    - IMAGE_FLAVOR: ubuntu
+      TARGET_ARCHS: amd64 arm64 ppc64le
+    - IMAGE_FLAVOR: alpine3.12
+      TARGET_ARCHS: amd64 arm64 ppc64le
+    - IMAGE_FLAVOR: alpine3.13
+      TARGET_ARCHS: amd64 arm64 ppc64le
+    - IMAGE_FLAVOR: alpine3.14
+      TARGET_ARCHS: amd64 arm64 ppc64le
+    - IMAGE_FLAVOR: alpine3.15
+      TARGET_ARCHS: amd64 arm64 ppc64le
+    # we build s390x images on their own, as they don't play nicely when built
+    # concurrently: https://gitlab.com/gitlab-org/gitlab-runner/-/issues/28392
+    - IMAGE_FLAVOR: ubuntu
+      TARGET_ARCHS: s390x
+      ALLOW_IMAGE_BUILD_FAILURE: "true"
+    - IMAGE_FLAVOR: alpine3.12
+      TARGET_ARCHS: s390x
+      ALLOW_IMAGE_BUILD_FAILURE: "true"
+    - IMAGE_FLAVOR: alpine3.13
+      TARGET_ARCHS: s390x
+      ALLOW_IMAGE_BUILD_FAILURE: "true"
+    - IMAGE_FLAVOR: alpine3.14
+      TARGET_ARCHS: s390x
+      ALLOW_IMAGE_BUILD_FAILURE: "true"
+    - IMAGE_FLAVOR: alpine3.15
+      TARGET_ARCHS: s390x
+      ALLOW_IMAGE_BUILD_FAILURE: "true"
+
+.release_helper_docker_images:
+  extends:
+  - .release_docker_images_base
+  dependencies:
+  - 'ecr public token'
+  - 'binaries'
+  - 'helper images'
+  - 'helper images fips'
+  script:
+  - make release_helper_docker_images
+  parallel:
+    matrix:
+    - IMAGE_FLAVOR: "alpine"
+      IMAGE_TAG: ["", "alpine3.12-"]
+    - IMAGE_FLAVOR: "alpine3.13"
+      IMAGE_TAG: ["alpine3.13-"]
+    - IMAGE_FLAVOR: "alpine3.14"
+      IMAGE_TAG: ["alpine3.14-"]
+    - IMAGE_FLAVOR: "alpine3.15"
+      IMAGE_TAG: ["alpine3.15-"]
+    - IMAGE_FLAVOR: "ubuntu"
+      IMAGE_TAG: ["ubuntu-"]
+    - IMAGE_FLAVOR: "ubi-fips"
+      IMAGE_TAG: ["ubi-fips-"]
 
 .release_windows_docker_images:
   extends:
-  - .except_docs
+  - .windows-dependency-checksums
   stage: release
   variables:
     PUSH_TO_DOCKER_HUB: "true"
     PUSH_TO_ECR_PUBLIC: "true"
     PUBLISH_IMAGES: "true"
-    GIT_256_CHECKSUM: "bdb8c1560eca39f4d99b07705006c00d94a3f8612501046a0f89353afc5307fa"
-    GIT_LFS_256_CHECKSUM: "ca05b0b9bd39d99665045776a5d0d5c7bfa2605a6118c2f489bfd40c2c3e4f2c"
-    PWSH_256_CHECKSUM: "D234CFD6E9DD4A2CA68BFBC64C416DE42F31760E954812E8ADE02B6D57FE243F"
+    PWSH_VERSION: 7.1.1
   dependencies:
-  - 'helper images'
+  - 'helper images binaries'
   - 'ecr public token'
-  - 'binaries windows/386 windows/amd64'
-  before_script:
-  - if (Test-Path env:GPG_KEY) { Remove-Item Env:GPG_KEY }
+  - 'binaries: [windows/386 windows/amd64]'
   script:
   - .\ci\build_release_windows_images.ps1
   retry: 2
 
 .release:
-  extends:
-  - .except_docs
   stage: release
   before_script:
-  - unset GPG_KEY
-  - source ci/touch_make_dependencies
-
-.release:with-rules:
-  extends:
-  - .rules:docs:skip
-  stage: release
-  before_script:
-  - unset GPG_KEY
   - source ci/touch_make_dependencies
 
 .release_s3:
@@ -68,15 +107,21 @@
   - .release
   dependencies:
   - 'helper images'
-  - 'test coverage report'
-  - 'binaries darwin/amd64'
-  - 'binaries freebsd/386 freebsd/amd64 freebsd/arm'
-  - 'binaries linux/386 linux/amd64 linux/arm linux/arm64 linux/s390x'
-  - 'binaries windows/386 windows/amd64'
+  - 'helper images binaries'
+  - 'binaries'
+  - 'binaries-fips'
   - 'package-deb'
   - 'package-rpm'
   before_script:
   - source ci/touch_make_dependencies
+  - |
+    # checking GPG signing support
+    if [ -f "$GPG_KEY_PATH" ]; then
+      export GPG_KEY=$(cat ${GPG_KEY_PATH})
+      export GPG_PASSPHRASE=$(cat ${GPG_PASSPHRASE_PATH})
+    else
+      echo -e "\033[0;31m****** GPG signing disabled ******\033[0m"
+    fi
   script:
   - make release_s3
 
@@ -89,38 +134,27 @@
   script:
   - make release_packagecloud
 
-.release_development:
-  only:
-  - merge_requests@gitlab-org/gitlab-runner
-  - merge_requests@gitlab-org/security/gitlab-runner
-  except:
-    variables:
-    - $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /(^docs[\/-].*|.*-docs$)/
-
-.release_bleeding_edge:
-  only:
-  - master@gitlab-org/gitlab-runner
-  - /\Av[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+\Z/@gitlab-org/gitlab-runner
-
-.release_stable:
-  only:
-  - /\Av[0-9]+\.[0-9]+\.[0-9]+\Z/@gitlab-org/gitlab-runner
-  - /\Av[0-9]+\.[0-9]+\.[0-9]+\Z/@gitlab-org/security/gitlab-runner
-
 development S3:
   extends:
   - .release_s3
-  - .release_development
+  - .rules:runner-only:release:development:merge-requests
   environment:
     name: development/s3/${CI_COMMIT_REF_NAME}
     url: https://gitlab-runner-downloads.s3.amazonaws.com/${CI_COMMIT_REF_NAME}/index.html
-  only:
-  - merge_requests@gitlab-org/gitlab-runner
 
 development docker images:
   extends:
   - .release_docker_images
-  - .release_development
+  - .rules:release:development:merge-requests
+  variables:
+    PUBLISH_IMAGES: "false"
+    PUSH_TO_DOCKER_HUB: "false"
+    PUSH_TO_ECR_PUBLIC: "false"
+
+development helper docker images:
+  extends:
+  - .release_helper_docker_images
+  - .rules:release:development:merge-requests
   variables:
     PUBLISH_IMAGES: "false"
     PUSH_TO_DOCKER_HUB: "false"
@@ -128,29 +162,9 @@ development docker images:
 
 development servercore1809 helper docker image:
   extends:
-  - .release_development
   - .windows1809
   - .release_windows_docker_images
-  variables:
-    PUBLISH_IMAGES: "false"
-    PUSH_TO_DOCKER_HUB: "false"
-    PUSH_TO_ECR_PUBLIC: "false"
-
-development servercore1903 helper docker image:
-  extends:
-  - .release_development
-  - .windows1903
-  - .release_windows_docker_images
-  variables:
-    PUBLISH_IMAGES: "false"
-    PUSH_TO_DOCKER_HUB: "false"
-    PUSH_TO_ECR_PUBLIC: "false"
-
-development servercore1909 helper docker image:
-  extends:
-  - .release_development
-  - .windows1909
-  - .release_windows_docker_images
+  - .rules:release:development:merge-requests
   variables:
     PUBLISH_IMAGES: "false"
     PUSH_TO_DOCKER_HUB: "false"
@@ -158,9 +172,19 @@ development servercore1909 helper docker image:
 
 development servercore2004 helper docker image:
   extends:
-  - .release_development
   - .windows2004
   - .release_windows_docker_images
+  - .rules:release:development:merge-requests
+  variables:
+    PUBLISH_IMAGES: "false"
+    PUSH_TO_DOCKER_HUB: "false"
+    PUSH_TO_ECR_PUBLIC: "false"
+
+development servercore20H2 helper docker image:
+  extends:
+  - .windows20H2
+  - .release_windows_docker_images
+  - .rules:release:development:merge-requests
   variables:
     PUBLISH_IMAGES: "false"
     PUSH_TO_DOCKER_HUB: "false"
@@ -169,7 +193,7 @@ development servercore2004 helper docker image:
 bleeding edge S3:
   extends:
   - .release_s3
-  - .release_bleeding_edge
+  - .rules:release:bleeding-edge
   environment:
     name: bleeding_edge/s3
     url: https://gitlab-runner-downloads.s3.amazonaws.com/${CI_COMMIT_REF_NAME}/index.html
@@ -177,137 +201,245 @@ bleeding edge S3:
 bleeding edge packagecloud:
   extends:
   - .release_packagecloud
-  - .release_bleeding_edge
+  - .rules:release:bleeding-edge
   environment:
     name: bleeding_edge/packagecloud
     url: https://packages.gitlab.com/runner/unstable
+  parallel:
+    matrix:
+    - DIST_FLAVOR:
+      - debian
+      - ubuntu
+      - el
+      - fedora
+
+.bleding_edge_docker_images_base:
+  extends:
+  - .rules:release:bleeding-edge
+  environment:
+    name: bleeding_edge/docker_images/linux
+    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
 
 bleeding edge docker images:
   extends:
+  - .bleding_edge_docker_images_base
   - .release_docker_images
-  - .release_bleeding_edge
-  environment:
-    name: bleeding_edge/docker_images
-    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
+
+bleeding edge helper docker images:
+  extends:
+  - .bleding_edge_docker_images_base
+  - .release_helper_docker_images
 
 bleeding edge servercore1809 docker images:
   extends:
-  - .release_bleeding_edge
   - .windows1809
   - .release_windows_docker_images
+  - .rules:release:bleeding-edge
   environment:
     name: bleeding_edge/docker_images/windows1809
     url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
 
-bleeding edge servercore1903 docker images:
-  extends:
-  - .release_bleeding_edge
-  - .windows1903
-  - .release_windows_docker_images
-  environment:
-    name: bleeding_edge/docker_images/windows1903
-    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
-
-bleeding edge servercore1909 docker images:
-  extends:
-  - .release_bleeding_edge
-  - .windows1909
-  - .release_windows_docker_images
-  environment:
-    name: bleeding_edge/docker_images/windows1909
-    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
-
 bleeding edge servercore2004 docker images:
   extends:
-  - .release_bleeding_edge
   - .windows2004
   - .release_windows_docker_images
+  - .rules:release:bleeding-edge
   environment:
     name: bleeding_edge/docker_images/windows2004
+    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
+
+bleeding edge servercore20H2 docker images:
+  extends:
+  - .windows20H2
+  - .release_windows_docker_images
+  - .rules:release:bleeding-edge
+  environment:
+    name: bleeding_edge/docker_images/windows20H2
     url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
 
 stable S3:
   extends:
   - .release_s3
-  - .release_stable
+  - .rules:release:stable:branch
   environment:
     name: stable/s3
     url: https://gitlab-runner-downloads.s3.amazonaws.com/${CI_COMMIT_REF_NAME}/index.html
 
-stable gitlab release:
-  extends:
-  - .release:with-rules
-  script:
-  - ./ci/release_gitlab
-  rules:
-  - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$/ && $CI_PROJECT_URL == "https://gitlab.com/gitlab-org/gitlab-runner"'
-    when: on_success
-  - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$/ && $CI_PROJECT_URL == "https://gitlab.com/gitlab-org/security/gitlab-runner"'
-    when: manual
-
 stable packagecloud:
   extends:
   - .release_packagecloud
-  - .release_stable
+  - .rules:release:stable:branch
   environment:
     name: stable/packagecloud
     url: https://packages.gitlab.com/runner/gitlab-runner
+  parallel:
+    matrix:
+    - DIST_FLAVOR:
+      - debian
+      - ubuntu
+      - raspbian
+      - linuxmint
+      - el
+      - ol
+      - fedora
+
+.stable_docker_images_base_variables_overwrite:
+  variables:
+    # Setting the CI_PROJECT_ID and CI_REGISTRY_IMAGE variable explicitly because we're
+    # running this job also from the https://gitlab.com/gitlab-org/security/gitlab-runner
+    # fork. But it should still create the release entry in the canonical one.
+    CI_REGISTRY: registry.gitlab.com
+    CI_REGISTRY_IMAGE: registry.gitlab.com/gitlab-org/gitlab-runner
+
+.stable_docker_images_base:
+  extends:
+  - .rules:release:stable:branch
+  - .stable_docker_images_base_variables_overwrite
+  environment:
+    name: stable/docker_images/linux
+    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
 
 stable docker images:
   extends:
+  - .stable_docker_images_base
   - .release_docker_images
-  - .release_stable
-  environment:
-    name: stable/docker_images
-    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
+
+stable helper docker images:
+  extends:
+  - .stable_docker_images_base
+  - .release_helper_docker_images
 
 stable servercore1809 docker images:
   extends:
-  - .release_stable
   - .windows1809
   - .release_windows_docker_images
+  - .rules:release:stable:branch
+  - .stable_docker_images_base_variables_overwrite
   environment:
     name: stable/docker_images/windows1809
     url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
 
-stable servercore1903 docker images:
-  extends:
-  - .release_stable
-  - .windows1903
-  - .release_windows_docker_images
-  environment:
-    name: stable/docker_images/windows1903
-    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
-
-stable servercore1909 docker images:
-  extends:
-  - .release_stable
-  - .windows1909
-  - .release_windows_docker_images
-  environment:
-    name: stable/docker_images/windows1909
-    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
-
 stable servercore2004 docker images:
   extends:
-  - .release_stable
   - .windows2004
   - .release_windows_docker_images
+  - .rules:release:stable:branch
+  - .stable_docker_images_base_variables_overwrite
   environment:
     name: stable/docker_images/windows2004
     url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
 
-static QA:
+stable servercore20H2 docker images:
   extends:
-  - .rules:merge_request_pipelines:no_docs
-  - .no_cache
-  stage: release
-  image: alpine:3.12.0
-  needs:
-  - code_quality
-  script: |
-    if [ "$(cat gl-code-quality-report.json)" != "[]" ] ; then
-      apk add -U --no-cache jq > /dev/null
-      jq -C . gl-code-quality-report.json
-      exit 1
-    fi
+  - .windows20H2
+  - .release_windows_docker_images
+  - .rules:release:stable:branch
+  - .stable_docker_images_base_variables_overwrite
+  environment:
+    name: stable/docker_images/windows20H2
+    url: https://hub.docker.com/r/gitlab/gitlab-runner/tags/
+
+stable gitlab release:
+  stage: postrelease
+  extends:
+  - .rules:release:stable-or-rc
+  dependencies: []
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  variables:
+    CHANGELOG: https://gitlab.com/gitlab-org/gitlab-runner/blob/$CI_COMMIT_TAG/CHANGELOG.md
+    S3: https://gitlab-runner-downloads.s3.amazonaws.com/$CI_COMMIT_TAG
+    # Setting the CI_PROJECT_ID variable explicitly because we're running this job
+    # also from the https://gitlab.com/gitlab-org/security/gitlab-runner fork. But it
+    # should still create the release entry in the canonical one.
+    CI_PROJECT_ID: 250833
+  environment:
+    name: stable/gitlab
+    url: https://gitlab.com/gitlab-org/gitlab-runner/-/releases
+  before_script: []
+  script:
+  - echo "Releasing to $S3"
+  release:
+    name: '$CI_COMMIT_TAG'
+    description: |
+      See [the changelog]($CHANGELOG) :rocket:
+
+      GitLab Runner documentation can be found at https://docs.gitlab.com/runner/.
+    tag_name: '$CI_COMMIT_TAG'
+    ref: '$CI_COMMIT_TAG'
+    assets:
+      links:
+      # binaries
+      - name: 'binary: Linux amd64'
+        url: '$S3/binaries/gitlab-runner-linux-amd64'
+        filepath: '/binaries/gitlab-runner-linux-amd64'
+      - name: 'binary: Linux arm'
+        url: '$S3/binaries/gitlab-runner-linux-arm'
+        filepath: '/binaries/gitlab-runner-linux-arm'
+      - name: 'binary: Linux s390x'
+        url: '$S3/binaries/gitlab-runner-linux-s390x'
+        filepath: '/binaries/gitlab-runner-linux-s390x'
+
+      - name: 'binary: macOS amd64'
+        url: '$S3/binaries/gitlab-runner-darwin-amd64'
+        filepath: '/binaries/gitlab-runner-darwin-amd64'
+      - name: 'binary: macOS arm64'
+        url: '$S3/binaries/gitlab-runner-darwin-arm64'
+        filepath: '/binaries/gitlab-runner-darwin-arm64'
+
+      - name: 'binary: Windows amd64'
+        url: '$S3/binaries/gitlab-runner-windows-amd64.zip'
+        filepath: '/binaries/gitlab-runner-windows-amd64.zip'
+      - name: 'binary: Windows i386'
+        url: '$S3/binaries/gitlab-runner-windows-386.zip'
+        filepath: '/binaries/gitlab-runner-windows-386.zip'
+
+      # DEB packages
+      - name: 'package: DEB amd64'
+        url: '$S3/deb/gitlab-runner_amd64.deb'
+        filepath: '/packages/deb/gitlab-runner_amd64.deb'
+      - name: 'package: DEB i386'
+        url: '$S3/deb/gitlab-runner_i386.deb'
+        filepath: '/packages/deb/gitlab-runner_i386.deb'
+      - name: 'package: DEB armel'
+        url: '$S3/deb/gitlab-runner_armel.deb'
+        filepath: '/packages/deb/gitlab-runner_armel.deb'
+      - name: 'package: DEB armhf'
+        url: '$S3/deb/gitlab-runner_armhf.deb'
+        filepath: '/packages/deb/gitlab-runner_armhf.deb'
+      - name: 'package: DEB aarch64'
+        url: '$S3/deb/gitlab-runner_aarch64.deb'
+        filepath: '/packages/deb/gitlab-runner_aarch64.deb'
+      - name: 'package: DEB arm64'
+        url: '$S3/deb/gitlab-runner_arm64.deb'
+        filepath: '/packages/deb/gitlab-runner_arm64.deb'
+
+      # RPM packages
+      - name: 'package: RPM amd64'
+        url: '$S3/rpm/gitlab-runner_amd64.rpm'
+        filepath: '/packages/rpm/gitlab-runner_amd64.rpm'
+      - name: 'package: RPM i686'
+        url: '$S3/rpm/gitlab-runner_i686.rpm'
+        filepath: '/packages/rpm/gitlab-runner_i686.rpm'
+      - name: 'package: RPM arm'
+        url: '$S3/rpm/gitlab-runner_arm.rpm'
+        filepath: '/packages/rpm/gitlab-runner_arm.rpm'
+      - name: 'package: RPM armhf'
+        url: '$S3/rpm/gitlab-runner_armhf.rpm'
+        filepath: '/packages/rpm/gitlab-runner_armhf.rpm'
+      - name: 'package: RPM arm64'
+        url: '$S3/rpm/gitlab-runner_arm64.rpm'
+        filepath: '/packages/rpm/gitlab-runner_arm64.rpm'
+      - name: 'package: RPM aarch64'
+        url: '$S3/rpm/gitlab-runner_aarch64.rpm'
+        filepath: '/packages/rpm/gitlab-runner_aarch64.rpm'
+
+      # Other files
+      - name: 'checksums'
+        url: '$S3/release.sha256'
+        filepath: '/release.sha256'
+      - name: 'checksums GPG signature'
+        url: '$S3/release.sha256.asc'
+        filepath: '/release.sha256.asc'
+      - name: 'other release artifacts'
+        url: '$S3/index.html'
+        filepath: '/index.html'

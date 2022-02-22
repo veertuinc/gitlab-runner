@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package kubernetes
 
 import (
@@ -501,104 +504,41 @@ func testVersionAndCodec() (version string, codec runtime.Codec) {
 	return
 }
 
-func TestGetCapabilities(t *testing.T) {
-	tests := map[string]struct {
-		defaultCapDrop     []string
-		capAdd             []string
-		capDrop            []string
-		assertCapabilities func(t *testing.T, a *api.Capabilities)
+func TestSanitizeLabel(t *testing.T) {
+	tests := []struct {
+		Name string
+		In   string
+		Out  string
 	}{
-		"no data provided": {
-			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
-				assert.Nil(t, a)
-			},
+		{
+			Name: "valid label",
+			In:   "label",
+			Out:  "label",
 		},
-		"only default_cap_drop provided": {
-			defaultCapDrop: []string{"CAP_1", "CAP_2"},
-			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
-				require.NotNil(t, a)
-				assert.Empty(t, a.Add)
-				assert.Len(t, a.Drop, 2)
-				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
-				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
-			},
+		{
+			Name: "invalid label",
+			In:   "label++@",
+			Out:  "label",
 		},
-		"only custom cap_add provided": {
-			capAdd: []string{"CAP_1", "CAP_2"},
-			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
-				require.NotNil(t, a)
-				assert.Len(t, a.Add, 2)
-				assert.Contains(t, a.Add, api.Capability("CAP_1"))
-				assert.Contains(t, a.Add, api.Capability("CAP_2"))
-				assert.Empty(t, a.Drop)
-			},
+		{
+			Name: "invalid label start end character",
+			In:   "--label-",
+			Out:  "label",
 		},
-		"only custom cap_drop provided": {
-			capDrop: []string{"CAP_1", "CAP_2"},
-			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
-				require.NotNil(t, a)
-				assert.Empty(t, a.Add)
-				assert.Len(t, a.Drop, 2)
-				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
-				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
-			},
+		{
+			Name: "invalid label too long",
+			In:   "labellabellabellabellabellabellabellabellabellabellabellabellabel",
+			Out:  "labellabellabellabellabellabellabellabellabellabellabellabellab",
 		},
-		"default_cap_drop and custom cap_drop sums": {
-			defaultCapDrop: []string{"CAP_1", "CAP_2"},
-			capDrop:        []string{"CAP_3", "CAP_4"},
-			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
-				require.NotNil(t, a)
-				assert.Empty(t, a.Add)
-				assert.Len(t, a.Drop, 4)
-				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
-				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
-				assert.Contains(t, a.Drop, api.Capability("CAP_3"))
-				assert.Contains(t, a.Drop, api.Capability("CAP_4"))
-			},
-		},
-		"default_cap_drop and custom cap_drop duplicate": {
-			defaultCapDrop: []string{"CAP_1", "CAP_2"},
-			capDrop:        []string{"CAP_2", "CAP_3"},
-			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
-				require.NotNil(t, a)
-				assert.Empty(t, a.Add)
-				assert.Len(t, a.Drop, 3)
-				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
-				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
-				assert.Contains(t, a.Drop, api.Capability("CAP_3"))
-			},
-		},
-		"default_cap_drop and custom cap_add intersect": {
-			defaultCapDrop: []string{"CAP_1", "CAP_2"},
-			capAdd:         []string{"CAP_2", "CAP_3"},
-			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
-				require.NotNil(t, a)
-				assert.Len(t, a.Add, 2)
-				assert.Contains(t, a.Add, api.Capability("CAP_2"))
-				assert.Contains(t, a.Add, api.Capability("CAP_3"))
-				assert.Len(t, a.Drop, 1)
-				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
-			},
-		},
-		"default_cap_drop and custom cap_add intersect and cap_drop forces": {
-			defaultCapDrop: []string{"CAP_1", "CAP_2"},
-			capAdd:         []string{"CAP_2", "CAP_3"},
-			capDrop:        []string{"CAP_2", "CAP_4"},
-			assertCapabilities: func(t *testing.T, a *api.Capabilities) {
-				require.NotNil(t, a)
-				assert.Len(t, a.Add, 1)
-				assert.Contains(t, a.Add, api.Capability("CAP_3"))
-				assert.Len(t, a.Drop, 3)
-				assert.Contains(t, a.Drop, api.Capability("CAP_1"))
-				assert.Contains(t, a.Drop, api.Capability("CAP_2"))
-				assert.Contains(t, a.Drop, api.Capability("CAP_4"))
-			},
+		{
+			Name: "invalid characters",
+			In:   "a\xc5z",
+			Out:  "a_z",
 		},
 	}
-
-	for tn, tt := range tests {
-		t.Run(tn, func(t *testing.T) {
-			tt.assertCapabilities(t, getCapabilities(tt.defaultCapDrop, tt.capAdd, tt.capDrop))
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			assert.Equal(t, sanitizeLabel(test.In), test.Out)
 		})
 	}
 }

@@ -22,6 +22,7 @@ type ShellWriter interface {
 	MkDir(path string)
 	RmDir(path string)
 	RmFile(path string)
+	RmFilesRecursive(path string, name string)
 	Absolute(path string) string
 	Join(elem ...string) string
 	TmpFile(name string) string
@@ -33,6 +34,9 @@ type ShellWriter interface {
 	Warningf(fmt string, arguments ...interface{})
 	Errorf(fmt string, arguments ...interface{})
 	EmptyLine()
+
+	SectionStart(id, command string)
+	SectionEnd(id string)
 
 	Finish(trace bool) string
 }

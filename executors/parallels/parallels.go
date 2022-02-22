@@ -7,12 +7,13 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/executors"
+	"gitlab.com/gitlab-org/gitlab-runner/executors/vm"
 	prl "gitlab.com/gitlab-org/gitlab-runner/helpers/parallels"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
 )
 
 type executor struct {
-	executors.AbstractExecutor
+	vm.Executor
 	vmName          string
 	sshCommand      ssh.Client
 	provisioned     bool
@@ -72,7 +73,7 @@ func (s *executor) verifyMachine(vmName string) error {
 		return err
 	}
 	defer sshCommand.Cleanup()
-	err = sshCommand.Run(s.Context, ssh.Command{Command: []string{"exit"}})
+	err = sshCommand.Run(s.Context, ssh.Command{Command: []string{"exit"}}, s.Shell().Shell)
 	if err != nil {
 		return err
 	}
@@ -96,12 +97,7 @@ func (s *executor) restoreFromSnapshot() error {
 	return nil
 }
 
-func (s *executor) createVM() error {
-	baseImage := s.Config.Parallels.BaseName
-	if baseImage == "" {
-		return errors.New("missing Image setting from Parallels config")
-	}
-
+func (s *executor) createVM(baseImage string) error {
 	templateName := s.Config.Parallels.TemplateName
 	if templateName == "" {
 		templateName = baseImage + "-template"
@@ -117,7 +113,7 @@ func (s *executor) createVM() error {
 		s.Debugln("Creating template from VM", baseImage, "...")
 		err := prl.CreateTemplate(baseImage, templateName)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w (image: %q)", err, baseImage)
 		}
 	}
 
@@ -135,7 +131,7 @@ func (s *executor) createVM() error {
 
 	// TODO: integration tests do fail on this due
 	// Unable to open new session in this virtual machine.
-	// Make sure the latest version of Parallels Tools is installed in this virtual machine and it has finished bootingg
+	// Make sure the latest version of Parallels Tools is installed in this virtual machine and it has finished booting
 	s.Debugln("Waiting for VM to start...")
 	err = prl.TryExec(s.vmName, 120, "exit", "0")
 	if err != nil {
@@ -157,15 +153,25 @@ func (s *executor) updateGuestTime() error {
 		timeServer = "time.apple.com"
 	}
 
-	// Check either ntpdate command exists or not before trying to execute it
-	// Starting from Mojave ntpdate was removed
+	// Try ntpdate first, this command is available in macOS versions prior to Mojave.
+	// This is not guaranteed, but there is high probability that ntpdate may be available on other UNIX-like systems.
 	_, err := prl.Exec(s.vmName, "which", "ntpdate")
-	if err != nil {
-		// Fallback to sntp
+	if err == nil {
+		return prl.TryExec(s.vmName, 20, "sudo", "ntpdate", "-u", timeServer)
+	}
+
+	// Starting from Mojave, ntpdate is no longer available on macOS, sntp is supposed to be used instead.
+	_, err = prl.Exec(s.vmName, "which", "sntp")
+	if err == nil {
 		return prl.TryExec(s.vmName, 20, "sudo", "sntp", "-sS", timeServer)
 	}
 
-	return prl.TryExec(s.vmName, 20, "sudo", "ntpdate", "-u", timeServer)
+	// Neither sntp nor ntpdate is available, very likely guest OS is not macOS.
+	// Report a warning to a user and gracefully return.
+
+	s.Warningln("Neither sntp nor ntpdate are available in a guest VM. Proceeding without time synchronization ...")
+
+	return nil
 }
 
 func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
@@ -184,9 +190,15 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		return err
 	}
 
+	var baseName string
+	baseName, err = s.Executor.GetBaseName(s.Config.Parallels.BaseName)
+	if err != nil {
+		return err
+	}
+
 	unregisterInvalidVM(s.vmName)
 
-	s.vmName = s.getVMName()
+	s.vmName = s.getVMName(baseName)
 
 	if s.Config.Parallels.DisableSnapshots && prl.Exist(s.vmName) {
 		s.Debugln("Deleting old VM...")
@@ -197,7 +209,7 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 
 	if !prl.Exist(s.vmName) {
 		s.Println("Creating new VM...")
-		err = s.createVM()
+		err = s.createVM(baseName)
 		if err != nil {
 			return err
 		}
@@ -230,6 +242,10 @@ func (s *executor) printVersion() error {
 }
 
 func (s *executor) validateConfig() error {
+	if s.Config.Parallels.BaseName == "" {
+		return errors.New("missing BaseName setting from Parallels configuration")
+	}
+
 	if s.BuildShell.PassFile {
 		return errors.New("parallels doesn't support shells that require script file")
 	}
@@ -242,10 +258,7 @@ func (s *executor) validateConfig() error {
 		return errors.New("missing Parallels configuration")
 	}
 
-	if s.Config.Parallels.BaseName == "" {
-		return errors.New("missing BaseName setting from Parallels config")
-	}
-	return nil
+	return s.ValidateAllowedImages(s.Config.Parallels.AllowedImages)
 }
 
 func (s *executor) tryRestoreFromSnapshot() {
@@ -261,14 +274,14 @@ func (s *executor) tryRestoreFromSnapshot() {
 	}
 }
 
-func (s *executor) getVMName() string {
+func (s *executor) getVMName(baseName string) string {
 	if s.Config.Parallels.DisableSnapshots {
-		return s.Config.Parallels.BaseName + "-" + s.Build.ProjectUniqueName()
+		return baseName + "-" + s.Build.ProjectUniqueName()
 	}
 
 	return fmt.Sprintf(
 		"%s-runner-%s-concurrent-%d",
-		s.Config.Parallels.BaseName,
+		baseName,
 		s.Build.Runner.ShortDescription(),
 		s.Build.RunnerID,
 	)
@@ -355,7 +368,7 @@ func (s *executor) Run(cmd common.ExecutorCommand) error {
 		Environment: s.BuildShell.Environment,
 		Command:     s.BuildShell.GetCommandWithArguments(),
 		Stdin:       cmd.Script,
-	})
+	}, s.Shell().Shell)
 	if exitError, ok := err.(*ssh.ExitError); ok {
 		exitCode := exitError.ExitCode()
 		err = &common.BuildError{Inner: err, ExitCode: exitCode}
@@ -393,8 +406,10 @@ func init() {
 
 	creator := func() common.Executor {
 		return &executor{
-			AbstractExecutor: executors.AbstractExecutor{
-				ExecutorOptions: options,
+			Executor: vm.Executor{
+				AbstractExecutor: executors.AbstractExecutor{
+					ExecutorOptions: options,
+				},
 			},
 		}
 	}

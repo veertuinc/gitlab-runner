@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package docker_test
 
 import (
@@ -18,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"gitlab.com/gitlab-org/gitlab-runner/shells/shellstest"
+
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/hashicorp/go-version"
@@ -26,6 +31,7 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/common/buildtest"
+	execDocker "gitlab.com/gitlab-org/gitlab-runner/executors/docker"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/container/windows"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
@@ -36,6 +42,16 @@ import (
 
 var getWindowsImageOnce sync.Once
 var windowsImage string
+
+var windowsDockerImageTagMappings = map[string]string{
+	windows.V20H2: "20H2",
+}
+
+func TestMain(m *testing.M) {
+	execDocker.PrebuiltImagesPaths = []string{"../../out/helper-images/"}
+
+	os.Exit(m.Run())
+}
 
 // safeBuffer is used for tests that are writing build logs to a buffer and
 // reading the build logs waiting for a log line.
@@ -157,7 +173,7 @@ func getRunnerConfigForOS(t *testing.T) *common.RunnerConfig {
 
 	if runtime.GOOS == "windows" {
 		executor = "docker-windows"
-		shell = "powershell"
+		shell = shells.SNPowershell
 		image = getWindowsImage(t)
 	}
 
@@ -176,6 +192,24 @@ func getRunnerConfigForOS(t *testing.T) *common.RunnerConfig {
 	}
 }
 
+// windowsDockerImageTag checks the specified operatingSystem to see if it's one of the
+// supported Windows version. If true, it maps the os version to the corresponding mcr.microsoft.com Docker image tag.
+// UnsupportedWindowsVersionError is returned when no supported Windows version
+// is found in the string.
+func windowsDockerImageTag(operatingSystem string) (string, error) {
+	version, err := windows.Version(operatingSystem)
+	if err != nil {
+		return "", err
+	}
+
+	dockerTag, ok := windowsDockerImageTagMappings[version]
+	if !ok {
+		dockerTag = version
+	}
+
+	return dockerTag, nil
+}
+
 func getWindowsImage(t *testing.T) string {
 	getWindowsImageOnce.Do(func() {
 		client, err := docker.New(docker.Credentials{}, "")
@@ -185,9 +219,9 @@ func getWindowsImage(t *testing.T) string {
 		info, err := client.Info(context.Background())
 		require.NoError(t, err, "docker info")
 
-		windowsVersion, err := windows.Version(info.OperatingSystem)
+		dockerImageTag, err := windowsDockerImageTag(info.OperatingSystem)
 		require.NoError(t, err)
-		windowsImage = fmt.Sprintf(common.TestWindowsImage, windowsVersion)
+		windowsImage = fmt.Sprintf(common.TestWindowsImage, dockerImageTag)
 	})
 
 	return windowsImage
@@ -233,6 +267,23 @@ func TestDockerCommandSuccessRunFileVariableContent(t *testing.T) {
 	out, err := buildtest.RunBuildReturningOutput(t, &build)
 	assert.NoError(t, err)
 	assert.Contains(t, out, fmt.Sprintf("%X", sha1.Sum([]byte(value))))
+}
+
+func TestBuildScriptSections(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		if shell == "cmd" || shell == "pwsh" || shell == "powershell" {
+			// support for pwsh and powershell tracked in https://gitlab.com/gitlab-org/gitlab-runner/-/issues/28119
+			t.Skip("CMD, pwsh, powershell not supported")
+		}
+
+		build := getBuildForOS(t, func() (common.JobResponse, error) {
+			return common.GetRemoteSuccessfulBuild()
+		})
+
+		build.Runner.RunnerSettings.Shell = shell
+
+		buildtest.RunBuildWithSections(t, &build)
+	})
 }
 
 func TestDockerCommandUsingCustomClonePath(t *testing.T) {
@@ -302,6 +353,70 @@ func TestDockerCommandNoRootImage(t *testing.T) {
 
 	err = build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	assert.NoError(t, err)
+}
+
+func TestDockerCommandEntrypointWithStderrOutput(t *testing.T) {
+	test.SkipIfGitLabCIOn(t, test.OSWindows)
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	resp, err := common.GetRemoteSuccessfulBuild()
+	assert.NoError(t, err)
+
+	resp.Image.Name = common.TestAlpineEntrypointStderrImage
+	build := &common.Build{
+		JobResponse: resp,
+		Runner: &common.RunnerConfig{
+			RunnerSettings: common.RunnerSettings{
+				Executor: "docker",
+				Docker: &common.DockerConfig{
+					PullPolicy: common.StringOrArray{common.PullPolicyIfNotPresent},
+				},
+				FeatureFlags: map[string]bool{
+					featureflags.DisableUmaskForDockerExecutor: true,
+				},
+			},
+		},
+	}
+
+	err = build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+	assert.NoError(t, err)
+}
+
+func TestDockerCommandOwnershipOverflow(t *testing.T) {
+	test.SkipIfGitLabCIOn(t, test.OSWindows)
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	resp, err := common.GetRemoteSuccessfulBuild()
+	assert.NoError(t, err)
+
+	resp.Image.Name = common.TestAlpineIDOverflowImage
+	build := &common.Build{
+		JobResponse: resp,
+		Runner: &common.RunnerConfig{
+			RunnerSettings: common.RunnerSettings{
+				Executor: "docker",
+				Docker: &common.DockerConfig{
+					PullPolicy: common.StringOrArray{common.PullPolicyIfNotPresent},
+				},
+				FeatureFlags: map[string]bool{
+					featureflags.DisableUmaskForDockerExecutor: true,
+				},
+			},
+		},
+	}
+
+	trace := &common.Trace{Writer: os.Stdout}
+	timeoutTimer := time.AfterFunc(time.Minute, func() {
+		trace.Abort()
+	})
+	defer timeoutTimer.Stop()
+
+	err = build.Run(&common.Config{}, trace)
+	assert.Error(t, err)
+
+	// error is only canceled if it timed out, something that will only happen
+	// if data from the overflow isn't safely limited.
+	assert.NotErrorIs(t, err, &common.BuildError{FailureReason: common.JobCanceled})
 }
 
 func TestDockerCommandWithAllowedImagesRun(t *testing.T) {
@@ -438,7 +553,7 @@ func TestDockerCommandMissingImage(t *testing.T) {
 
 	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, &common.BuildError{})
+	assert.ErrorIs(t, err, &common.BuildError{FailureReason: common.ScriptFailure})
 
 	contains := "repository does not exist"
 	if isDockerOlderThan17_07(t) {
@@ -456,8 +571,45 @@ func TestDockerCommandMissingTag(t *testing.T) {
 
 	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, &common.BuildError{})
+	assert.ErrorIs(t, err, &common.BuildError{FailureReason: common.ScriptFailure})
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestDockerCommandMissingServiceImage(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	build := getBuildForOS(t, common.GetSuccessfulBuild)
+	build.Services = common.Services{
+		{
+			Name: "some/non-existing/image",
+		},
+	}
+
+	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, &common.BuildError{FailureReason: common.ScriptFailure})
+
+	contains := "repository does not exist"
+	if isDockerOlderThan17_07(t) {
+		contains = "not found"
+	}
+
+	assert.Contains(t, err.Error(), contains)
+}
+
+// TestDockerCommandPullingImageNoHost tests if the DNS resolution failure for the registry host
+// is categorized as a script failure.
+func TestDockerCommandPullingImageNoHost(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	build := getBuildForOS(t, common.GetSuccessfulBuild)
+	build.Runner.RunnerSettings.Docker.Image = "docker.repo.example.com/docker:18.09.7-dind"
+
+	var buildError *common.BuildError
+	err := build.Run(&common.Config{}, &common.Trace{Writer: os.Stdout})
+	require.ErrorAs(t, err, &buildError)
+
+	assert.Equal(t, common.ScriptFailure, buildError.FailureReason, "expected script failure error")
 }
 
 func TestDockerCommandBuildCancel(t *testing.T) {
@@ -552,7 +704,7 @@ func TestDockerCommandOutput(t *testing.T) {
 	assert.NoError(t, err)
 
 	re, err :=
-		regexp.Compile("(?m)^Initialized empty Git repository in /builds/gitlab-org/ci-cd/tests/gitlab-test/.git/")
+		regexp.Compile("(?m)^Initialized empty Git repository in /builds/gitlab-org/ci-cd/gitlab-runner-pipeline-tests/gitlab-test/.git/")
 	require.NoError(t, err)
 	assert.Regexp(t, re, buffer.String())
 }
@@ -934,31 +1086,9 @@ func TestDockerServiceHealthcheck(t *testing.T) {
 			}
 
 			if runtime.GOOS == "windows" {
-				build.Runner.RunnerSettings.Shell = "powershell"
+				build.Runner.RunnerSettings.Shell = shells.SNPwsh
 				build.Runner.RunnerSettings.Executor = "docker-windows"
-
-				// HACK: Runner's PowerShell Core shell is not yet fully
-				// supported: https://gitlab.com/gitlab-org/gitlab-runner/-/issues/13139
-				//
-				// `liveness` only contains powershell core to keep the image
-				// small. Until there's full support, we perform this hack
-				// whereby we copy pwsh to powershell.exe. This is safe as this
-				// only occurs on the build container, which only executes the
-				// `liveness client` commands above.
-				//
-				// This entrypoint can be nullified with:
-				//   build.Image.Entrypoint = []string{""}
-				// once PowerShell Core is supported. Note that it cannot be
-				// set to nil, as that indicates that Runner should use the
-				// default image entrypoint.
-				build.Image.Entrypoint = []string{
-					"pwsh",
-					"-Command",
-					"cp $env:ProgramFiles\\PowerShell\\pwsh.exe $env:ProgramFiles\\PowerShell\\powershell.exe",
-					"&&",
-					"pwsh",
-					"-Command",
-				}
+				build.Image.Entrypoint = []string{""}
 			}
 
 			build.Services = append(build.Services, common.Image{
@@ -984,6 +1114,44 @@ func TestDockerServiceHealthcheck(t *testing.T) {
 			assert.NotContains(t, out, "probably didn't start properly")
 		})
 	}
+}
+
+func TestDockerServiceHealthcheckOverflow(t *testing.T) {
+	test.SkipIfGitLabCIOn(t, test.OSWindows)
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	resp, err := common.GetRemoteSuccessfulBuild()
+	assert.NoError(t, err)
+
+	build := &common.Build{
+		JobResponse: resp,
+		Runner: &common.RunnerConfig{
+			RunnerSettings: common.RunnerSettings{
+				Executor: "docker",
+				Docker:   &common.DockerConfig{},
+			},
+		},
+	}
+
+	build.Image = common.Image{
+		Name: common.TestAlpineImage,
+	}
+
+	build.Services = append(build.Services, common.Image{
+		Name:    common.TestAlpineImage,
+		Command: []string{"printf", "datastart: %" + strconv.Itoa(execDocker.ServiceLogOutputLimit) + "s", ":dataend"},
+	})
+
+	build.Variables = append(build.Variables, common.JobVariable{
+		Key:    "FF_NETWORK_PER_BUILD",
+		Value:  "true",
+		Public: true,
+	})
+
+	out, err := buildtest.RunBuildReturningOutput(t, build)
+	assert.NoError(t, err)
+	assert.Contains(t, out, "datastart:")
+	assert.NotContains(t, out, ":dataend")
 }
 
 func runDockerInDocker(version string) (id string, err error) {
@@ -1241,8 +1409,8 @@ func TestDockerCommand_Pwsh(t *testing.T) {
 
 	out, err := buildtest.RunBuildReturningOutput(t, &build)
 	assert.NoError(t, err)
-	assert.Contains(t, out, "PSVersion                      7.1.1")
-	assert.Contains(t, out, "PSEdition                      Core")
+	assert.Regexp(t, `PSVersion\s+7.1.1`, out)
+	assert.Regexp(t, `PSEdition\s+Core`, out)
 }
 
 func TestDockerCommandWithDoingPruneAndAfterScript(t *testing.T) {
@@ -1493,7 +1661,7 @@ func TestChownAndUmaskUsage(t *testing.T) {
 		RepoURL:   "https://gitlab.com/gitlab-org/ci-cd/tests/file-permissions.git",
 		Sha:       "050d238e16c5962fc16e49ab1b6be1be39778b6c",
 		BeforeSha: "0000000000000000000000000000000000000000",
-		Ref:       "master",
+		Ref:       "main",
 		RefType:   common.RefTypeBranch,
 		Refspecs:  []string{"+refs/heads/*:refs/origin/heads/*", "+refs/tags/*:refs/tags/*"},
 	}
@@ -1571,4 +1739,117 @@ func TestBuildLogLimitExceeded(t *testing.T) {
 	helpers.SkipIntegrationTests(t, "docker", "info")
 
 	buildtest.RunRemoteBuildWithJobOutputLimitExceeded(t, getRunnerConfigForOS(t), nil)
+}
+
+func TestCleanupProjectGitClone(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	build := getBuildForOS(t, common.GetRemoteSuccessfulBuild)
+	buildtest.RunBuildWithCleanupGitClone(t, &build)
+}
+
+func TestCleanupProjectGitFetch(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	untrackedFilename := "untracked"
+
+	build := getBuildForOS(t, func() (common.JobResponse, error) {
+		return common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFilename, "", "")...,
+		)
+	})
+
+	buildtest.RunBuildWithCleanupGitFetch(t, &build, untrackedFilename)
+}
+
+func TestCleanupProjectGitSubmoduleNormal(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	untrackedFile := "untracked"
+	untrackedSubmoduleFile := "untracked_submodule"
+
+	build := getBuildForOS(t, func() (common.JobResponse, error) {
+		return common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFile, untrackedSubmoduleFile, "")...,
+		)
+	})
+
+	buildtest.RunBuildWithCleanupNormalSubmoduleStrategy(t, &build, untrackedFile, untrackedSubmoduleFile)
+}
+
+func TestCleanupProjectGitSubmoduleRecursive(t *testing.T) {
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	untrackedFile := "untracked"
+	untrackedSubmoduleFile := "untracked_submodule"
+	untrackedSubSubmoduleFile := "untracked_submodule_submodule"
+
+	build := getBuildForOS(t, func() (common.JobResponse, error) {
+		return common.GetRemoteBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(
+				untrackedFile,
+				untrackedSubmoduleFile,
+				untrackedSubSubmoduleFile)...,
+		)
+	})
+
+	buildtest.RunBuildWithCleanupRecursiveSubmoduleStrategy(
+		t,
+		&build,
+		untrackedFile,
+		untrackedSubmoduleFile,
+		untrackedSubSubmoduleFile,
+	)
+}
+
+func TestDockerCommandServiceVariables(t *testing.T) {
+	test.SkipIfGitLabCIOn(t, test.OSWindows)
+	helpers.SkipIntegrationTests(t, "docker", "info")
+
+	build := getBuildForOS(t, common.GetRemoteSuccessfulBuild)
+	build.Variables = append(build.JobResponse.Variables,
+		common.JobVariable{
+			Key:    "FF_NETWORK_PER_BUILD",
+			Value:  "true",
+			Public: true,
+		},
+		common.JobVariable{
+			Key:    "BUILD_VAR",
+			Value:  "BUILD_VAR_VALUE",
+			Public: true,
+		},
+	)
+
+	shell := "sh"
+	if runtime.GOOS == "windows" {
+		shell = shells.SNPowershell
+	}
+
+	// immediately timeout as triggering an error is the  only way to get a
+	// service to send its output to the log
+	build.Runner.Docker.WaitForServicesTimeout = 1
+
+	build.Services = common.Services{
+		common.Image{
+			Name: common.TestLivenessImage,
+			Variables: []common.JobVariable{
+				{
+					Key:   "SERVICE_VAR",
+					Value: "SERVICE_VAR_VALUE",
+				},
+				{
+					Key:   "SERVICE_VAR_REF_BUILD_VAR",
+					Value: "$BUILD_VAR",
+				},
+			},
+			Entrypoint: append([]string{shell, "-c"}, "echo SERVICE_VAR=$SERVICE_VAR SERVICE_VAR_REF_BUILD_VAR=$SERVICE_VAR_REF_BUILD_VAR"),
+		},
+	}
+
+	var buffer bytes.Buffer
+	err := build.Run(&common.Config{}, &common.Trace{Writer: &buffer})
+	assert.NoError(t, err)
+	out := buffer.String()
+	assert.Contains(t, out, "SERVICE_VAR=SERVICE_VAR_VALUE")
+	assert.Contains(t, out, "SERVICE_VAR_REF_BUILD_VAR=BUILD_VAR_VALUE")
 }

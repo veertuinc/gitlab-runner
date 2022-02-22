@@ -29,6 +29,7 @@ const (
 	ScriptFailure       JobFailureReason = "script_failure"
 	RunnerSystemFailure JobFailureReason = "runner_system_failure"
 	JobExecutionTimeout JobFailureReason = "job_execution_timeout"
+	UnknownFailure      JobFailureReason = "unknown_failure"
 	// JobCanceled is only internal to runner, and not used inside of rails.
 	JobCanceled JobFailureReason = "job_canceled"
 )
@@ -56,6 +57,7 @@ const (
 	UploadForbidden
 	UploadFailed
 	UploadServiceUnavailable
+	UploadRedirected
 )
 
 const (
@@ -88,16 +90,22 @@ type FeaturesInfo struct {
 	VaultSecrets            bool `json:"vault_secrets"`
 	Cancelable              bool `json:"cancelable"`
 	ReturnExitCode          bool `json:"return_exit_code"`
+	ServiceVariables        bool `json:"service_variables"`
+}
+
+type ConfigInfo struct {
+	Gpus string `json:"gpus"`
 }
 
 type RegisterRunnerParameters struct {
-	Description    string `json:"description,omitempty"`
-	Tags           string `json:"tag_list,omitempty"`
-	RunUntagged    bool   `json:"run_untagged"`
-	Locked         bool   `json:"locked"`
-	AccessLevel    string `json:"access_level,omitempty"`
-	MaximumTimeout int    `json:"maximum_timeout,omitempty"`
-	Active         bool   `json:"active"`
+	Description     string `json:"description,omitempty"`
+	MaintenanceNote string `json:"maintenance_note,omitempty"`
+	Tags            string `json:"tag_list,omitempty"`
+	RunUntagged     bool   `json:"run_untagged"`
+	Locked          bool   `json:"locked"`
+	AccessLevel     string `json:"access_level,omitempty"`
+	MaximumTimeout  int    `json:"maximum_timeout,omitempty"`
+	Active          bool   `json:"active"`
 }
 
 type RegisterRunnerRequest struct {
@@ -127,6 +135,7 @@ type VersionInfo struct {
 	Executor     string       `json:"executor,omitempty"`
 	Shell        string       `json:"shell,omitempty"`
 	Features     FeaturesInfo `json:"features"`
+	Config       ConfigInfo   `json:"config,omitempty"`
 }
 
 type JobRequest struct {
@@ -207,11 +216,12 @@ type Step struct {
 type Steps []Step
 
 type Image struct {
-	Name       string   `json:"name"`
-	Alias      string   `json:"alias,omitempty"`
-	Command    []string `json:"command,omitempty"`
-	Entrypoint []string `json:"entrypoint,omitempty"`
-	Ports      []Port   `json:"ports,omitempty"`
+	Name       string       `json:"name"`
+	Alias      string       `json:"alias,omitempty"`
+	Command    []string     `json:"command,omitempty"`
+	Entrypoint []string     `json:"entrypoint,omitempty"`
+	Ports      []Port       `json:"ports,omitempty"`
+	Variables  JobVariables `json:"variables,omitempty"`
 }
 
 type Port struct {
@@ -331,7 +341,8 @@ type Dependency struct {
 type Dependencies []Dependency
 
 type GitlabFeatures struct {
-	TraceSections bool `json:"trace_sections"`
+	TraceSections  bool               `json:"trace_sections"`
+	FailureReasons []JobFailureReason `json:"failure_reasons"`
 }
 
 type JobResponse struct {
@@ -361,6 +372,8 @@ type Secrets map[string]Secret
 
 type Secret struct {
 	Vault *VaultSecret `json:"vault,omitempty"`
+
+	File *bool `json:"file,omitempty"`
 }
 
 type VaultSecret struct {
@@ -400,22 +413,24 @@ func (s Secret) expandVariables(vars JobVariables) {
 	}
 }
 
+// IsFile defines whether the variable should be of type FILE or no.
+//
+// The default behavior is to represent the variable as FILE type.
+// If defined by the user - set to whatever was chosen.
+func (s Secret) IsFile() bool {
+	if s.File == nil {
+		return SecretVariableDefaultsToFile
+	}
+
+	return *s.File
+}
+
 func (s *VaultSecret) expandVariables(vars JobVariables) {
-	if len(s.Server.Auth.Data) < 1 {
-		return
-	}
+	s.Server.expandVariables(vars)
+	s.Engine.expandVariables(vars)
 
-	s.Server.Auth.Path = vars.ExpandValue(s.Server.Auth.Path)
-
-	jwt, ok := s.Server.Auth.Data["jwt"]
-	if ok {
-		s.Server.Auth.Data["jwt"] = vars.ExpandValue(fmt.Sprintf("%s", jwt))
-	}
-
-	role, ok := s.Server.Auth.Data["role"]
-	if ok {
-		s.Server.Auth.Data["role"] = vars.ExpandValue(fmt.Sprintf("%s", role))
-	}
+	s.Path = vars.ExpandValue(s.Path)
+	s.Field = vars.ExpandValue(s.Field)
 }
 
 func (s *VaultSecret) AuthName() string {
@@ -444,6 +459,26 @@ func (s *VaultSecret) SecretPath() string {
 
 func (s *VaultSecret) SecretField() string {
 	return s.Field
+}
+
+func (s *VaultServer) expandVariables(vars JobVariables) {
+	s.URL = vars.ExpandValue(s.URL)
+
+	s.Auth.expandVariables(vars)
+}
+
+func (a *VaultAuth) expandVariables(vars JobVariables) {
+	a.Name = vars.ExpandValue(a.Name)
+	a.Path = vars.ExpandValue(a.Path)
+
+	for field, value := range a.Data {
+		a.Data[field] = vars.ExpandValue(fmt.Sprintf("%s", value))
+	}
+}
+
+func (e *VaultEngine) expandVariables(vars JobVariables) {
+	e.Name = vars.ExpandValue(e.Name)
+	e.Path = vars.ExpandValue(e.Path)
 }
 
 func (j *JobResponse) RepoCleanURL() string {
@@ -563,6 +598,6 @@ type Network interface {
 	UpdateJob(config RunnerConfig, jobCredentials *JobCredentials, jobInfo UpdateJobInfo) UpdateJobResult
 	PatchTrace(config RunnerConfig, jobCredentials *JobCredentials, content []byte, startOffset int) PatchTraceResult
 	DownloadArtifacts(config JobCredentials, artifactsFile io.WriteCloser, directDownload *bool) DownloadState
-	UploadRawArtifacts(config JobCredentials, reader io.ReadCloser, options ArtifactsOptions) UploadState
+	UploadRawArtifacts(config JobCredentials, reader io.ReadCloser, options ArtifactsOptions) (UploadState, string)
 	ProcessJob(config RunnerConfig, buildCredentials *JobCredentials) (JobTrace, error)
 }

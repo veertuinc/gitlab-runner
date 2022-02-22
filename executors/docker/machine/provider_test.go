@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package machine
 
 import (
@@ -15,7 +18,6 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 )
 
 var machineDefaultConfig = &common.RunnerConfig{
@@ -32,18 +34,6 @@ var machineCreateFail = &common.RunnerConfig{
 		Machine: &common.DockerMachine{
 			MachineName: "create-fail-%s",
 			IdleTime:    5,
-		},
-	},
-}
-
-var machineCreateFailSkipProvision = &common.RunnerConfig{
-	RunnerSettings: common.RunnerSettings{
-		Machine: &common.DockerMachine{
-			MachineName: "create-fail-%s",
-			IdleTime:    5,
-		},
-		FeatureFlags: map[string]bool{
-			featureflags.SkipDockerMachineProvisionOnCreationFailure: true,
 		},
 	},
 }
@@ -305,6 +295,10 @@ func TestMachineCreationAndRemoval(t *testing.T) {
 	assert.Equal(t, 0, d.UsedCount)
 	assert.NotNil(t, p.details[d.Name])
 
+	err := p.remove(d.Name)
+	assert.NoError(t, err)
+	assert.Equal(t, machineStateRemoving, d.State)
+
 	d2, errCh := p.create(machineProvisionFail, machineStateUsed)
 	assert.NotNil(t, d2)
 	assert.Error(t, <-errCh, "Fails, because it fails to provision machine")
@@ -312,21 +306,8 @@ func TestMachineCreationAndRemoval(t *testing.T) {
 
 	d3, errCh := p.create(machineCreateFail, machineStateUsed)
 	assert.NotNil(t, d3)
-	assert.NoError(t, <-errCh)
-	assert.Equal(t, machineStateUsed, d3.State)
-
-	err := p.remove(d.Name)
-	assert.NoError(t, err)
-	assert.Equal(t, machineStateRemoving, d.State)
-}
-
-func TestMachineCreation_SkipProvisionOnFailure(t *testing.T) {
-	p, _ := testMachineProvider()
-
-	m, errCh := p.create(machineCreateFailSkipProvision, machineStateUsed)
-	assert.NotNil(t, m)
-	assert.Error(t, <-errCh, "failed to create")
-	assert.Equal(t, machineStateRemoving, m.State)
+	assert.Error(t, <-errCh)
+	assert.Equal(t, machineStateRemoving, d3.State)
 }
 
 func TestMachineUse(t *testing.T) {

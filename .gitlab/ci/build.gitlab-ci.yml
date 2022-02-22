@@ -1,4 +1,4 @@
-.binaries: &binaries
+binaries:
   extends:
   - .rules:merge_request_pipelines:no_docs
   - .go-cache
@@ -7,16 +7,40 @@
   - 'prepare done'
   script:
   - source ci/touch_make_dependencies
-  - export platforms=$(echo $CI_JOB_NAME | sed 's|binaries ||')
-  - make runner-bin BUILD_PLATFORMS="-osarch='$platforms'"
+  - make runner-bin BUILD_PLATFORMS="-osarch='$PLATFORMS'"
   artifacts:
     paths:
     - out/binaries/gitlab-runner-*
     exclude:
     - out/binaries/gitlab-runner-helper/
     expire_in: 7d
+  parallel:
+    matrix:
+    - PLATFORMS:
+      - linux/amd64 linux/arm64 #64bit
+      - linux/386 linux/arm #32bit
+      - linux/s390x linux/ppc64le #ibm
+      - darwin/amd64 darwin/arm64
+      - freebsd/386 freebsd/amd64 freebsd/arm
+      - windows/386 windows/amd64
 
-binaries darwin/amd64: *binaries
-binaries freebsd/386 freebsd/amd64 freebsd/arm: *binaries
-binaries linux/386 linux/amd64 linux/arm linux/arm64 linux/s390x: *binaries
-binaries windows/386 windows/amd64: *binaries
+binaries-fips:
+  extends:
+  - .rules:merge_request_pipelines:no_docs
+  - .go-cache
+  stage: build
+  image: $GO_FIPS_IMAGE
+  needs:
+  - job: 'prepare go fips'
+    optional: true
+  script:
+  - source ci/touch_make_dependencies
+  - make runner-bin-fips GOOS=$GOOS GOARCH=$GOARCH
+  artifacts:
+    paths:
+      - out/binaries/gitlab-runner-*
+    expire_in: 7d
+  parallel:
+    matrix:
+    - GOOS: linux
+      GOARCH: amd64

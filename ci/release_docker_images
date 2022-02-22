@@ -4,58 +4,69 @@ set -eEo pipefail
 
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"
 
-# shellcheck source=ci/docker_buildx_commands
-source "${SCRIPTPATH}/docker_buildx_commands"
+# shellcheck source=ci/docker_commands
+source "${SCRIPTPATH}/docker_commands"
 
 declare -A checksums
 
 DOCKER_MACHINE_VERSION=${DOCKER_MACHINE_VERSION:-0.16.2}
-checksums['DOCKER_MACHINE_AMD64']=${DOCKER_MACHINE_AMD64_CHECKSUM:-a7f7cbb842752b12123c5a5447d8039bf8dccf62ec2328853583e68eb4ffb097}
-checksums['DOCKER_MACHINE_ARM64']=${DOCKER_MACHINE_ARM64_CHECKSUM:-109f534bfb8b9b852c938cad978e60a86b13f5ecf92da5e24320dacd2a7216ac}
+checksums['DOCKER_MACHINE_AMD64']=${DOCKER_MACHINE_LINUX_AMD64_CHECKSUM:-a7f7cbb842752b12123c5a5447d8039bf8dccf62ec2328853583e68eb4ffb097}
+checksums['DOCKER_MACHINE_ARM64']=${DOCKER_MACHINE_LINUX_ARM64_CHECKSUM:-109f534bfb8b9b852c938cad978e60a86b13f5ecf92da5e24320dacd2a7216ac}
 checksums['DOCKER_MACHINE_S390X']="" # No binary available yet for s390x, see https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26551
+checksums['DOCKER_MACHINE_PPC64LE']="" # No binary available
 DUMB_INIT_VERSION=${DUMB_INIT_VERSION:-1.2.2}
-checksums['DUMB_INIT_AMD64']=${DUMB_INIT_AMD64_CHECKSUM:-37f2c1f0372a45554f1b89924fbb134fc24c3756efaedf11e07f599494e0eff9}
-checksums['DUMB_INIT_ARM64']=${DUMB_INIT_ARM64_CHECKSUM:-45b1bbf56cc03edda81e4220535a025bfe3ed6e93562222b9be4471005b3eeb3}
-checksums['DUMB_INIT_S390X']=${DUMB_INIT_S390X_CHECKSUM:-8b3808c3c06d008b8f2eeb2789c7c99e0450b678d94fb50fd446b8f6a22e3a9d}
+checksums['DUMB_INIT_AMD64']=${DUMB_INIT_LINUX_AMD64_CHECKSUM:-37f2c1f0372a45554f1b89924fbb134fc24c3756efaedf11e07f599494e0eff9}
+checksums['DUMB_INIT_ARM64']=${DUMB_INIT_LINUX_ARM64_CHECKSUM:-45b1bbf56cc03edda81e4220535a025bfe3ed6e93562222b9be4471005b3eeb3}
+checksums['DUMB_INIT_S390X']=${DUMB_INIT_LINUX_S390X_CHECKSUM:-8b3808c3c06d008b8f2eeb2789c7c99e0450b678d94fb50fd446b8f6a22e3a9d}
+checksums['DUMB_INIT_PPC64LE']=${DUMB_INIT_LINUX_PPC64LE_CHECKSUM:-88b02a3bd014e4c30d8d54389597adc4f5a36d1d6b49200b5a4f6a71026c2246}
 GIT_LFS_VERSION=${GIT_LFS_VERSION:-2.11.0}
-checksums['GIT_LFS_AMD64']=${GIT_LFS_AMD64_CHECKSUM:-f48f45cf8ca600cdde4a8f27b16faf761e2ab944eaf1b0d9a38f66e9979b7df0}
-checksums['GIT_LFS_ARM64']=${GIT_LFS_ARM64_CHECKSUM:-b7e65e7f336c465c7049b538f1bc829146f511237f83a55b5d27e51e2e2fcbf7}
-checksums['GIT_LFS_S390X']=${GIT_LFS_S390X_CHECKSUM:-8d3d5bb5ed98fe8df788011e890e2d47351ccec8bf47b679576b375840eb0610}
+checksums['GIT_LFS_AMD64']=${GIT_LFS_LINUX_AMD64_CHECKSUM:-46508eb932c2ec0003a940f179246708d4ddc2fec439dcacbf20ff9e98b957c9}
+checksums['GIT_LFS_ARM64']=${GIT_LFS_LINUX_ARM64_CHECKSUM:-ba6a2820d6afcdf94a83c9307bfbabcc2f8146b27404b450c673567798a81f67}
+checksums['GIT_LFS_S390X']=${GIT_LFS_LINUX_S390X_CHECKSUM:-ca73776cb1cdc855aaf743c09ae70caae97f67d8d5e4147f19dcc4f959f9fc4d}
+checksums['GIT_LFS_PPC64LE']=${GIT_LFS_LINUX_PPC64LE_CHECKSUM:-76196d06a79eec11c202d9cbafbab98f52b9a7fda8538c2d94748461ba192209}
+
+IMAGE_FLAVOR=${IMAGE_FLAVOR:-'ubuntu'}
+
+image_platform=""
+if [[ "${IMAGE_FLAVOR}" == ubuntu* ]]; then
+  image_platform="ubuntu"
+elif [[ "${IMAGE_FLAVOR}" == ubi-fips* ]]; then
+  image_platform="ubi-fips"
+else
+  image_platform="alpine"
+fi
+
+declare -A base_images_from_flavor
+base_images_from_flavor=(
+  ["ubuntu"]="ubuntu:20.04"
+  ["alpine3.12"]="alpine:3.12.0"
+  ["alpine3.13"]="alpine:3.13.6"
+  ["alpine3.14"]="alpine:3.14.2"
+  ["alpine3.15"]="alpine:3.15.0"
+  ["ubi-fips"]="redhat/ubi8:8.5-214"
+)
+
+get_image_version_from_flavor() {
+  local flavor="$1"
+  echo "${base_images_from_flavor[${flavor}]}"
+}
+
+declare -A flavor_aliases
+flavor_aliases=( ["alpine3.12"]="alpine,alpine3.12" )
+
+get_flavor_aliases() {
+  local flavor="$1"
+  if [[ "${flavor_aliases[$flavor]}" != "" ]]; then
+      echo "${flavor_aliases[$flavor]}"
+  else
+      echo "$flavor"
+  fi
+}
 
 if [ -n "${TARGET_ARCHS}" ]; then
-    IFS=', ' read -r -a TARGET_ARCHS <<< "${TARGET_ARCHS}"
+    IFS=' ' read -r -a TARGET_ARCHS <<< "${TARGET_ARCHS}"
 else
     TARGET_ARCHS=('amd64')
-fi
-
-CI_COMMIT_TAG=${CI_COMMIT_TAG:-}
-CI_REGISTRY=${CI_REGISTRY:-}
-CI_REGISTRY_IMAGE=${CI_REGISTRY_IMAGE:-}
-CI_REGISTRY_USER=${CI_REGISTRY_USER:-}
-CI_REGISTRY_PASSWORD=${CI_REGISTRY_PASSWORD:-}
-DOCKER_HUB_NAMESPACE=${DOCKER_HUB_NAMESPACE:-'gitlab'}
-DOCKER_HUB_USER=${DOCKER_HUB_USER:-}
-DOCKER_HUB_PASSWORD=${DOCKER_HUB_PASSWORD:-}
-ECR_PUBLIC_REGISTRY=${ECR_PUBLIC_REGISTRY:-'public.ecr.aws/gitlab'}
-ECR_PUBLIC_USER='AWS'
-ECR_PUBLIC_PASSWORD=${ECR_PUBLIC_PASSWORD:-}
-IS_LATEST=${IS_LATEST:-}
-PUBLISH_IMAGES=${PUBLISH_IMAGES:-false}
-PUSH_TO_DOCKER_HUB=${PUSH_TO_DOCKER_HUB:-false}
-PUSH_TO_ECR_PUBLIC=${PUSH_TO_ECR_PUBLIC:-false}
-
-ref_tag="${CI_COMMIT_TAG}"
-if [[ -z "${ref_tag}" ]]; then
-    ref_tag=${CI_COMMIT_REF_SLUG:-master}
-fi
-
-if [[ "${ref_tag}" == "master" ]]; then
-    ref_tag=bleeding
-fi
-
-REVISION=${REVISION:-}
-if [[ -z "${REVISION}" ]]; then
-    REVISION=$(git rev-parse --short=8 HEAD || echo "unknown")
 fi
 
 join_by() {
@@ -67,12 +78,15 @@ join_by() {
 # buildx receives an array of tag names, and the context path as the last parameter
 buildx() {
     local contextPath="$1"
+    local base_image="$2"
     local platforms=()
     local os
     os=$(_docker version -f '{{.Server.Os}}')
     for arch in "${TARGET_ARCHS[@]}"; do
         platforms+=("${os}/${arch}")
     done
+
+    shift
     shift
 
     local args=("$@")
@@ -117,6 +131,7 @@ buildx() {
         --build-arg DOCKER_MACHINE_VERSION="${DOCKER_MACHINE_VERSION}" \
         --build-arg DUMB_INIT_VERSION="${DUMB_INIT_VERSION}" \
         --build-arg GIT_LFS_VERSION="${GIT_LFS_VERSION}" \
+        --build-arg BASE_IMAGE="${base_image}" \
         --platform "${formatted_platforms}" \
         --no-cache \
         "${tagOpts[@]}" \
@@ -140,103 +155,9 @@ buildx() {
     fi
 }
 
-import() {
-    echo -e "\033[1mImporting image: \033[32m${2}\033[0m"
-    _docker import "${1}" "${2}"
-}
-
-tag() {
-    echo -e "\033[1mTagging image: \033[32m${2}\033[0m"
-    _docker tag "${1}" "${2}"
-}
-
-tag_latest() {
-    if [[ -z "${IS_LATEST}" ]]; then
-        return
-    fi
-
-    tag "${@}"
-}
-
-push() {
-    echo -e "\033[1mPushing image: \033[32m${1}\033[0m"
-    _docker push "${1}"
-}
-
-push_latest() {
-    if [[ -z "${IS_LATEST}" ]]; then
-        return
-    fi
-
-    push "${@}"
-}
-
-# Release the helper images. The first passed argument will be used as a
-# prefix for the image name, which is useful to push do a different registry.
-# For example `registry.gitlab.com/gitlab-org/gitlab-runner` and `gitlab`.
-release_docker_helper_images() {
-    helper_image_x86_64="${1}/gitlab-runner-helper:x86_64-${REVISION}"
-    helper_image_x86_64_pwsh="${1}/gitlab-runner-helper:x86_64-${REVISION}-pwsh"
-    helper_image_x86_64_version="${1}/gitlab-runner-helper:x86_64-${ref_tag}"
-    helper_image_x86_64_pwsh_version="${1}/gitlab-runner-helper:x86_64-${ref_tag}-pwsh"
-    helper_image_x86_64_latest="${1}/gitlab-runner-helper:x86_64-latest"
-    helper_image_x86_64_pwsh_latest="${1}/gitlab-runner-helper:x86_64-latest-pwsh"
-    helper_image_arm="${1}/gitlab-runner-helper:arm-${REVISION}"
-    helper_image_arm_version="${1}/gitlab-runner-helper:arm-${ref_tag}"
-    helper_image_arm_latest="${1}/gitlab-runner-helper:arm-latest"
-    helper_image_arm64="${1}/gitlab-runner-helper:arm64-${REVISION}"
-    helper_image_arm64_version="${1}/gitlab-runner-helper:arm64-${ref_tag}"
-    helper_image_arm64_latest="${1}/gitlab-runner-helper:arm64-latest"
-    helper_image_s390x="${1}/gitlab-runner-helper:s390x-${REVISION}"
-    helper_image_s390x_version="${1}/gitlab-runner-helper:s390x-${ref_tag}"
-    helper_image_s390x_latest="${1}/gitlab-runner-helper:s390x-latest"
-
-    import out/helper-images/prebuilt-x86_64.tar.xz "${helper_image_x86_64}"
-    import out/helper-images/prebuilt-x86_64-pwsh.tar.xz "${helper_image_x86_64_pwsh}"
-    import out/helper-images/prebuilt-arm.tar.xz "${helper_image_arm}"
-    import out/helper-images/prebuilt-arm64.tar.xz "${helper_image_arm64}"
-    import out/helper-images/prebuilt-s390x.tar.xz "${helper_image_s390x}"
-
-    tag_latest "${helper_image_x86_64}" "${helper_image_x86_64_latest}"
-    tag_latest "${helper_image_x86_64_pwsh}" "${helper_image_x86_64_pwsh_latest}"
-    tag_latest "${helper_image_arm}" "${helper_image_arm_latest}"
-    tag_latest "${helper_image_arm64}" "${helper_image_arm64_latest}"
-    tag_latest "${helper_image_s390x}" "${helper_image_s390x_latest}"
-    tag "${helper_image_x86_64}" "${helper_image_x86_64_version}"
-    tag "${helper_image_x86_64_pwsh}" "${helper_image_x86_64_pwsh_version}"
-    tag "${helper_image_arm}" "${helper_image_arm_version}"
-    tag "${helper_image_arm64}" "${helper_image_arm64_version}"
-    tag "${helper_image_s390x}" "${helper_image_s390x_version}"
-
-    push "${helper_image_x86_64}"
-    push "${helper_image_x86_64_pwsh}"
-    push "${helper_image_arm}"
-    push "${helper_image_arm64}"
-    push "${helper_image_s390x}"
-
-    push_latest "${helper_image_x86_64_latest}"
-    push_latest "${helper_image_x86_64_pwsh_latest}"
-    push_latest "${helper_image_arm_latest}"
-    push_latest "${helper_image_arm64_latest}"
-    push_latest "${helper_image_s390x_latest}"
-    push "${helper_image_x86_64_version}"
-    push "${helper_image_x86_64_pwsh_version}"
-    push "${helper_image_arm_version}"
-    push "${helper_image_arm64_version}"
-    push "${helper_image_s390x_version}"
-}
-
-login() {
-    echo "${2}" | _docker login --username "${1}" --password-stdin "${3}"
-}
-
-logout() {
-    _docker logout "${1}"
-}
-
 add_tags() {
-    local -n tags=$1
-    local base_image="$2"
+    local -n add_to_tags=$1
+    local base_images="$2"
     local user="$3"
     local password="$4"
     local repository="$5"
@@ -246,16 +167,18 @@ add_tags() {
         return
     fi
 
-    tags+=("${repository}:${base_image}-${ref_tag}")
-    if [[ "${base_image}" == "${default_image}" ]]; then
-        tags+=("${repository}:${ref_tag}")
-    fi
-    if [[ -n "${IS_LATEST}" ]]; then
-        tags+=("${repository}:${base_image}")
-        if [[ "${base_image}" == "${default_image}" ]]; then
-            tags+=("${repository}:latest")
-        fi
-    fi
+    for base_image in ${base_images//,/ }; do
+      add_to_tags+=("${repository}:${base_image}-${ref_tag}")
+      if [[ "${base_image}" == "${default_image}" ]]; then
+          add_to_tags+=("${repository}:${ref_tag}")
+      fi
+      if [[ -n "${IS_LATEST}" ]]; then
+          add_to_tags+=("${repository}:${base_image}")
+          if [[ "${base_image}" == "${default_image}" ]]; then
+              add_to_tags+=("${repository}:latest")
+          fi
+      fi
+    done
 }
 
 [ "${#TARGET_ARCHS[@]}" -eq 0 ] && TARGET_ARCHS=("$(_docker version -f '{{.Server.Arch}}')")
@@ -277,60 +200,56 @@ for arch in "${TARGET_ARCHS[@]}"; do
     rm -f "${runner_home_dir}/checksums-${arch}"
     writeChecksum 'DOCKER_MACHINE' "${arch}" '/usr/bin/docker-machine'
     writeChecksum 'DUMB_INIT' "${arch}" '/usr/bin/dumb-init'
-    writeChecksum 'GIT_LFS' "${arch}" '/usr/bin/git-lfs'
+    writeChecksum 'GIT_LFS' "${arch}" '/tmp/git-lfs.tar.gz'
 done
 
 cp "${runner_home_dir}/install-deps" "${runner_home_dir}/ubuntu/"
 cp "${runner_home_dir}/install-deps" "${runner_home_dir}/alpine/"
+cp "${runner_home_dir}/install-deps" "${runner_home_dir}/ubi-fips/"
 for arch in "${TARGET_ARCHS[@]}"; do
-    cp "${runner_home_dir}/checksums-${arch}" "out/deb/gitlab-runner_${arch}.deb" \
+    deb_arch=$(if [ "${arch}" == "ppc64le" ]; then echo "ppc64el"; else echo "${arch}"; fi)
+    cp "${runner_home_dir}/checksums-${arch}" "out/deb/gitlab-runner_${deb_arch}.deb" \
         "${runner_home_dir}/ubuntu/"
     cp "${runner_home_dir}/checksums-${arch}" "out/binaries/gitlab-runner-linux-${arch}" \
         "${runner_home_dir}/alpine/"
+    if [[ $arch == "amd64" ]]; then
+        cp "${runner_home_dir}/checksums-${arch}" \
+           "out/binaries/gitlab-runner-linux-${arch}-fips" \
+           "out/rpm/gitlab-runner_${arch}-fips.rpm" \
+           "${runner_home_dir}/ubi-fips/"
+    fi
 done
 
-alpineTags=()
-ubuntuTags=()
+tags=()
+aliases="$(get_flavor_aliases "$IMAGE_FLAVOR")"
 if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ "${PUSH_TO_DOCKER_HUB}" == "true" ]]; then
-   add_tags alpineTags "alpine" "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}" "${DOCKER_HUB_NAMESPACE}/gitlab-runner" "${ref_tag}"
-   add_tags ubuntuTags "ubuntu" "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}" "${DOCKER_HUB_NAMESPACE}/gitlab-runner" "${ref_tag}"
+   add_tags tags "${aliases}" "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}" "${DOCKER_HUB_NAMESPACE}/gitlab-runner" "${ref_tag}"
 fi
 
 if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ -n "${CI_REGISTRY}" ]] && [[ -n "${CI_REGISTRY_IMAGE}" ]]; then
-   add_tags alpineTags "alpine" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY_IMAGE}" "${ref_tag}"
-   add_tags ubuntuTags "ubuntu" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY_IMAGE}" "${ref_tag}"
+   add_tags tags "${aliases}" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY_IMAGE}" "${ref_tag}"
 fi
 
 if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ "${PUSH_TO_ECR_PUBLIC}" == "true" ]]; then
-   add_tags alpineTags "alpine" "${ECR_PUBLIC_USER}" "${ECR_PUBLIC_PASSWORD}" "${ECR_PUBLIC_REGISTRY}/gitlab-runner" "${ref_tag}"
-   add_tags ubuntuTags "ubuntu" "${ECR_PUBLIC_USER}" "${ECR_PUBLIC_PASSWORD}" "${ECR_PUBLIC_REGISTRY}/gitlab-runner" "${ref_tag}"
+   add_tags tags "${aliases}" "${ECR_PUBLIC_USER}" "${ECR_PUBLIC_PASSWORD}" "${ECR_PUBLIC_REGISTRY}/gitlab-runner" "${ref_tag}"
 fi
 
 # Build and publish multi-platform images using `docker buildx`
-buildx "${runner_home_dir}/ubuntu" "${ubuntuTags[@]}"
-buildx "${runner_home_dir}/alpine" "${alpineTags[@]}"
+# shellcheck disable=SC2154
+base_image="$(get_image_version_from_flavor "${IMAGE_FLAVOR}")"
 
-# Release helper images
-if [[ -n "${CI_REGISTRY_USER}" ]] && [[ -n "${CI_REGISTRY_PASSWORD}" && "${PUBLISH_IMAGES}" == "true" ]]; then
-    login "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+# Workaround for linux/s390x building problem when Go>=1.5 is used
+buildx_call_failed="false"
+ALLOW_IMAGE_BUILD_FAILURE=${ALLOW_IMAGE_BUILD_FAILURE:-"false"}
 
-    release_docker_helper_images "${CI_REGISTRY_IMAGE}"
+buildx "${runner_home_dir}/${image_platform}" "$base_image" "${tags[@]}" || buildx_call_failed="true"
 
-    logout "${CI_REGISTRY}"
-fi
-
-if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ "${PUSH_TO_DOCKER_HUB}" == "true" ]]; then
-    login "${DOCKER_HUB_USER}" "${DOCKER_HUB_PASSWORD}"
-
-    release_docker_helper_images "${DOCKER_HUB_NAMESPACE}"
-
-    logout
-fi
-
-if [[ "${PUBLISH_IMAGES}" == "true" ]] && [[ "${PUSH_TO_ECR_PUBLIC}" == "true" ]]; then
-    login "${ECR_PUBLIC_USER}" "${ECR_PUBLIC_PASSWORD}" "${ECR_PUBLIC_REGISTRY}"
-
-    release_docker_helper_images "${ECR_PUBLIC_REGISTRY}"
-
-    logout "${ECR_PUBLIC_REGISTRY}"
+if [[ "${buildx_call_failed}" == "true" ]]; then
+  echo -e "\033[2mImage build with buildx have failed!\033[0m"
+  if [[ "${ALLOW_IMAGE_BUILD_FAILURE}" == "true" ]]; then
+    echo "Ignoring the failure as ALLOW_IMAGE_BUILD_FAILURE is set to true"
+    exit 0
+  else
+    exit 1
+  fi
 fi

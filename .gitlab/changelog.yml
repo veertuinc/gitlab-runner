@@ -17,8 +17,8 @@ order:
 - other
 label_matchers:
 - labels:
-  - documentation
-  scope: documentation
+  - runner-distribution
+  scope: runner-distribution
 - labels:
   - feature::addition
   scope: new-feature
@@ -26,11 +26,14 @@ label_matchers:
   - security
   scope: security-fix
 - labels:
-  - bug
+  - type::bug
   scope: fix
 - labels:
-  - runner-distribution
-  scope: runner-distribution
+  - type::maintenance
+  scope: maintenance
+- labels:
+  - feature::enhancement
+  scope: maintenance
 - labels:
   - technical debt
   scope: maintenance
@@ -41,10 +44,10 @@ label_matchers:
   - tooling::workflow
   scope: maintenance
 - labels:
-  - feature::maintenance
-  scope: maintenance
-- labels:
-  - feature::enhancement
-  scope: maintenance
+  - documentation
+  scope: documentation
 authorship_labels:
 - Community contribution
+skip_changelog_labels:
+- skip-changelog
+

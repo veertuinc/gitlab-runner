@@ -4,7 +4,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
 ---
 
-# Install GitLab Runner manually on GNU/Linux
+# Install GitLab Runner manually on GNU/Linux **(FREE)**
 
 If you can't use the [deb/rpm repository](linux-repository.md) to
 install GitLab Runner, or your GNU/Linux OS is not among the supported
@@ -15,7 +15,7 @@ If you want to use the [Docker executor](../executors/docker.md),
 you must [install Docker](https://docs.docker.com/install/linux/docker-ce/centos/#install-docker-ce)
 before using GitLab Runner.
 
-Make sure that you read the [FAQ](../faq/README.md) section which describes
+Make sure that you read the [FAQ](../faq/index.md) section which describes
 some of the most common problems with GitLab Runner.
 
 ## Using deb/rpm package
@@ -47,6 +47,14 @@ For example, for CentOS or Red Hat Enterprise Linux:
 # Replace ${arch} with any of the supported architectures, e.g. amd64, arm, arm64
 # A full list of architectures can be found here https://gitlab-runner-downloads.s3.amazonaws.com/latest/index.html
 curl -LJO "https://gitlab-runner-downloads.s3.amazonaws.com/latest/rpm/gitlab-runner_${arch}.rpm"
+```
+
+For example, for [FIPS compliant GitLab Runner](index.md#fips-compliant-gitlab-runner) on RHEL:
+
+```shell
+# Currently only amd64 is a supported arch
+# A full list of architectures can be found here https://gitlab-runner-downloads.s3.amazonaws.com/latest/index.html
+curl -LJO "https://gitlab-runner-downloads.s3.amazonaws.com/latest/rpm/gitlab-runner_amd64_fips.rpm"
 ```
 
 ### Install
@@ -110,6 +118,12 @@ want to install a version prior to GitLab Runner 10, [visit the old docs](old.md
 
    # Linux s390x
    sudo curl -L --output /usr/local/bin/gitlab-runner "https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-linux-s390x"
+
+   # Linux ppc64le
+   sudo curl -L --output /usr/local/bin/gitlab-runner "https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-linux-ppc64le"
+   
+   # Linux x86-64 FIPS Compliant
+   sudo curl -L --output /usr/local/bin/gitlab-runner "https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-linux-amd64-fips"
    ```
 
    You can download a binary for every available version as described in
@@ -133,6 +147,9 @@ want to install a version prior to GitLab Runner 10, [visit the old docs](old.md
    sudo gitlab-runner install --user=gitlab-runner --working-directory=/home/gitlab-runner
    sudo gitlab-runner start
    ```
+
+   Ensure you have `/usr/local/bin/` in `$PATH` for root or you might get a `command not found` error.
+   Alternately, you can install `gitlab-runner` in a different location, like `/usr/bin/`.
 
 1. [Register a runner](../register/index.md)
 

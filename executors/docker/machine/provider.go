@@ -11,7 +11,6 @@ import (
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
-	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 )
 
 type machineProvider struct {
@@ -30,6 +29,8 @@ type machineProvider struct {
 	totalActions      *prometheus.CounterVec
 	currentStatesDesc *prometheus.Desc
 	creationHistogram prometheus.Histogram
+	stoppingHistogram prometheus.Histogram
+	removalHistogram  prometheus.Histogram
 }
 
 func (m *machineProvider) machineDetails(name string, acquire bool) *machineDetails {
@@ -116,12 +117,7 @@ func (m *machineProvider) createWithGrowthCapacity(
 	logger := logrus.WithField("name", details.Name)
 	started := time.Now()
 
-	err := m.reprovisionMachineOnCreationFailure(
-		logger,
-		config,
-		details,
-		m.machine.Create(config.Machine.MachineDriver, details.Name, config.Machine.MachineOptions...),
-	)
+	err := m.machine.Create(config.Machine.MachineDriver, details.Name, config.Machine.MachineOptions...)
 	if err != nil {
 		logger.WithField("time", time.Since(started)).
 			WithError(err).
@@ -147,29 +143,6 @@ func (m *machineProvider) createWithGrowthCapacity(
 		coordinator.addAvailableMachine()
 	}
 	errCh <- err
-}
-
-func (m *machineProvider) reprovisionMachineOnCreationFailure(
-	logger logrus.FieldLogger,
-	config *common.RunnerConfig,
-	details *machineDetails,
-	err error,
-) error {
-	skipProvision := config.IsFeatureFlagOn(featureflags.SkipDockerMachineProvisionOnCreationFailure)
-	if skipProvision {
-		logger.WithError(err).Infof("Skipping provision retry on failed machine")
-		return err
-	}
-
-	for i := 0; i < 3 && err != nil; i++ {
-		details.RetryCount++
-		logger.WithError(err).
-			Warningln("Machine creation failed, trying to provision")
-		time.Sleep(provisionRetryInterval)
-		err = m.machine.Provision(details.Name)
-	}
-
-	return err
 }
 
 func (m *machineProvider) findFreeMachine(skipCache bool, machines ...string) (details *machineDetails) {
@@ -294,18 +267,20 @@ func (m *machineProvider) removeMachine(details *machineDetails) (err error) {
 		defer m.stuckRemoveLock.Unlock()
 	}
 
-	details.logger().
-		Warningln("Stopping machine")
-	err = m.machine.Stop(details.Name, machineStopCommandTimeout)
+	details.logger().Warningln("Stopping machine")
+	err = runHistogramCountedOperation(m.stoppingHistogram, func() error {
+		return m.machine.Stop(details.Name, machineStopCommandTimeout)
+	})
 	if err != nil {
 		details.logger().
 			WithError(err).
 			Warningln("Error while stopping machine")
 	}
 
-	details.logger().
-		Warningln("Removing machine")
-	err = m.machine.Remove(details.Name)
+	details.logger().Warningln("Removing machine")
+	err = runHistogramCountedOperation(m.removalHistogram, func() error {
+		return m.machine.Remove(details.Name)
+	})
 	if err != nil {
 		details.RetryCount++
 		time.Sleep(removeRetryInterval)
@@ -313,6 +288,14 @@ func (m *machineProvider) removeMachine(details *machineDetails) (err error) {
 	}
 
 	return nil
+}
+
+func runHistogramCountedOperation(histogram prometheus.Histogram, operation func() error) error {
+	startedAt := time.Now()
+	err := operation()
+	histogram.Observe(time.Since(startedAt).Seconds())
+
+	return err
 }
 
 func (m *machineProvider) finalizeRemoval(details *machineDetails) {
@@ -359,34 +342,6 @@ func (m *machineProvider) remove(machineName string, reason ...interface{}) erro
 	return nil
 }
 
-func (m *machineProvider) updateMachine(
-	config *common.RunnerConfig,
-	data *machinesData,
-	details *machineDetails,
-) error {
-	if details.State != machineStateIdle {
-		return nil
-	}
-
-	if config.Machine.MaxBuilds > 0 && details.UsedCount >= config.Machine.MaxBuilds {
-		// Limit number of builds
-		return errors.New("too many builds")
-	}
-
-	if data.Total() >= config.Limit && config.Limit > 0 {
-		// Limit maximum number of machines
-		return errors.New("too many machines")
-	}
-
-	if time.Since(details.Used) > time.Second*time.Duration(config.Machine.GetIdleTime()) {
-		if data.Idle >= config.Machine.GetIdleCount() {
-			// Remove machine that are way over the idle time
-			return errors.New("too many idle machines")
-		}
-	}
-	return nil
-}
-
 func (m *machineProvider) updateMachines(
 	machines []string,
 	config *common.RunnerConfig,
@@ -398,11 +353,11 @@ func (m *machineProvider) updateMachines(
 		details := m.machineDetails(name, false)
 		details.LastSeen = time.Now()
 
-		err := m.updateMachine(config, &data, details)
-		if err == nil {
+		reason := shouldRemoveIdle(config, &data, details)
+		if reason == dontRemoveIdleMachine {
 			validMachines = append(validMachines, name)
 		} else {
-			_ = m.remove(details.Name, err)
+			_ = m.remove(details.Name, reason)
 		}
 
 		data.Add(details)
@@ -410,21 +365,15 @@ func (m *machineProvider) updateMachines(
 	return
 }
 
+// createMachines starts goroutines that are creating the new machines.
+// Limiting strategy is used to ensure the autoscaling parameters are respected.
 func (m *machineProvider) createMachines(config *common.RunnerConfig, data *machinesData) {
-	// Create a new machines and mark them as Idle
 	for {
-		if data.Available() >= config.Machine.GetIdleCount() {
-			// Limit maximum number of idle machines
-			break
+		if !canCreateIdle(config, data) {
+			return
 		}
-		if data.Total() >= config.Limit && config.Limit > 0 {
-			// Limit maximum number of machines
-			break
-		}
-		if data.Creating >= config.Machine.MaxGrowthRate && config.Machine.MaxGrowthRate > 0 {
-			// Prevent excessive growth in the number of machines
-			break
-		}
+
+		// Create a new machine and mark it as Idle
 		m.create(config, machineStateIdle)
 		data.Creating++
 	}
@@ -496,13 +445,15 @@ func (m *machineProvider) Acquire(config *common.RunnerConfig) (common.ExecutorD
 	// Pre-create machines
 	m.createMachines(config, &machinesData)
 
-	logrus.WithFields(machinesData.Fields()).
+	logger := logrus.WithFields(machinesData.Fields()).
 		WithField("runner", config.ShortDescription()).
-		WithField("minIdleCount", config.Machine.GetIdleCount()).
+		WithField("idleCountMin", config.Machine.GetIdleCountMin()).
+		WithField("idleCount", config.Machine.GetIdleCount()).
+		WithField("idleScaleFactor", config.Machine.GetIdleScaleFactor()).
 		WithField("maxMachines", config.Limit).
-		WithField("maxMachineCreate", config.Machine.MaxGrowthRate).
-		WithField("time", time.Now()).
-		Debugln("Docker Machine Details")
+		WithField("maxMachineCreate", config.Machine.MaxGrowthRate)
+
+	logger.WithField("time", time.Now()).Debugln("Docker Machine Details")
 	machinesData.writeDebugInformation()
 
 	// Try to find a free machine
@@ -511,11 +462,13 @@ func (m *machineProvider) Acquire(config *common.RunnerConfig) (common.ExecutorD
 		return details, nil
 	}
 
-	// If we have a free machines we can process a build
-	if config.Machine.GetIdleCount() != 0 && machinesData.Idle == 0 {
-		err = errors.New("no free machines that can process builds")
+	if config.Machine.GetIdleCount() == 0 {
+		logger.Info("IdleCount is set to 0 so the machine will be created on demand in job context")
+	} else if machinesData.Idle == 0 {
+		return nil, &common.NoFreeExecutorError{Message: "no free machines that can process builds"}
 	}
-	return nil, err
+
+	return nil, nil
 }
 
 //nolint:nakedret
@@ -614,6 +567,10 @@ func (m *machineProvider) GetFeatures(features *common.FeaturesInfo) error {
 	return m.provider.GetFeatures(features)
 }
 
+func (m *machineProvider) GetConfigInfo(input *common.RunnerConfig, output *common.ConfigInfo) {
+	m.provider.GetConfigInfo(input, output)
+}
+
 func (m *machineProvider) GetDefaultShell() string {
 	return m.provider.GetDefaultShell()
 }
@@ -659,6 +616,26 @@ func newMachineProvider(name, executor string) *machineProvider {
 				Name:    "gitlab_runner_autoscaling_machine_creation_duration_seconds",
 				Help:    "Histogram of machine creation time.",
 				Buckets: prometheus.ExponentialBuckets(30, 1.25, 10),
+				ConstLabels: prometheus.Labels{
+					"executor": name,
+				},
+			},
+		),
+		stoppingHistogram: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "gitlab_runner_autoscaling_machine_stopping_duration_seconds",
+				Help:    "Histogram of machine stopping time.",
+				Buckets: []float64{1, 3, 5, 10, 30, 50, 60, 80, 90, 120},
+				ConstLabels: prometheus.Labels{
+					"executor": name,
+				},
+			},
+		),
+		removalHistogram: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "gitlab_runner_autoscaling_machine_removal_duration_seconds",
+				Help:    "Histogram of machine removal time.",
+				Buckets: []float64{1, 3, 5, 10, 30, 50, 60, 80, 90, 120},
 				ConstLabels: prometheus.Labels{
 					"executor": name,
 				},

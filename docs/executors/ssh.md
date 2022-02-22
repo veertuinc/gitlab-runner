@@ -4,7 +4,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
 ---
 
-# SSH
+# SSH **(FREE)**
 
 NOTE:
 The SSH executor supports only scripts generated in Bash and the caching feature
@@ -14,8 +14,8 @@ This is a simple executor that allows you to execute builds on a remote machine
 by executing commands over SSH.
 
 NOTE:
-GitLab Runner will use the `git lfs` command if [Git LFS](https://git-lfs.github.com) is installed on the remote machine.
-Ensure Git LFS is up-to-date on any remote systems where GitLab Runner will run using SSH executor.
+GitLab Runner uses the `git lfs` command if [Git LFS](https://git-lfs.github.com) is installed on the remote machine.
+Ensure Git LFS is up-to-date on any remote systems where GitLab Runner runs using SSH executor.
 
 ## Overview
 
@@ -57,6 +57,12 @@ connecting to via SSH.
 
 ## Security
 
-The SSH executor is susceptible to MITM attacks (man-in-the-middle), because of
-the missing `StrictHostKeyChecking` option. This will be fixed in one of the
-future releases.
+> [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/3074) in GitLab 14.3.
+
+To enable SSH `StrictHostKeyChecking`, make sure the `[runners.ssh.disable_strict_host_key_checking]` is set
+to `false`. The current default is `true`.
+
+[In GitLab 15.0](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/28192) and later,
+the default value will be `false`, meaning host key checking is required.
+
+We are not setting the value to `false` immediately, because we don't want to break existing builds.

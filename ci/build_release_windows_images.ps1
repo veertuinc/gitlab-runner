@@ -9,16 +9,20 @@ $InformationPreference = "Continue"
 #   used for building the Docker image. It is important for the version to match
 #   one of the mcr.microsoft.com/windows/servercore or https://hub.docker.com/_/microsoft-windows-nanoserver
 #   tag prefixes (discarding the architecture suffix).
-#   For example, `servercore1903` will build from mcr.microsoft.com/windows/servercore:1903-amd64.
+#   For example, `servercoreYYH1` will build from mcr.microsoft.com/windows/servercore:YYH1-amd64.
 # - $Env:GIT_VERSION - Specify which version of Git needs to be installed on
 #   the Docker image. This is done through Docker build args.
 # - $Env:GIT_VERSION_BUILD - Specify which build is needed to download for the
 #   GIT_VERSION you specified.
-# - $Env:GIT_256_CHECKSUM - The checksum of the downloaded zip, usually found in
+# - $Env:GIT_WINDOWS_AMD64_CHECKSUM - The checksum of the downloaded zip, usually found in
 #   the GitHub release page.
 # - $Env:GIT_LFS_VERSION - The Git LFS version needed to install on the
 #   Docker image.
-# - $Env:GIT_LFS_256_CHECKSUM - The checksum of the downloaded zip, usually
+# - $Env:GIT_LFS_WINDOWS_AMD64_CHECKSUM - The checksum of the downloaded .tar.gz file, usually
+#   found in the GitHub release page.
+# - $Env:PWSH_VERSION - The Powershell Core version needed to install on the
+#   Docker image.
+# - $Env:PWSH_WINDOWS_AMD64_CHECKSUM - The checksum of the downloaded MSI, usually
 #   found in the GitHub release page.
 # - $Env:IS_LATEST - When we want to tag current tag as the latest, this is usually
 #   used when we are tagging a release for the runner (which is not a patch
@@ -50,6 +54,11 @@ $imagesBasePath = "dockerfiles/runner-helper/Dockerfile.x86_64"
 
 function Main
 {
+    if (-not (Test-Path Env:IS_LATEST))
+    {
+        $Env:IS_LATEST = Is-Latest
+    }
+
     $tag = Get-Tag
 
     Build-Image $tag
@@ -60,13 +69,12 @@ function Main
 
         Connect-Registry $Env:DOCKER_HUB_USER $Env:DOCKER_HUB_PASSWORD
         Push-Tag $namespace $tag
+        Push-As-Ref $namespace $tag
 
         if ($Env:IS_LATEST -eq "true")
         {
-            Add-LatestTag $namespace $tag
-            Push-Latest $namespace
+            Push-As-Latest $namespace $tag
         }
-
         Disconnect-Registry
     }
 
@@ -75,11 +83,11 @@ function Main
         Connect-Registry $Env:CI_REGISTRY_USER $Env:CI_REGISTRY_PASSWORD $Env:CI_REGISTRY
 
         Push-Tag "${Env:CI_REGISTRY_IMAGE}" $tag
+        Push-As-Ref "${Env:CI_REGISTRY_IMAGE}" $tag
 
         if ($Env:IS_LATEST -eq "true")
         {
-            Add-LatestTag $Env:CI_REGISTRY_IMAGE $tag
-            Push-Latest $Env:CI_REGISTRY_IMAGE
+            Push-As-Latest $Env:CI_REGISTRY_IMAGE $tag
         }
 
         Disconnect-Registry $env:CI_REGISTRY
@@ -92,11 +100,11 @@ function Main
         Connect-Registry AWS $Env:ECR_PUBLIC_PASSWORD $ecrPublicRegistry
 
         Push-Tag $ecrPublicRegistry $tag
+        Push-As-Ref $ecrPublicRegistry $tag
 
         if ($Env:IS_LATEST -eq "true")
         {
-            Add-LatestTag $ecrPublicRegistry $tag
-            Push-Latest $ecrPublicRegistry
+            Push-As-Latest $ecrPublicRegistry $tag
         }
 
         Disconnect-Registry $ecrPublicRegistry
@@ -108,6 +116,36 @@ function Get-Tag
     $revision = & 'git' rev-parse --short=8 HEAD
 
     return "x86_64-$revision-$Env:WINDOWS_VERSION"
+}
+
+function Get-Latest-Stable-Tag
+{
+    $versions = & git -c versionsort.prereleaseSuffix="-rc" -c versionsort.prereleaseSuffix="-RC" tag -l "v*.*.*" |
+        Where-Object { $_ -notlike "*-rc*" } |
+        %{[System.Version]$_.Substring(1)} |
+        sort -descending
+    $latestTag = $versions[0].ToString()
+
+    return "v$latestTag"
+}
+
+function Is-Latest
+{
+    $prevErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue' # We expect errors from `git describe`, so temporarily disable handling
+
+    try
+    {
+        $latestTag = Get-Latest-Stable-Tag
+        & git describe --exact-match --match $latestTag 2>&1 | out-null
+        $isLatest = $LASTEXITCODE -eq 0
+    }
+    finally
+    {
+        $ErrorActionPreference = $prevErrorPreference
+    }
+
+    return $isLatest
 }
 
 function Build-Image($tag)
@@ -126,12 +164,12 @@ function Build-Image($tag)
     $buildArgs = @(
         '--build-arg', "BASE_IMAGE_TAG=mcr.microsoft.com/windows/${windowsFlavor}:${windowsVersion}-amd64",
         '--build-arg', "PWSH_VERSION=$Env:PWSH_VERSION",
-        '--build-arg', "PWSH_256_CHECKSUM=$Env:PWSH_256_CHECKSUM",
+        '--build-arg', "PWSH_AMD64_CHECKSUM=$Env:PWSH_WINDOWS_AMD64_CHECKSUM",
         '--build-arg', "GIT_VERSION=$Env:GIT_VERSION",
         '--build-arg', "GIT_VERSION_BUILD=$Env:GIT_VERSION_BUILD",
-        '--build-arg', "GIT_256_CHECKSUM=$Env:GIT_256_CHECKSUM"
+        '--build-arg', "GIT_AMD64_CHECKSUM=$Env:GIT_WINDOWS_AMD64_CHECKSUM"
         '--build-arg', "GIT_LFS_VERSION=$Env:GIT_LFS_VERSION"
-        '--build-arg', "GIT_LFS_256_CHECKSUM=$Env:GIT_LFS_256_CHECKSUM"
+        '--build-arg', "GIT_LFS_AMD64_CHECKSUM=$Env:GIT_LFS_WINDOWS_AMD64_CHECKSUM"
     )
 
     $imageNames = @(
@@ -156,13 +194,43 @@ function Push-Tag($namespace, $tag)
     }
 }
 
-function Add-LatestTag($namespace, $tag)
+function Push-As-Latest($namespace, $tag)
 {
-    Write-Information "Tag $tag as latest"
+    Push-As $namespace $tag "latest"
+}
 
-    & 'docker' tag "${namespace}/gitlab-runner-helper:$tag" "${namespace}/gitlab-runner-helper:x86_64-latest-$Env:WINDOWS_VERSION"
+function Push-As-Ref($namespace, $tag)
+{
+    $ref = "${Env:CI_COMMIT_TAG}"
+    if ($ref -eq "") {
+       $ref = "${Env:CI_COMMIT_REF_SLUG}"
+    }
+    if($ref -eq "") {
+        $ref = "main"
+    }
+    if($ref -eq "main") {
+        $ref = "bleeding"
+    }
+    Push-As $namespace $tag $ref
+}
+
+function Push-As($namespace, $tag, $alias)
+{
+    $image = "${namespace}/gitlab-runner-helper:$tag"
+
+    $newTag = "x86_64-${alias}-$Env:WINDOWS_VERSION"
+    $newImage = "${namespace}/gitlab-runner-helper:$newTag"
+
+    Write-Information "Tag $tag as $newTag"
+    & 'docker' tag $image $newImage
     if ($LASTEXITCODE -ne 0) {
-        throw ("Failed to tag ${namespace}/gitlab-runner-helper:$tag as latest image" )
+        throw ("Failed to tag $tag as $newTag" )
+    }
+
+    Write-Information "Push image $newImage"
+    & 'docker' push $newImage
+    if ($LASTEXITCODE -ne 0) {
+        throw ("Failed to push image $newImage to registry" )
     }
 }
 

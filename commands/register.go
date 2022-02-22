@@ -3,6 +3,7 @@ package commands
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/imdario/mergo"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
@@ -20,6 +20,7 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/ssh"
 	"gitlab.com/gitlab-org/gitlab-runner/network"
+	"gitlab.com/gitlab-org/gitlab-runner/shells"
 )
 
 type configTemplate struct {
@@ -35,7 +36,7 @@ func (c *configTemplate) Enabled() bool {
 func (c *configTemplate) MergeTo(config *common.RunnerConfig) error {
 	err := c.loadConfigTemplate()
 	if err != nil {
-		return errors.Wrap(err, "couldn't load configuration template file")
+		return fmt.Errorf("couldn't load configuration template file: %w", err)
 	}
 
 	if len(c.Runners) != 1 {
@@ -44,7 +45,7 @@ func (c *configTemplate) MergeTo(config *common.RunnerConfig) error {
 
 	err = mergo.Merge(config, c.Runners[0])
 	if err != nil {
-		return errors.Wrap(err, "error while merging configuration with configuration template")
+		return fmt.Errorf("error while merging configuration with configuration template: %w", err)
 	}
 
 	return nil
@@ -83,6 +84,7 @@ type RegisterCommand struct {
 	AccessLevel       string `long:"access-level" env:"REGISTER_ACCESS_LEVEL" description:"Set access_level of the runner to not_protected or ref_protected; defaults to not_protected"`
 	MaximumTimeout    int    `long:"maximum-timeout" env:"REGISTER_MAXIMUM_TIMEOUT" description:"What is the maximum timeout (in seconds) that will be set for job when using this Runner"`
 	Paused            bool   `long:"paused" env:"REGISTER_PAUSED" description:"Set Runner to be paused, defaults to 'false'"`
+	MaintenanceNote   string `long:"maintenance-note" env:"REGISTER_MAINTENANCE_NOTE" description:"Runner's maintenance note"`
 
 	common.RunnerConfig
 }
@@ -167,7 +169,7 @@ func (s *RegisterCommand) askExecutor() {
 }
 
 func (s *RegisterCommand) askDocker() {
-	s.askBasicDocker("ruby:2.6")
+	s.askBasicDocker("ruby:2.7")
 
 	for _, volume := range s.Docker.Volumes {
 		parts := strings.Split(volume, ":")
@@ -248,22 +250,24 @@ func (s *RegisterCommand) askRunner() {
 	}
 
 	// we store registration token as token, since we pass that to RunnerCredentials
-	s.Token = s.ask("registration-token", "Please enter the gitlab-ci token for this runner:")
-	s.Name = s.ask("name", "Please enter the gitlab-ci description for this runner:")
-	s.TagList = s.ask("tag-list", "Please enter the gitlab-ci tags for this runner (comma separated):", true)
+	s.Token = s.ask("registration-token", "Enter the registration token:")
+	s.Name = s.ask("name", "Enter a description for the runner:")
+	s.TagList = s.ask("tag-list", "Enter tags for the runner (comma-separated):", true)
+	s.MaintenanceNote = s.ask("maintenance-note", "Enter optional maintenance note for the runner:", true)
 
 	if s.TagList == "" {
 		s.RunUntagged = true
 	}
 
 	parameters := common.RegisterRunnerParameters{
-		Description:    s.Name,
-		Tags:           s.TagList,
-		Locked:         s.Locked,
-		AccessLevel:    s.AccessLevel,
-		RunUntagged:    s.RunUntagged,
-		MaximumTimeout: s.MaximumTimeout,
-		Active:         !s.Paused,
+		Description:     s.Name,
+		MaintenanceNote: s.MaintenanceNote,
+		Tags:            s.TagList,
+		Locked:          s.Locked,
+		AccessLevel:     s.AccessLevel,
+		RunUntagged:     s.RunUntagged,
+		MaximumTimeout:  s.MaximumTimeout,
+		Active:          !s.Paused,
 	}
 
 	result := s.network.RegisterRunner(s.RunnerCredentials, parameters)
@@ -271,6 +275,10 @@ func (s *RegisterCommand) askRunner() {
 		logrus.Panicln("Failed to register the runner. You may be having network problems.")
 	}
 
+	// golangci-lint doesn't recognize logrus.Panicln() call as breaking the execution
+	// flow which causes the following assignment to throw false-positive report for
+	// 'SA5011: possible nil pointer dereference'
+	// nolint:staticcheck
 	s.Token = result.Token
 	s.registered = true
 }
@@ -316,6 +324,10 @@ func (s *RegisterCommand) askExecutorOptions() {
 			s.askDocker()
 		},
 		"docker-windows": func() {
+			if s.RunnerConfig.Shell == "" {
+				s.Shell = shells.SNPwsh
+			}
+
 			s.Docker = docker
 			s.askDockerWindows()
 		},
@@ -344,9 +356,7 @@ func (s *RegisterCommand) askExecutorOptions() {
 		},
 		"shell": func() {
 			if runtime.GOOS == osTypeWindows && s.RunnerConfig.Shell == "" {
-				// TODO: Replace with `pwsh` in 14.0.
-				//  For more details read https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26419
-				s.Shell = "powershell"
+				s.Shell = shells.SNPwsh
 			}
 		},
 		"custom": func() {
@@ -381,6 +391,8 @@ func (s *RegisterCommand) Execute(context *cli.Context) {
 			"Refer to anka-gitlab-runner register -h for the correct options.")
 	}
 
+	s.mergeTemplate()
+
 	s.askRunner()
 
 	if !s.LeaveRunner {
@@ -398,8 +410,6 @@ func (s *RegisterCommand) Execute(context *cli.Context) {
 
 	s.askExecutor()
 	s.askExecutorOptions()
-
-	s.mergeTemplate()
 
 	s.addRunner(&s.RunnerConfig)
 	err = s.saveConfig()

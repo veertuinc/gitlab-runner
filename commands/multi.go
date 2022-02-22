@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	service "github.com/ayufan/golang-kardianos-service"
+	"github.com/kardianos/service"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -93,7 +93,7 @@ func (mr *RunCommand) log() *logrus.Entry {
 	return logrus.WithField("builds", mr.buildsHelper.buildsCount())
 }
 
-// Start is the method implementing `github.com/ayufan/golang-kardianos-service`.`Interface`
+// Start is the method implementing `github.com/kardianos/service`.`Interface`
 // interface. It's responsible for a non-blocking initialization of the process. When it exits,
 // the main control flow is passed to runWait() configured as service's RunWait method. Take a look
 // into Execute() for details.
@@ -261,6 +261,7 @@ func (mr *RunCommand) setupMetricsAndDebugServer() {
 
 	go func() {
 		err := http.Serve(listener, mux)
+
 		if err != nil {
 			mr.log().WithError(err).Fatal("Metrics server terminated")
 		}
@@ -300,7 +301,18 @@ func (mr *RunCommand) serveMetrics(mux *http.ServeMux) {
 		}
 	}
 
-	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	// restrictHTTPMethods should be used on all promhttp handlers
+	// In this specific instance, the handler is unintrumented, so isn't as
+	// important. But in the future, if any other promhttp handlers are added
+	// they too should be wrapped and restriced.
+	// https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27194
+	mux.Handle(
+		"/metrics",
+		restrictHTTPMethods(
+			promhttp.HandlerFor(registry, promhttp.HandlerOpts{}),
+			http.MethodGet, http.MethodHead,
+		),
+	)
 }
 
 func (mr *RunCommand) serveDebugData(mux *http.ServeMux) {
@@ -313,6 +325,24 @@ func (mr *RunCommand) servePprof(mux *http.ServeMux) {
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+}
+
+// restrictHTTPMethods wraps a http.Handler and returns a http.Handler that
+// restricts methods only to those provided.
+func restrictHTTPMethods(handler http.Handler, methods ...string) http.Handler {
+	supported := map[string]struct{}{}
+	for _, method := range methods {
+		supported[method] = struct{}{}
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := supported[r.Method]; !ok {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+
+		handler.ServeHTTP(w, r)
+	})
 }
 
 func (mr *RunCommand) setupSessionServer() {
@@ -409,13 +439,17 @@ func (mr *RunCommand) processRunners(id int, stopWorker chan bool, runners chan 
 		case runner := <-runners:
 			err := mr.processRunner(id, runner, runners)
 			if err != nil {
-				mr.log().
-					WithFields(logrus.Fields{
-						"runner":   runner.ShortDescription(),
-						"executor": runner.Executor,
-					}).
-					WithError(err).
-					Warn("Failed to process runner")
+				logger := mr.log().WithFields(logrus.Fields{
+					"runner":   runner.ShortDescription(),
+					"executor": runner.Executor,
+				}).WithError(err)
+
+				var NoFreeExecutorError *common.NoFreeExecutorError
+				if errors.As(err, &NoFreeExecutorError) {
+					logger.Debug("Failed to process runner")
+				} else {
+					logger.Warn("Failed to process runner")
+				}
 			}
 
 			// force GC cycle after processing build
@@ -694,7 +728,7 @@ func (mr *RunCommand) checkConfig() (err error) {
 	return nil
 }
 
-// Stop is the method implementing `github.com/ayufan/golang-kardianos-service`.`Interface`
+// Stop is the method implementing `github.com/kardianos/service`.`Interface`
 // interface. It's responsible for triggering the process stop.
 // First it starts a goroutine that starts broadcasting the interrupt signal (used to stop
 // workers scaling goroutine).
@@ -805,7 +839,7 @@ func (mr *RunCommand) handleGracefulShutdown() error {
 //    properly.
 //
 // After this method exits, Stop returns it error and finally the
-// `github.com/ayufan/golang-kardianos-service` service mechanism will finish
+// `github.com/kardianos/service` service mechanism will finish
 // process execution.
 func (mr *RunCommand) handleForcefulShutdown() error {
 	mr.log().
@@ -873,7 +907,7 @@ func (mr *RunCommand) Execute(_ *cli.Context) {
 	}
 }
 
-// runWait is the blocking mechanism for `github.com/ayufan/golang-kardianos-service`
+// runWait is the blocking mechanism for `github.com/kardianos/service`
 // service. It's started after Start exited and should block the control flow. When it exits,
 // then the Stop is executed and service shutdown should be handled.
 // For Runner it waits for the stopSignal to be received by the process. When it will happen,

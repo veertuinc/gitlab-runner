@@ -1,11 +1,15 @@
+//go:build !integration
+// +build !integration
+
 package s3
 
 import (
 	"errors"
 	"testing"
 
-	"github.com/minio/minio-go/v6"
-	"github.com/minio/minio-go/v6/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -15,6 +19,7 @@ import (
 type minioClientInitializationTest struct {
 	errorOnInitialization bool
 	configurationFactory  func() *common.CacheConfig
+	serverAddress         string
 
 	expectedToUseIAM bool
 	expectedInsecure bool
@@ -45,6 +50,7 @@ func TestMinioClientInitialization(t *testing.T) {
 		"only-ServerAddress-defined": {
 			configurationFactory: onlyServerAddressFactory,
 			expectedToUseIAM:     true,
+			serverAddress:        "s3.customurl.com",
 		},
 		"only-AccessKey-defined": {
 			configurationFactory: onlyAccessKeyFactory,
@@ -127,7 +133,7 @@ func emptySecretKeyFactory() *common.CacheConfig {
 
 func onlyServerAddressFactory() *common.CacheConfig {
 	cacheConfig := emptyCredentialsCacheFactory()
-	cacheConfig.S3.ServerAddress = "s3.amazonaws.com"
+	cacheConfig.S3.ServerAddress = "s3.customurl.com"
 
 	return cacheConfig
 }
@@ -148,9 +154,9 @@ func onlySecretKeyFactory() *common.CacheConfig {
 
 func runOnFakeMinio(t *testing.T, test minioClientInitializationTest) func() {
 	oldNewMinio := newMinio
-	newMinio = func(endpoint string, accessKeyID string, secretAccessKey string, secure bool) (*minio.Client, error) {
+	newMinio = func(endpoint string, opts *minio.Options) (*minio.Client, error) {
 		if test.expectedToUseIAM {
-			t.Error("Should not use regular minio client initializator")
+			t.Error("Should not use regular minio client initializer")
 		}
 
 		if test.errorOnInitialization {
@@ -158,12 +164,12 @@ func runOnFakeMinio(t *testing.T, test minioClientInitializationTest) func() {
 		}
 
 		if test.expectedInsecure {
-			assert.False(t, secure)
+			assert.False(t, opts.Secure)
 		} else {
-			assert.True(t, secure)
+			assert.True(t, opts.Secure)
 		}
 
-		client, err := minio.New(endpoint, accessKeyID, secretAccessKey, secure)
+		client, err := minio.New(endpoint, opts)
 		require.NoError(t, err)
 
 		return client, nil
@@ -175,28 +181,38 @@ func runOnFakeMinio(t *testing.T, test minioClientInitializationTest) func() {
 }
 
 func runOnFakeMinioWithCredentials(t *testing.T, test minioClientInitializationTest) func() {
-	oldNewMinioWithCredentials := newMinioWithCredentials
-	newMinioWithCredentials =
-		func(endpoint string, creds *credentials.Credentials, secure bool, region string) (*minio.Client, error) {
+	oldNewMinioWithCredentials := newMinioWithIAM
+	newMinioWithIAM =
+		func(serverAddress, bucketLocation string) (*minio.Client, error) {
 			if !test.expectedToUseIAM {
 				t.Error("Should not use minio with IAM client initializator")
+			}
+
+			assert.Equal(t, "location", bucketLocation)
+
+			if test.serverAddress == "" {
+				assert.Equal(t, DefaultAWSS3Server, serverAddress)
+			} else {
+				assert.Equal(t, test.serverAddress, serverAddress)
 			}
 
 			if test.errorOnInitialization {
 				return nil, errors.New("test error")
 			}
 
-			assert.Equal(t, "s3.amazonaws.com", endpoint)
-			assert.True(t, secure)
-			assert.Empty(t, region)
-
-			client, err := minio.NewWithCredentials(endpoint, creds, secure, region)
+			client, err := minio.New(serverAddress, &minio.Options{
+				Creds:  credentials.NewIAM(""),
+				Secure: true,
+				Transport: &bucketLocationTripper{
+					bucketLocation: bucketLocation,
+				},
+			})
 			require.NoError(t, err)
 
 			return client, nil
 		}
 
 	return func() {
-		newMinioWithCredentials = oldNewMinioWithCredentials
+		newMinioWithIAM = oldNewMinioWithCredentials
 	}
 }

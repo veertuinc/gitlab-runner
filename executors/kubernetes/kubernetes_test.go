@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package kubernetes
 
 import (
@@ -23,9 +26,11 @@ import (
 	"github.com/stretchr/testify/require"
 	api "k8s.io/api/core/v1"
 	kubeerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/rest/fake"
+	"k8s.io/client-go/util/exec"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/common/buildtest"
@@ -91,7 +96,7 @@ func testVolumeMountsFeatureFlag(t *testing.T, featureFlagName string, featureFl
 				Runner: &common.RunnerConfig{},
 			},
 			Expected: []api.VolumeMount{
-				{Name: "repo"},
+				{Name: "repo", MountPath: "/builds"},
 			},
 		},
 		"custom volumes": {
@@ -122,8 +127,13 @@ func testVolumeMountsFeatureFlag(t *testing.T, featureFlagName string, featureFl
 								{Name: "PVC", MountPath: "/path/to/whatever"},
 								{
 									Name:      "PVC-subpath",
-									MountPath: "/path/to/whatever",
-									SubPath:   "PVC-subpath",
+									MountPath: "/path/to/whatever/1",
+									SubPath:   "PVC-subpath-1",
+								},
+								{
+									Name:      "PVC-subpath",
+									MountPath: "/path/to/whatever/2",
+									SubPath:   "PVC-subpath-2",
 								},
 							},
 							ConfigMaps: []common.KubernetesConfigMap{
@@ -159,20 +169,21 @@ func testVolumeMountsFeatureFlag(t *testing.T, featureFlagName string, featureFl
 				Runner: &common.RunnerConfig{},
 			},
 			Expected: []api.VolumeMount{
-				{Name: "repo"},
 				{Name: "docker", MountPath: "/var/run/docker.sock"},
 				{Name: "host-path", MountPath: "/path/two"},
 				{Name: "host-subpath", MountPath: "/subpath", SubPath: "subpath"},
 				{Name: "Secret", MountPath: "/path/to/whatever"},
 				{Name: "Secret-subpath", MountPath: "/path/to/whatever", SubPath: "secret-subpath"},
 				{Name: "PVC", MountPath: "/path/to/whatever"},
-				{Name: "PVC-subpath", MountPath: "/path/to/whatever", SubPath: "PVC-subpath"},
+				{Name: "PVC-subpath", MountPath: "/path/to/whatever/1", SubPath: "PVC-subpath-1"},
+				{Name: "PVC-subpath", MountPath: "/path/to/whatever/2", SubPath: "PVC-subpath-2"},
 				{Name: "ConfigMap", MountPath: "/path/to/whatever"},
 				{Name: "ConfigMap-subpath", MountPath: "/path/to/whatever", SubPath: "ConfigMap-subpath"},
 				{Name: "emptyDir", MountPath: "/path/to/empty/dir"},
 				{Name: "emptyDir-subpath", MountPath: "/subpath", SubPath: "empty-subpath"},
 				{Name: "csi", MountPath: "/path/to/csi/volume"},
 				{Name: "csi-subpath", MountPath: "/path/to/csi/volume", SubPath: "subpath"},
+				{Name: "repo", MountPath: "/builds"},
 			},
 		},
 		"custom volumes with read-only settings": {
@@ -207,12 +218,53 @@ func testVolumeMountsFeatureFlag(t *testing.T, featureFlagName string, featureFl
 				Runner: &common.RunnerConfig{},
 			},
 			Expected: []api.VolumeMount{
-				{Name: "repo"},
 				{Name: "test", MountPath: "/opt/test/readonly", ReadOnly: true},
 				{Name: "docker", MountPath: "/var/run/docker.sock"},
 				{Name: "secret", MountPath: "/path/to/secret", ReadOnly: true},
 				{Name: "configMap", MountPath: "/path/to/configmap", ReadOnly: true},
 				{Name: "csi", MountPath: "/path/to/csi/volume", ReadOnly: true},
+				{Name: "repo", MountPath: "/builds"},
+			},
+		},
+		"default volume with build dir": {
+			GlobalConfig: &common.Config{},
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					BuildsDir: "/path/to/builds/dir",
+					Kubernetes: &common.KubernetesConfig{
+						Volumes: common.KubernetesVolumes{},
+					},
+				},
+			},
+			Build: &common.Build{
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: []api.VolumeMount{
+				{
+					Name:      "repo",
+					MountPath: "/path/to/builds/dir",
+				},
+			},
+		},
+		"user-provided volume with build dir": {
+			GlobalConfig: &common.Config{},
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					BuildsDir: "/path/to/builds/dir",
+					Kubernetes: &common.KubernetesConfig{
+						Volumes: common.KubernetesVolumes{
+							HostPaths: []common.KubernetesHostPath{
+								{Name: "user-provided", MountPath: "/path/to/builds/dir"},
+							},
+						},
+					},
+				},
+			},
+			Build: &common.Build{
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: []api.VolumeMount{
+				{Name: "user-provided", MountPath: "/path/to/builds/dir"},
 			},
 		},
 	}
@@ -228,17 +280,7 @@ func testVolumeMountsFeatureFlag(t *testing.T, featureFlagName string, featureFl
 			}
 
 			buildtest.SetBuildFeatureFlag(e.Build, featureFlagName, featureFlagValue)
-
-			mounts := e.getVolumeMounts()
-			for _, expected := range tt.Expected {
-				assert.Contains(
-					t,
-					mounts,
-					expected,
-					"Expected volumeMount definition for %s was not found",
-					expected.Name,
-				)
-			}
+			assert.Equal(t, tt.Expected, e.getVolumeMounts())
 		})
 	}
 }
@@ -246,6 +288,8 @@ func testVolumeMountsFeatureFlag(t *testing.T, featureFlagName string, featureFl
 func testVolumesFeatureFlag(t *testing.T, featureFlagName string, featureFlagValue bool) {
 	csiVolFSType := "ext4"
 	csiVolReadOnly := false
+	mode := int32(0777)
+	optional := false
 	//nolint:lll
 	tests := map[string]struct {
 		GlobalConfig *common.Config
@@ -266,6 +310,18 @@ func testVolumesFeatureFlag(t *testing.T, featureFlagName string, featureFlagVal
 			},
 			Expected: []api.Volume{
 				{Name: "repo", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{}}},
+				{
+					Name: "scripts", VolumeSource: api.VolumeSource{
+						ConfigMap: &api.ConfigMapVolumeSource{
+							LocalObjectReference: api.LocalObjectReference{
+								Name: fakeConfigMap().Name,
+							},
+							DefaultMode: &mode,
+							Optional:    &optional,
+						},
+					},
+				},
+				{Name: "logs", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{}}},
 			},
 		},
 		"custom volumes": {
@@ -288,8 +344,13 @@ func testVolumesFeatureFlag(t *testing.T, featureFlagName string, featureFlagVal
 								{Name: "PVC", MountPath: "/path/to/whatever"},
 								{
 									Name:      "PVC-subpath",
-									MountPath: "/subpath",
-									SubPath:   "subpath",
+									MountPath: "/subpath1",
+									SubPath:   "subpath1",
+								},
+								{
+									Name:      "PVC-subpath",
+									MountPath: "/subpath2",
+									SubPath:   "subpath2",
 								},
 							},
 							ConfigMaps: []common.KubernetesConfigMap{
@@ -338,32 +399,9 @@ func testVolumesFeatureFlag(t *testing.T, featureFlagName string, featureFlagVal
 				Runner: &common.RunnerConfig{},
 			},
 			Expected: []api.Volume{
-				{Name: "repo", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{}}},
 				{Name: "docker", VolumeSource: api.VolumeSource{HostPath: &api.HostPathVolumeSource{Path: "/var/run/docker.sock"}}},
 				{Name: "host-path", VolumeSource: api.VolumeSource{HostPath: &api.HostPathVolumeSource{Path: "/path/one"}}},
 				{Name: "host-subpath", VolumeSource: api.VolumeSource{HostPath: &api.HostPathVolumeSource{Path: "/path/one"}}},
-				{Name: "PVC", VolumeSource: api.VolumeSource{PersistentVolumeClaim: &api.PersistentVolumeClaimVolumeSource{ClaimName: "PVC"}}},
-				{Name: "PVC-subpath", VolumeSource: api.VolumeSource{PersistentVolumeClaim: &api.PersistentVolumeClaimVolumeSource{ClaimName: "PVC-subpath"}}},
-				{Name: "emptyDir", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{Medium: "Memory"}}},
-				{Name: "emptyDir-subpath", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{Medium: "Memory"}}},
-				{
-					Name: "ConfigMap",
-					VolumeSource: api.VolumeSource{
-						ConfigMap: &api.ConfigMapVolumeSource{
-							LocalObjectReference: api.LocalObjectReference{Name: "ConfigMap"},
-							Items:                []api.KeyToPath{{Key: "key_1", Path: "/path/to/key_1"}},
-						},
-					},
-				},
-				{
-					Name: "ConfigMap-subpath",
-					VolumeSource: api.VolumeSource{
-						ConfigMap: &api.ConfigMapVolumeSource{
-							LocalObjectReference: api.LocalObjectReference{Name: "ConfigMap-subpath"},
-							Items:                []api.KeyToPath{{Key: "key_1", Path: "/path/to/key_1"}},
-						},
-					},
-				},
 				{
 					Name: "secret",
 					VolumeSource: api.VolumeSource{
@@ -382,6 +420,28 @@ func testVolumesFeatureFlag(t *testing.T, featureFlagName string, featureFlagVal
 						},
 					},
 				},
+				{Name: "PVC", VolumeSource: api.VolumeSource{PersistentVolumeClaim: &api.PersistentVolumeClaimVolumeSource{ClaimName: "PVC"}}},
+				{Name: "PVC-subpath", VolumeSource: api.VolumeSource{PersistentVolumeClaim: &api.PersistentVolumeClaimVolumeSource{ClaimName: "PVC-subpath"}}},
+				{
+					Name: "ConfigMap",
+					VolumeSource: api.VolumeSource{
+						ConfigMap: &api.ConfigMapVolumeSource{
+							LocalObjectReference: api.LocalObjectReference{Name: "ConfigMap"},
+							Items:                []api.KeyToPath{{Key: "key_1", Path: "/path/to/key_1"}},
+						},
+					},
+				},
+				{
+					Name: "ConfigMap-subpath",
+					VolumeSource: api.VolumeSource{
+						ConfigMap: &api.ConfigMapVolumeSource{
+							LocalObjectReference: api.LocalObjectReference{Name: "ConfigMap-subpath"},
+							Items:                []api.KeyToPath{{Key: "key_1", Path: "/path/to/key_1"}},
+						},
+					},
+				},
+				{Name: "emptyDir", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{Medium: "Memory"}}},
+				{Name: "emptyDir-subpath", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{Medium: "Memory"}}},
 				{
 					Name: "csi",
 					VolumeSource: api.VolumeSource{
@@ -393,6 +453,81 @@ func testVolumesFeatureFlag(t *testing.T, featureFlagName string, featureFlagVal
 						},
 					},
 				},
+				{Name: "repo", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{}}},
+				{
+					Name: "scripts", VolumeSource: api.VolumeSource{
+						ConfigMap: &api.ConfigMapVolumeSource{
+							LocalObjectReference: api.LocalObjectReference{
+								Name: fakeConfigMap().Name,
+							},
+							DefaultMode: &mode,
+							Optional:    &optional,
+						},
+					},
+				},
+				{Name: "logs", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{}}},
+			},
+		},
+		"default volume with build dir": {
+			GlobalConfig: &common.Config{},
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					BuildsDir: "/path/to/builds/dir",
+					Kubernetes: &common.KubernetesConfig{
+						Volumes: common.KubernetesVolumes{},
+					},
+				},
+			},
+			Build: &common.Build{
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: []api.Volume{
+				{Name: "repo", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{}}},
+				{
+					Name: "scripts", VolumeSource: api.VolumeSource{
+						ConfigMap: &api.ConfigMapVolumeSource{
+							LocalObjectReference: api.LocalObjectReference{
+								Name: fakeConfigMap().Name,
+							},
+							DefaultMode: &mode,
+							Optional:    &optional,
+						},
+					},
+				},
+				{Name: "logs", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{}}},
+			},
+		},
+		"user-provided volume with build dir": {
+			GlobalConfig: &common.Config{},
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					BuildsDir: "/path/to/builds/dir",
+					Kubernetes: &common.KubernetesConfig{
+						Volumes: common.KubernetesVolumes{
+							HostPaths: []common.KubernetesHostPath{
+								{Name: "user-provided", MountPath: "/path/to/builds/dir"},
+							},
+						},
+					},
+				},
+			},
+			Build: &common.Build{
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: []api.Volume{
+				{Name: "user-provided", VolumeSource: api.VolumeSource{HostPath: &api.HostPathVolumeSource{Path: "/path/to/builds/dir"}}},
+				{
+					Name: "scripts", VolumeSource: api.VolumeSource{
+						ConfigMap: &api.ConfigMapVolumeSource{
+							LocalObjectReference: api.LocalObjectReference{
+								Name: fakeConfigMap().Name,
+							},
+							DefaultMode: &mode,
+							Optional:    &optional,
+						},
+					},
+				},
+				{Name: "logs", VolumeSource: api.VolumeSource{EmptyDir: &api.EmptyDirVolumeSource{}}},
 			},
 		},
 	}
@@ -409,11 +544,7 @@ func testVolumesFeatureFlag(t *testing.T, featureFlagName string, featureFlagVal
 			}
 
 			buildtest.SetBuildFeatureFlag(e.Build, featureFlagName, featureFlagValue)
-
-			volumes := e.getVolumes()
-			for _, expected := range tt.Expected {
-				assert.Contains(t, volumes, expected, "Expected volume definition for %s was not found", expected.Name)
-			}
+			assert.Equal(t, tt.Expected, e.getVolumes())
 		})
 	}
 }
@@ -602,14 +733,15 @@ func TestCleanup(t *testing.T) {
 		Pod         *api.Pod
 		ConfigMap   *api.ConfigMap
 		Credentials *api.Secret
-		ClientFunc  func(*http.Request) (*http.Response, error)
+		ClientFunc  func(*testing.T, *http.Request) (*http.Response, error)
 		Services    []api.Service
+		Config      *common.KubernetesConfig
 		Error       bool
 	}{
 		{
 			Name: "Proper Cleanup",
 			Pod:  &api.Pod{ObjectMeta: objectMeta},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				switch p, m := req.URL.Path, req.Method; {
 				case m == http.MethodDelete && p == podsEndpointURI:
 					return fakeKubeDeleteResponse(http.StatusOK), nil
@@ -621,7 +753,7 @@ func TestCleanup(t *testing.T) {
 		{
 			Name: "Delete failure",
 			Pod:  &api.Pod{ObjectMeta: objectMeta},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				return nil, fmt.Errorf("delete failed")
 			},
 			Error: true,
@@ -629,7 +761,7 @@ func TestCleanup(t *testing.T) {
 		{
 			Name: "POD already deleted",
 			Pod:  &api.Pod{ObjectMeta: objectMeta},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				switch p, m := req.URL.Path, req.Method; {
 				case m == http.MethodDelete && p == podsEndpointURI:
 					return fakeKubeDeleteResponse(http.StatusNotFound), nil
@@ -643,7 +775,7 @@ func TestCleanup(t *testing.T) {
 			Name:        "POD creation failed, Secrets provided",
 			Pod:         nil, // a failed POD create request will cause a nil Pod
 			Credentials: &api.Secret{ObjectMeta: objectMeta},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				switch p, m := req.URL.Path, req.Method; {
 				case m == http.MethodDelete && p == secretsEndpointURI:
 					return fakeKubeDeleteResponse(http.StatusNotFound), nil
@@ -657,7 +789,7 @@ func TestCleanup(t *testing.T) {
 			Name:     "POD created, Services created",
 			Pod:      &api.Pod{ObjectMeta: objectMeta},
 			Services: []api.Service{{ObjectMeta: objectMeta}},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				switch p, m := req.URL.Path, req.Method; {
 				case m == http.MethodDelete && ((p == servicesEndpointURI) || (p == podsEndpointURI)):
 					return fakeKubeDeleteResponse(http.StatusOK), nil
@@ -670,23 +802,21 @@ func TestCleanup(t *testing.T) {
 			Name:     "POD created, Services creation failed",
 			Pod:      &api.Pod{ObjectMeta: objectMeta},
 			Services: []api.Service{{ObjectMeta: objectMeta}},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				switch p, m := req.URL.Path, req.Method; {
-				case m == http.MethodDelete && p == servicesEndpointURI:
-					return fakeKubeDeleteResponse(http.StatusNotFound), nil
 				case m == http.MethodDelete && p == podsEndpointURI:
 					return fakeKubeDeleteResponse(http.StatusOK), nil
 				default:
 					return nil, fmt.Errorf("unexpected request. method: %s, path: %s", m, p)
 				}
 			},
-			Error: true,
+			Error: false,
 		},
 		{
 			Name:     "POD creation failed, Services created",
 			Pod:      nil, // a failed POD create request will cause a nil Pod
 			Services: []api.Service{{ObjectMeta: objectMeta}},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				switch p, m := req.URL.Path, req.Method; {
 				case m == http.MethodDelete && p == servicesEndpointURI:
 					return fakeKubeDeleteResponse(http.StatusOK), nil
@@ -699,20 +829,18 @@ func TestCleanup(t *testing.T) {
 			Name:     "POD creation failed, Services cleanup failed",
 			Pod:      nil, // a failed POD create request will cause a nil Pod
 			Services: []api.Service{{ObjectMeta: objectMeta}},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				switch p, m := req.URL.Path, req.Method; {
-				case m == http.MethodDelete && p == servicesEndpointURI:
-					return fakeKubeDeleteResponse(http.StatusNotFound), nil
 				default:
 					return nil, fmt.Errorf("unexpected request. method: %s, path: %s", m, p)
 				}
 			},
-			Error: true,
+			Error: false,
 		},
 		{
 			Name:      "ConfigMap cleanup",
 			ConfigMap: &api.ConfigMap{ObjectMeta: objectMeta},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				switch p, m := req.URL.Path, req.Method; {
 				case m == http.MethodDelete && p == configMapsEndpointURI:
 					return fakeKubeDeleteResponse(http.StatusOK), nil
@@ -724,7 +852,7 @@ func TestCleanup(t *testing.T) {
 		{
 			Name:      "ConfigMap cleanup failed",
 			ConfigMap: &api.ConfigMap{ObjectMeta: objectMeta},
-			ClientFunc: func(req *http.Request) (*http.Response, error) {
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
 				switch p, m := req.URL.Path, req.Method; {
 				case m == http.MethodDelete && p == configMapsEndpointURI:
 					return fakeKubeDeleteResponse(http.StatusNotFound), nil
@@ -734,12 +862,73 @@ func TestCleanup(t *testing.T) {
 			},
 			Error: true,
 		},
+		{
+			Name: "Pod cleanup specifies GracePeriodSeconds with TerminationGracePeriodSeconds set",
+			Config: &common.KubernetesConfig{
+				TerminationGracePeriodSeconds: common.Int64Ptr(15),
+			},
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
+				switch p, m := req.URL.Path, req.Method; {
+				case m == http.MethodDelete && p == podsEndpointURI:
+					defer req.Body.Close()
+					b, err := ioutil.ReadAll(req.Body)
+					if err != nil {
+						return nil, err
+					}
+
+					var opts metav1.DeleteOptions
+					err = json.Unmarshal(b, &opts)
+					if err != nil {
+						return nil, err
+					}
+
+					assert.EqualValues(t, common.Int64Ptr(15), opts.GracePeriodSeconds)
+					return fakeKubeDeleteResponse(http.StatusOK), nil
+				default:
+					return nil, fmt.Errorf("unexpected request. method: %s, path: %s", m, p)
+				}
+			},
+			Pod: &api.Pod{ObjectMeta: objectMeta},
+		},
+		{
+			Name: "Pod cleanup specifies GracePeriodSeconds with CleanupGracePeriodSeconds set",
+			Config: &common.KubernetesConfig{
+				CleanupGracePeriodSeconds: common.Int64Ptr(10),
+			},
+			ClientFunc: func(t *testing.T, req *http.Request) (*http.Response, error) {
+				switch p, m := req.URL.Path, req.Method; {
+				case m == http.MethodDelete && p == podsEndpointURI:
+					defer req.Body.Close()
+					b, err := ioutil.ReadAll(req.Body)
+					if err != nil {
+						return nil, err
+					}
+
+					var opts metav1.DeleteOptions
+					err = json.Unmarshal(b, &opts)
+					if err != nil {
+						return nil, err
+					}
+
+					assert.EqualValues(t, common.Int64Ptr(10), opts.GracePeriodSeconds)
+					return fakeKubeDeleteResponse(http.StatusOK), nil
+				default:
+					return nil, fmt.Errorf("unexpected request. method: %s, path: %s", m, p)
+				}
+			},
+			Pod: &api.Pod{ObjectMeta: objectMeta},
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
 			ex := executor{
-				kubeClient:  testKubernetesClient(version, fake.CreateHTTPClient(test.ClientFunc)),
+				kubeClient: testKubernetesClient(
+					version,
+					fake.CreateHTTPClient(func(req *http.Request) (*http.Response, error) {
+						return test.ClientFunc(t, req)
+					}),
+				),
 				pod:         test.Pod,
 				credentials: test.Credentials,
 				services:    test.Services,
@@ -765,6 +954,15 @@ func TestCleanup(t *testing.T) {
 			ex.AbstractExecutor.Trace = buildTrace
 			ex.AbstractExecutor.BuildLogger = common.NewBuildLogger(buildTrace, logrus.WithFields(logrus.Fields{}))
 
+			if test.Config == nil {
+				test.Config = &common.KubernetesConfig{}
+			}
+			ex.AbstractExecutor.Config = common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: test.Config,
+				},
+			}
+
 			ex.Cleanup()
 
 			if test.Error && !errored {
@@ -783,9 +981,20 @@ func TestPrepare(t *testing.T) {
 		helperImageTag = common.REVISION
 	}
 
+	defaultOverwrites := &overwrites{
+		namespace:       "default",
+		serviceLimits:   api.ResourceList{},
+		buildLimits:     api.ResourceList{},
+		helperLimits:    api.ResourceList{},
+		serviceRequests: api.ResourceList{},
+		buildRequests:   api.ResourceList{},
+		helperRequests:  api.ResourceList{},
+	}
+
 	defaultHelperImage := helperimage.Info{
 		Architecture:            "x86_64",
-		Name:                    helperimage.DockerHubName,
+		OSType:                  helperimage.OSTypeLinux,
+		Name:                    helperimage.GitLabRegistryName,
 		Tag:                     fmt.Sprintf("x86_64-%s", helperImageTag),
 		IsSupportingLocalImport: true,
 		Cmd:                     []string{"gitlab-runner-build"},
@@ -798,7 +1007,7 @@ func TestPrepare(t *testing.T) {
 		Architecture:   "x86_64",
 		OSType:         os,
 		Shell:          shells.SNPwsh,
-		GitLabRegistry: false,
+		GitLabRegistry: true,
 	})
 	require.NoError(t, err)
 
@@ -810,8 +1019,9 @@ func TestPrepare(t *testing.T) {
 		RunnerConfig *common.RunnerConfig
 		Build        *common.Build
 
-		Expected           *executor
-		ExpectedPullPolicy api.PullPolicy
+		Expected                *executor
+		ExpectedPullPolicy      api.PullPolicy
+		ExpectedSharedBuildsDir bool
 	}{
 		{
 			Name:         "all with limits",
@@ -829,7 +1039,7 @@ func TestPrepare(t *testing.T) {
 						HelperCPULimit:               "50m",
 						HelperMemoryLimit:            "100Mi",
 						HelperEphemeralStorageLimit:  "200Mi",
-						Privileged:                   true,
+						Privileged:                   func(b bool) *bool { return &b }(true),
 						PullPolicy:                   common.StringOrArray{"if-not-present"},
 					},
 				},
@@ -895,7 +1105,7 @@ func TestPrepare(t *testing.T) {
 						HelperCPURequest:               "0.5m",
 						HelperMemoryRequest:            "42Mi",
 						HelperEphemeralStorageRequest:  "99Mi",
-						Privileged:                     false,
+						Privileged:                     func(b bool) *bool { return &b }(false),
 					},
 				},
 			},
@@ -960,7 +1170,7 @@ func TestPrepare(t *testing.T) {
 						HelperCPURequest:               "0.5m",
 						HelperMemoryRequest:            "42Mi",
 						HelperEphemeralStorageRequest:  "52Mi",
-						Privileged:                     false,
+						Privileged:                     func(b bool) *bool { return &b }(false),
 					},
 				},
 			},
@@ -1008,7 +1218,7 @@ func TestPrepare(t *testing.T) {
 						HelperCPURequest:               "0.5m",
 						HelperMemoryRequest:            "42Mi",
 						HelperEphemeralStorageRequest:  "32Mi",
-						Privileged:                     false,
+						Privileged:                     func(b bool) *bool { return &b }(false),
 					},
 				},
 			},
@@ -1114,16 +1324,8 @@ func TestPrepare(t *testing.T) {
 						Name: "test-image",
 					},
 				},
-				configurationOverwrites: &overwrites{
-					namespace:       "default",
-					serviceLimits:   api.ResourceList{},
-					buildLimits:     api.ResourceList{},
-					helperLimits:    api.ResourceList{},
-					serviceRequests: api.ResourceList{},
-					buildRequests:   api.ResourceList{},
-					helperRequests:  api.ResourceList{},
-				},
-				helperImageInfo: defaultHelperImage,
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo:         defaultHelperImage,
 			},
 		},
 		{
@@ -1152,16 +1354,8 @@ func TestPrepare(t *testing.T) {
 						Name: "test-image",
 					},
 				},
-				configurationOverwrites: &overwrites{
-					namespace:       "default",
-					serviceLimits:   api.ResourceList{},
-					buildLimits:     api.ResourceList{},
-					helperLimits:    api.ResourceList{},
-					serviceRequests: api.ResourceList{},
-					buildRequests:   api.ResourceList{},
-					helperRequests:  api.ResourceList{},
-				},
-				helperImageInfo: pwshHelperImage,
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo:         pwshHelperImage,
 			},
 		},
 		{
@@ -1207,16 +1401,8 @@ func TestPrepare(t *testing.T) {
 						},
 					},
 				},
-				configurationOverwrites: &overwrites{
-					namespace:       "default",
-					serviceLimits:   api.ResourceList{},
-					buildLimits:     api.ResourceList{},
-					helperLimits:    api.ResourceList{},
-					serviceRequests: api.ResourceList{},
-					buildRequests:   api.ResourceList{},
-					helperRequests:  api.ResourceList{},
-				},
-				helperImageInfo: defaultHelperImage,
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo:         defaultHelperImage,
 			},
 		},
 		{
@@ -1307,20 +1493,12 @@ func TestPrepare(t *testing.T) {
 						},
 					},
 				},
-				configurationOverwrites: &overwrites{
-					namespace:       "default",
-					serviceLimits:   api.ResourceList{},
-					buildLimits:     api.ResourceList{},
-					helperLimits:    api.ResourceList{},
-					serviceRequests: api.ResourceList{},
-					buildRequests:   api.ResourceList{},
-					helperRequests:  api.ResourceList{},
-				},
-				helperImageInfo: defaultHelperImage,
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo:         defaultHelperImage,
 			},
 		},
 		{
-			Name:         "Docker Hub helper image",
+			Name:         "Default helper image",
 			GlobalConfig: &common.Config{},
 			RunnerConfig: &common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
@@ -1343,20 +1521,12 @@ func TestPrepare(t *testing.T) {
 						Name: "test-image",
 					},
 				},
-				helperImageInfo: defaultHelperImage,
-				configurationOverwrites: &overwrites{
-					namespace:       "default",
-					serviceLimits:   api.ResourceList{},
-					buildLimits:     api.ResourceList{},
-					helperLimits:    api.ResourceList{},
-					serviceRequests: api.ResourceList{},
-					buildRequests:   api.ResourceList{},
-					helperRequests:  api.ResourceList{},
-				},
+				helperImageInfo:         defaultHelperImage,
+				configurationOverwrites: defaultOverwrites,
 			},
 		},
 		{
-			Name:         "GitLab registry helper image",
+			Name:         "DockerHub helper image",
 			GlobalConfig: &common.Config{},
 			RunnerConfig: &common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
@@ -1373,7 +1543,7 @@ func TestPrepare(t *testing.T) {
 					Variables: common.JobVariables{
 						common.JobVariable{
 							Key:      featureflags.GitLabRegistryHelperImage,
-							Value:    "true",
+							Value:    "false",
 							Public:   false,
 							Internal: false,
 							File:     false,
@@ -1391,11 +1561,87 @@ func TestPrepare(t *testing.T) {
 					},
 				},
 				helperImageInfo: helperimage.Info{
+					OSType:                  os,
 					Architecture:            "x86_64",
-					Name:                    helperimage.GitLabRegistryName,
+					Name:                    helperimage.DockerHubName,
 					Tag:                     fmt.Sprintf("x86_64-%s", helperImageTag),
 					IsSupportingLocalImport: true,
 					Cmd:                     []string{"gitlab-runner-build"},
+				},
+				configurationOverwrites: defaultOverwrites,
+			},
+		},
+		{
+			Name:         "helper image with ubuntu flavour default registry",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Host:              "test-server",
+						HelperImageFlavor: "ubuntu",
+					},
+				},
+			},
+			Build: &common.Build{
+				JobResponse: common.JobResponse{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo: helperimage.Info{
+					OSType:                  os,
+					Architecture:            "x86_64",
+					Name:                    helperimage.GitLabRegistryName,
+					Tag:                     fmt.Sprintf("ubuntu-x86_64-%s", helperImageTag),
+					IsSupportingLocalImport: true,
+					Cmd:                     []string{"gitlab-runner-build"},
+				},
+			},
+		},
+		{
+			Name:         "helper image with ubuntu flavour DockerHub registry",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Host:              "test-server",
+						HelperImageFlavor: "ubuntu",
+					},
+				},
+			},
+			Build: &common.Build{
+				JobResponse: common.JobResponse{
+					Image: common.Image{
+						Name: "test-image",
+					},
+					Variables: common.JobVariables{
+						common.JobVariable{
+							Key:      featureflags.GitLabRegistryHelperImage,
+							Value:    "false",
+							Public:   false,
+							Internal: false,
+							File:     false,
+							Masked:   false,
+							Raw:      false,
+						},
+					},
+				},
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
 				},
 				configurationOverwrites: &overwrites{
 					namespace:       "default",
@@ -1406,7 +1652,321 @@ func TestPrepare(t *testing.T) {
 					buildRequests:   api.ResourceList{},
 					helperRequests:  api.ResourceList{},
 				},
+				helperImageInfo: helperimage.Info{
+					OSType:                  os,
+					Architecture:            "x86_64",
+					Name:                    helperimage.DockerHubName,
+					Tag:                     fmt.Sprintf("ubuntu-x86_64-%s", helperImageTag),
+					IsSupportingLocalImport: true,
+					Cmd:                     []string{"gitlab-runner-build"},
+				},
 			},
+		},
+		{
+			Name:         "helper image with ubuntu flavour DockerHub registry",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Host:              "test-server",
+						HelperImageFlavor: "alpine3.13",
+					},
+				},
+			},
+			Build: &common.Build{
+				JobResponse: common.JobResponse{
+					Image: common.Image{
+						Name: "test-image",
+					},
+					Variables: common.JobVariables{
+						common.JobVariable{
+							Key:      featureflags.GitLabRegistryHelperImage,
+							Value:    "false",
+							Public:   false,
+							Internal: false,
+							File:     false,
+							Masked:   false,
+							Raw:      false,
+						},
+					},
+				},
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				configurationOverwrites: &overwrites{
+					namespace:       "default",
+					serviceLimits:   api.ResourceList{},
+					buildLimits:     api.ResourceList{},
+					helperLimits:    api.ResourceList{},
+					serviceRequests: api.ResourceList{},
+					buildRequests:   api.ResourceList{},
+					helperRequests:  api.ResourceList{},
+				},
+				helperImageInfo: helperimage.Info{
+					OSType:                  os,
+					Architecture:            "x86_64",
+					Name:                    helperimage.DockerHubName,
+					Tag:                     fmt.Sprintf("alpine3.13-x86_64-%s", helperImageTag),
+					IsSupportingLocalImport: true,
+					Cmd:                     []string{"gitlab-runner-build"},
+				},
+			},
+		},
+		{
+			Name:         "helper image from node selector (linux, arm)",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Host: "test-server",
+						NodeSelector: map[string]string{
+							api.LabelArchStable: "arm64",
+							api.LabelOSStable:   "linux",
+						},
+					},
+				},
+			},
+			Build: &common.Build{
+				JobResponse: common.JobResponse{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo: helperimage.Info{
+					OSType:                  "linux",
+					Architecture:            "arm64",
+					Name:                    helperimage.GitLabRegistryName,
+					Tag:                     fmt.Sprintf("arm64-%s", helperImageTag),
+					IsSupportingLocalImport: true,
+					Cmd:                     []string{"gitlab-runner-build"},
+				},
+			},
+		},
+		{
+			Name:         "helper image from node selector (windows, amd64)",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Host: "test-server",
+						NodeSelector: map[string]string{
+							api.LabelArchStable:           "amd64",
+							api.LabelOSStable:             "windows",
+							nodeSelectorWindowsBuildLabel: "10.0.19041",
+						},
+					},
+				},
+			},
+			Build: &common.Build{
+				JobResponse: common.JobResponse{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo: helperimage.Info{
+					OSType:                  "windows",
+					Architecture:            "x86_64",
+					Name:                    helperimage.GitLabRegistryName,
+					Tag:                     fmt.Sprintf("x86_64-%s-servercore2004", helperImageTag),
+					IsSupportingLocalImport: false,
+					Cmd: []string{
+						"powershell",
+						"-NoProfile",
+						"-NoLogo",
+						"-InputFormat",
+						"text",
+						"-OutputFormat",
+						"text",
+						"-NonInteractive",
+						"-ExecutionPolicy",
+						"Bypass",
+						"-Command",
+						"-",
+					},
+				},
+			},
+		},
+		{
+			Name:         "helper image from node selector (unknown)",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Host: "test-server",
+						NodeSelector: map[string]string{
+							api.LabelArchStable: "riscv64",
+							api.LabelOSStable:   "freebsd",
+						},
+					},
+				},
+			},
+			Build: &common.Build{
+				JobResponse: common.JobResponse{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo:         helperimage.Info{},
+			},
+			Error: `prepare helper image: unsupported OSType "freebsd"`,
+		},
+		{
+			Name:         "builds dir default",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Image: "test-image",
+						Host:  "test-server",
+					},
+				},
+			},
+			Build: &common.Build{
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo:         defaultHelperImage,
+			},
+			ExpectedSharedBuildsDir: false,
+		},
+		{
+			Name:         "builds dir user specified empty_dir",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Image: "test-image",
+						Host:  "test-server",
+						Volumes: common.KubernetesVolumes{
+							EmptyDirs: []common.KubernetesEmptyDir{
+								{
+									Name:      "repo",
+									MountPath: "/builds",
+									Medium:    "Memory",
+								},
+							},
+						},
+					},
+				},
+			},
+			Build: &common.Build{
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo:         defaultHelperImage,
+			},
+			ExpectedSharedBuildsDir: false,
+		},
+		{
+			Name:         "builds dir user specified host_path",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Image: "test-image",
+						Host:  "test-server",
+						Volumes: common.KubernetesVolumes{
+							HostPaths: []common.KubernetesHostPath{
+								{
+									Name:      "repo-host",
+									MountPath: "/builds",
+									HostPath:  "/mnt/builds",
+								},
+							},
+						},
+					},
+				},
+			},
+			Build: &common.Build{
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo:         defaultHelperImage,
+			},
+			ExpectedSharedBuildsDir: true,
+		},
+		{
+			Name:         "builds dir user specified pvc",
+			GlobalConfig: &common.Config{},
+			RunnerConfig: &common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Image: "test-image",
+						Host:  "test-server",
+						Volumes: common.KubernetesVolumes{
+							PVCs: []common.KubernetesPVC{
+								{
+									Name:      "repo-pvc",
+									MountPath: "/builds",
+								},
+							},
+						},
+					},
+				},
+			},
+			Build: &common.Build{
+				Runner: &common.RunnerConfig{},
+			},
+			Expected: &executor{
+				options: &kubernetesOptions{
+					Image: common.Image{
+						Name: "test-image",
+					},
+				},
+				configurationOverwrites: defaultOverwrites,
+				helperImageInfo:         defaultHelperImage,
+			},
+			ExpectedSharedBuildsDir: true,
 		},
 	}
 
@@ -1418,6 +1978,7 @@ func TestPrepare(t *testing.T) {
 				},
 			}
 
+			// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
 			prepareOptions := common.ExecutorPrepareOptions{
 				Config:  test.RunnerConfig,
 				Build:   test.Build,
@@ -1443,13 +2004,44 @@ func TestPrepare(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, test.ExpectedPullPolicy, pullPolicy)
 
+			sharedBuildsDir := e.isSharedBuildsDirRequired()
+			assert.Equal(t, test.ExpectedSharedBuildsDir, sharedBuildsDir)
+
 			e.kubeClient = nil
 			e.kubeConfig = nil
 			e.featureChecker = nil
 			e.pullManager = nil
+			e.requireDefaultBuildsDirVolume = nil
+			e.requireSharedBuildsDir = nil
 
 			assert.NoError(t, err)
 			assert.Equal(t, test.Expected, e)
+		})
+	}
+}
+
+func TestSetupDefaultExecutorOptions(t *testing.T) {
+	tests := map[string]func(*testing.T, *executor){
+		"windows": func(t *testing.T, e *executor) {
+			assert.Equal(t, e.DefaultBuildsDir, `C:\builds`)
+			assert.Equal(t, e.DefaultCacheDir, `C:\cache`)
+		},
+		"linux": func(t *testing.T, e *executor) {
+			assert.Equal(t, e.DefaultBuildsDir, `/builds`)
+			assert.Equal(t, e.DefaultCacheDir, `/cache`)
+		},
+	}
+
+	for os, tc := range tests {
+		t.Run(os, func(t *testing.T) {
+			e := &executor{
+				AbstractExecutor: executors.AbstractExecutor{
+					ExecutorOptions: executorOptions,
+				},
+			}
+
+			e.setupDefaultExecutorOptions(os)
+			tc(t, e)
 		})
 	}
 }
@@ -1595,8 +2187,10 @@ func TestSetupCredentials(t *testing.T) {
 type setupBuildPodTestDef struct {
 	RunnerConfig             common.RunnerConfig
 	Variables                []common.JobVariable
+	Credentials              []common.Credentials
 	Options                  *kubernetesOptions
 	InitContainers           []api.Container
+	SetHTTPPutResponse       func() (*http.Response, error)
 	PrepareFn                func(*testing.T, setupBuildPodTestDef, *executor)
 	VerifyFn                 func(*testing.T, setupBuildPodTestDef, *api.Pod)
 	VerifyExecutorFn         func(*testing.T, setupBuildPodTestDef, *executor)
@@ -1611,29 +2205,59 @@ type setupBuildPodFakeRoundTripper struct {
 
 func (rt *setupBuildPodFakeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	rt.executed = true
-	podBytes, err := ioutil.ReadAll(req.Body)
+	dataBytes, err := ioutil.ReadAll(req.Body)
 	if !assert.NoError(rt.t, err, "failed to read request body") {
 		return nil, err
-	}
-
-	p := new(api.Pod)
-	err = json.Unmarshal(podBytes, p)
-	if !assert.NoError(rt.t, err, "failed to read request body") {
-		return nil, err
-	}
-
-	if rt.test.VerifyFn != nil {
-		rt.test.VerifyFn(rt.t, rt.test, p)
 	}
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body: FakeReadCloser{
-			Reader: bytes.NewBuffer(podBytes),
+			Reader: bytes.NewBuffer(dataBytes),
 		},
 	}
 	resp.Header = make(http.Header)
 	resp.Header.Add("Content-Type", "application/json")
+
+	if strings.Contains(req.URL.Path, "pods") {
+		p := new(api.Pod)
+		err = json.Unmarshal(dataBytes, p)
+		if !assert.NoError(rt.t, err, "failed to read request body") {
+			return nil, err
+		}
+
+		if rt.test.VerifyFn != nil {
+			rt.test.VerifyFn(rt.t, rt.test, p)
+		}
+
+		return resp, nil
+	}
+
+	if req.Method == http.MethodPost && strings.Contains(req.URL.Path, "secrets") {
+		s := new(api.Secret)
+		err = json.Unmarshal(dataBytes, s)
+		if !assert.NoError(rt.t, err, "failed to read request body") {
+			return nil, err
+		}
+		s.SetName("secret-name")
+		dataBytes, err = json.Marshal(s)
+		if !assert.NoError(rt.t, err, "failed to marshal secret named") {
+			return nil, err
+		}
+		resp = &http.Response{
+			StatusCode: http.StatusOK,
+			Body: FakeReadCloser{
+				Reader: bytes.NewBuffer(dataBytes),
+			},
+		}
+		resp.Header = make(http.Header)
+		resp.Header.Add("Content-Type", "application/json")
+		return resp, nil
+	}
+
+	if req.Method == http.MethodPut && rt.test.SetHTTPPutResponse != nil {
+		return rt.test.SetHTTPPutResponse()
+	}
 
 	return resp, nil
 }
@@ -1648,7 +2272,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						NodeSelector: map[string]string{
 							"a-selector":       "first",
 							"another-selector": "second",
@@ -1684,7 +2307,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						ImagePullSecrets: []string{
 							"docker-registry-credentials",
 						},
@@ -1697,13 +2319,6 @@ func TestSetupBuildPod(t *testing.T) {
 			},
 		},
 		"uses default security context flags for containers": {
-			RunnerConfig: common.RunnerConfig{
-				RunnerSettings: common.RunnerSettings{
-					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-					},
-				},
-			},
 			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				for _, c := range pod.Spec.Containers {
 					assert.Empty(
@@ -1723,8 +2338,7 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:                "default",
-						Privileged:               false,
+						Privileged:               func(b bool) *bool { return &b }(false),
 						AllowPrivilegeEscalation: func(b bool) *bool { return &b }(false),
 					},
 				},
@@ -1742,8 +2356,7 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:                "default",
-						Privileged:               true,
+						Privileged:               func(b bool) *bool { return &b }(true),
 						AllowPrivilegeEscalation: func(b bool) *bool { return &b }(true),
 					},
 				},
@@ -1758,13 +2371,6 @@ func TestSetupBuildPod(t *testing.T) {
 			},
 		},
 		"configures helper container": {
-			RunnerConfig: common.RunnerConfig{
-				RunnerSettings: common.RunnerSettings{
-					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-					},
-				},
-			},
 			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				hasHelper := false
 				for _, c := range pod.Spec.Containers {
@@ -1779,7 +2385,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image",
 					},
 				},
@@ -1796,7 +2401,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						PodLabels: map[string]string{
 							"test":    "label",
 							"another": "label",
@@ -1821,7 +2425,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						PodAnnotations: map[string]string{
 							"test":    "annotation",
 							"another": "annotation",
@@ -1845,7 +2448,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image:${CI_RUNNER_REVISION}",
 					},
 				},
@@ -1862,7 +2464,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						NodeTolerations: map[string]string{
 							"node-role.kubernetes.io/master": "NoSchedule",
 							"custom.toleration=value":        "NoSchedule",
@@ -1905,7 +2506,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image",
 					},
 				},
@@ -1925,10 +2525,27 @@ func TestSetupBuildPod(t *testing.T) {
 						Name:    "test-service-2",
 						Command: []string{"application", "--debug"},
 					},
+					{
+						Name:    "test-service-3",
+						Command: []string{"application", "--debug"},
+						Variables: []common.JobVariable{
+							{
+								Key:   "SERVICE_VAR",
+								Value: "SERVICE_VAR_VALUE",
+							},
+							{
+								Key:   "SERVICE_VAR_REF_BUILD_VAR",
+								Value: "$BUILD_VAR",
+							},
+						},
+					},
 				},
 			},
+			Variables: []common.JobVariable{
+				{Key: "BUILD_VAR", Value: "BUILD_VAR_VALUE", Public: true},
+			},
 			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
-				require.Len(t, pod.Spec.Containers, 4)
+				require.Len(t, pod.Spec.Containers, 5)
 
 				assert.Equal(t, "build", pod.Spec.Containers[0].Name)
 				assert.Equal(t, "test-image", pod.Spec.Containers[0].Image)
@@ -1944,18 +2561,38 @@ func TestSetupBuildPod(t *testing.T) {
 				assert.Equal(t, "test-service", pod.Spec.Containers[2].Image)
 				assert.Equal(t, []string{"/init", "run"}, pod.Spec.Containers[2].Command)
 				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[2].Args)
+				assert.NotContains(
+					t, pod.Spec.Containers[2].Env,
+					api.EnvVar{Name: "SERVICE_VAR", Value: "SERVICE_VAR_VALUE"},
+					"Service env should NOT contain SERVICE_VAR with value VARIABLE_VALUE",
+				)
 
 				assert.Equal(t, "svc-1", pod.Spec.Containers[3].Name)
 				assert.Equal(t, "test-service-2", pod.Spec.Containers[3].Image)
 				assert.Empty(t, pod.Spec.Containers[3].Command, "Service container command should be empty")
 				assert.Equal(t, []string{"application", "--debug"}, pod.Spec.Containers[3].Args)
+				assert.NotContains(
+					t, pod.Spec.Containers[3].Env,
+					api.EnvVar{Name: "SERVICE_VAR", Value: "SERVICE_VAR_VALUE"},
+					"Service env should NOT contain VARIABLE_NAME with value VARIABLE_VALUE",
+				)
+
+				assert.Equal(t, "svc-2", pod.Spec.Containers[4].Name)
+				assert.Equal(t, "test-service-3", pod.Spec.Containers[4].Image)
+				assert.Contains(
+					t, pod.Spec.Containers[4].Env,
+					api.EnvVar{Name: "SERVICE_VAR", Value: "SERVICE_VAR_VALUE"},
+				)
+				assert.Contains(
+					t, pod.Spec.Containers[4].Env,
+					api.EnvVar{Name: "SERVICE_VAR_REF_BUILD_VAR", Value: "BUILD_VAR_VALUE"},
+				)
 			},
 		},
 		"creates services in kubernetes if ports are set": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image",
 					},
 				},
@@ -1995,11 +2632,13 @@ func TestSetupBuildPod(t *testing.T) {
 				},
 			},
 			VerifyExecutorFn: func(t *testing.T, test setupBuildPodTestDef, e *executor) {
+				ownerReferences := e.buildPodReferences()
 				expectedServices := []api.Service{
 					{
 						ObjectMeta: metav1.ObjectMeta{
-							GenerateName: "build",
-							Namespace:    "default",
+							GenerateName:    "build",
+							Namespace:       "default",
+							OwnerReferences: ownerReferences,
 						},
 						Spec: api.ServiceSpec{
 							Ports: []api.ServicePort{
@@ -2015,8 +2654,9 @@ func TestSetupBuildPod(t *testing.T) {
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
-							GenerateName: "proxy-svc-0",
-							Namespace:    "default",
+							GenerateName:    "proxy-svc-0",
+							Namespace:       "default",
+							OwnerReferences: ownerReferences,
 						},
 						Spec: api.ServiceSpec{
 							Ports: []api.ServicePort{
@@ -2037,8 +2677,9 @@ func TestSetupBuildPod(t *testing.T) {
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{
-							GenerateName: "proxy-svc-1",
-							Namespace:    "default",
+							GenerateName:    "proxy-svc-1",
+							Namespace:       "default",
+							OwnerReferences: ownerReferences,
 						},
 						Spec: api.ServiceSpec{
 							Ports: []api.ServicePort{
@@ -2061,7 +2702,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image",
 					},
 				},
@@ -2084,7 +2724,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image",
 					},
 				},
@@ -2119,7 +2758,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image",
 					},
 				},
@@ -2148,7 +2786,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image",
 					},
 				},
@@ -2207,7 +2844,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image",
 					},
 				},
@@ -2244,7 +2880,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace:   "default",
 						HelperImage: "custom/helper-image",
 					},
 				},
@@ -2303,11 +2938,6 @@ func TestSetupBuildPod(t *testing.T) {
 				RunnerCredentials: common.RunnerCredentials{
 					Token: "ToK3_?OF",
 				},
-				RunnerSettings: common.RunnerSettings{
-					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-					},
-				},
 			},
 			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				dns_test.AssertRFC1123Compatibility(t, pod.GetGenerateName())
@@ -2317,7 +2947,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						PodSecurityContext: common.KubernetesPodSecurityContext{
 							FSGroup:            func() *int64 { i := int64(200); return &i }(),
 							RunAsGroup:         func() *int64 { i := int64(200); return &i }(),
@@ -2337,13 +2966,6 @@ func TestSetupBuildPod(t *testing.T) {
 			},
 		},
 		"uses default security context when unspecified": {
-			RunnerConfig: common.RunnerConfig{
-				RunnerSettings: common.RunnerSettings{
-					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-					},
-				},
-			},
 			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
 				assert.Empty(t, pod.Spec.SecurityContext, "Security context should be empty")
 			},
@@ -2352,7 +2974,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						Affinity: common.KubernetesAffinity{
 							NodeAffinity: &common.KubernetesNodeAffinity{
 								PreferredDuringSchedulingIgnoredDuringExecution: []common.PreferredSchedulingTerm{
@@ -2450,11 +3071,142 @@ func TestSetupBuildPod(t *testing.T) {
 				assert.Equal(t, []string{"e2e-az1", "e2e-az2"}, requiredNodeAffinity.NodeSelectorTerms[0].MatchExpressions[0].Values)
 			},
 		},
+		"supports pod affinities": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Affinity: common.KubernetesAffinity{
+							PodAffinity: &common.KubernetesPodAffinity{
+								RequiredDuringSchedulingIgnoredDuringExecution: []common.PodAffinityTerm{
+									{
+										LabelSelector: &common.LabelSelector{
+											MatchLabels: map[string]string{"key": "value"},
+											MatchExpressions: []common.NodeSelectorRequirement{
+												{
+													Key:      "cores",
+													Operator: "In",
+													Values:   []string{"many", "high_count"},
+												},
+											},
+										},
+										Namespaces:  []string{"namespace_1", "namespace_2"},
+										TopologyKey: "topo_key",
+										NamespaceSelector: &common.LabelSelector{
+											MatchLabels: map[string]string{"key": "value"},
+											MatchExpressions: []common.NodeSelectorRequirement{
+												{
+													Key:      "cores",
+													Operator: "In",
+													Values:   []string{"many", "high_count"},
+												},
+											},
+										},
+									},
+								},
+								PreferredDuringSchedulingIgnoredDuringExecution: nil,
+							},
+						},
+					},
+				},
+			},
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
+				require.NotNil(t, pod.Spec.Affinity)
+				require.NotNil(t, pod.Spec.Affinity.PodAffinity)
+
+				podAffinity := pod.Spec.Affinity.PodAffinity
+				require.Len(t, podAffinity.RequiredDuringSchedulingIgnoredDuringExecution, 1)
+				preferredNodeAffinity := podAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
+
+				assert.Equal(t, []string{"namespace_1", "namespace_2"}, preferredNodeAffinity.Namespaces)
+				assert.Equal(t, "topo_key", preferredNodeAffinity.TopologyKey)
+
+				require.NotNil(t, preferredNodeAffinity.LabelSelector)
+				assert.Equal(t, map[string]string{"key": "value"}, preferredNodeAffinity.LabelSelector.MatchLabels)
+				require.Len(t, preferredNodeAffinity.LabelSelector.MatchExpressions, 1)
+				preferredMatchExp := preferredNodeAffinity.LabelSelector.MatchExpressions
+				assert.Equal(t, "cores", preferredMatchExp[0].Key)
+				assert.Equal(t, metav1.LabelSelectorOperator("In"), preferredMatchExp[0].Operator)
+				assert.Equal(t, []string{"many", "high_count"}, preferredMatchExp[0].Values)
+
+				require.NotNil(t, preferredNodeAffinity.NamespaceSelector)
+				assert.Equal(t, map[string]string{"key": "value"}, preferredNodeAffinity.NamespaceSelector.MatchLabels)
+				require.Len(t, preferredNodeAffinity.NamespaceSelector.MatchExpressions, 1)
+				preferredMatchExp = preferredNodeAffinity.NamespaceSelector.MatchExpressions
+				assert.Equal(t, "cores", preferredMatchExp[0].Key)
+				assert.Equal(t, metav1.LabelSelectorOperator("In"), preferredMatchExp[0].Operator)
+				assert.Equal(t, []string{"many", "high_count"}, preferredMatchExp[0].Values)
+			},
+		},
+		"supports pod anti-affinities": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Affinity: common.KubernetesAffinity{
+							PodAntiAffinity: &common.KubernetesPodAntiAffinity{
+								RequiredDuringSchedulingIgnoredDuringExecution: []common.PodAffinityTerm{
+									{
+										LabelSelector: &common.LabelSelector{
+											MatchLabels: map[string]string{"key": "value"},
+											MatchExpressions: []common.NodeSelectorRequirement{
+												{
+													Key:      "cores",
+													Operator: "In",
+													Values:   []string{"many", "high_count"},
+												},
+											},
+										},
+										Namespaces:  []string{"namespace_1", "namespace_2"},
+										TopologyKey: "topo_key",
+										NamespaceSelector: &common.LabelSelector{
+											MatchLabels: map[string]string{"key": "value"},
+											MatchExpressions: []common.NodeSelectorRequirement{
+												{
+													Key:      "cores",
+													Operator: "In",
+													Values:   []string{"many", "high_count"},
+												},
+											},
+										},
+									},
+								},
+								PreferredDuringSchedulingIgnoredDuringExecution: nil,
+							},
+						},
+					},
+				},
+			},
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
+				require.NotNil(t, pod.Spec.Affinity)
+				require.NotNil(t, pod.Spec.Affinity.PodAntiAffinity)
+
+				podAntiAffinity := pod.Spec.Affinity.PodAntiAffinity
+				require.Len(t, podAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution, 1)
+				preferredNodeAffinity := podAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0]
+
+				assert.Equal(t, []string{"namespace_1", "namespace_2"}, preferredNodeAffinity.Namespaces)
+				assert.Equal(t, "topo_key", preferredNodeAffinity.TopologyKey)
+
+				require.NotNil(t, preferredNodeAffinity.LabelSelector)
+				assert.Equal(t, map[string]string{"key": "value"}, preferredNodeAffinity.LabelSelector.MatchLabels)
+				require.Len(t, preferredNodeAffinity.LabelSelector.MatchExpressions, 1)
+				preferredMatchExp := preferredNodeAffinity.LabelSelector.MatchExpressions
+				assert.Equal(t, "cores", preferredMatchExp[0].Key)
+				assert.Equal(t, metav1.LabelSelectorOperator("In"), preferredMatchExp[0].Operator)
+				assert.Equal(t, []string{"many", "high_count"}, preferredMatchExp[0].Values)
+
+				require.NotNil(t, preferredNodeAffinity.NamespaceSelector)
+				assert.Equal(t, map[string]string{"key": "value"}, preferredNodeAffinity.NamespaceSelector.MatchLabels)
+				require.Len(t, preferredNodeAffinity.NamespaceSelector.MatchExpressions, 1)
+				preferredMatchExp = preferredNodeAffinity.NamespaceSelector.MatchExpressions
+				assert.Equal(t, "cores", preferredMatchExp[0].Key)
+				assert.Equal(t, metav1.LabelSelectorOperator("In"), preferredMatchExp[0].Operator)
+				assert.Equal(t, []string{"many", "high_count"}, preferredMatchExp[0].Values)
+			},
+		},
 		"supports services and setting extra hosts using HostAliases": {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						HostAliases: []common.KubernetesHostAliases{
 							{
 								IP:        "127.0.0.1",
@@ -2511,13 +3263,6 @@ func TestSetupBuildPod(t *testing.T) {
 			},
 		},
 		"ignores non RFC1123 aliases": {
-			RunnerConfig: common.RunnerConfig{
-				RunnerSettings: common.RunnerSettings{
-					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-					},
-				},
-			},
 			Options: &kubernetesOptions{
 				Services: common.Services{
 					{
@@ -2543,7 +3288,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						HostAliases: []common.KubernetesHostAliases{
 							{
 								IP:        "127.0.0.1",
@@ -2576,13 +3320,6 @@ func TestSetupBuildPod(t *testing.T) {
 			},
 		},
 		"check host aliases with non kubernetes version error": {
-			RunnerConfig: common.RunnerConfig{
-				RunnerSettings: common.RunnerSettings{
-					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-					},
-				},
-			},
 			Options: &kubernetesOptions{
 				Services: common.Services{
 					{
@@ -2601,13 +3338,6 @@ func TestSetupBuildPod(t *testing.T) {
 			},
 		},
 		"check host aliases with kubernetes version error": {
-			RunnerConfig: common.RunnerConfig{
-				RunnerSettings: common.RunnerSettings{
-					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-					},
-				},
-			},
 			Options: &kubernetesOptions{
 				Services: common.Services{
 					{
@@ -2626,26 +3356,12 @@ func TestSetupBuildPod(t *testing.T) {
 			},
 		},
 		"no init container defined": {
-			RunnerConfig: common.RunnerConfig{
-				RunnerSettings: common.RunnerSettings{
-					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-					},
-				},
-			},
 			InitContainers: []api.Container{},
 			VerifyFn: func(t *testing.T, def setupBuildPodTestDef, pod *api.Pod) {
 				assert.Nil(t, pod.Spec.InitContainers)
 			},
 		},
 		"init container defined": {
-			RunnerConfig: common.RunnerConfig{
-				RunnerSettings: common.RunnerSettings{
-					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-					},
-				},
-			},
 			InitContainers: []api.Container{
 				{
 					Name:  "a-init-container",
@@ -2660,9 +3376,8 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-						CapAdd:    []string{"CAP_1", "CAP_2"},
-						CapDrop:   []string{"CAP_3", "CAP_4"},
+						CapAdd:  []string{"CAP_1", "CAP_2"},
+						CapDrop: []string{"CAP_3", "CAP_4"},
 					},
 				},
 			},
@@ -2683,8 +3398,7 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-						CapAdd:    []string{"NET_RAW", "CAP_2"},
+						CapAdd: []string{"NET_RAW", "CAP_2"},
 					},
 				},
 			},
@@ -2702,9 +3416,8 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-						CapAdd:    []string{"CAP_1"},
-						CapDrop:   []string{"CAP_1"},
+						CapAdd:  []string{"CAP_1"},
+						CapDrop: []string{"CAP_1"},
 					},
 				},
 			},
@@ -2722,9 +3435,8 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
-						CapAdd:    []string{"CAP_1"},
-						CapDrop:   []string{"CAP_2"},
+						CapAdd:  []string{"CAP_1"},
+						CapDrop: []string{"CAP_2"},
 					},
 				},
 			},
@@ -2765,7 +3477,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						DNSPolicy: "",
 					},
 				},
@@ -2779,7 +3490,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						DNSPolicy: common.DNSPolicyNone,
 					},
 				},
@@ -2792,7 +3502,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						DNSPolicy: common.DNSPolicyDefault,
 					},
 				},
@@ -2806,7 +3515,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						DNSPolicy: common.DNSPolicyClusterFirst,
 					},
 				},
@@ -2820,7 +3528,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						DNSPolicy: common.DNSPolicyClusterFirstWithHostNet,
 					},
 				},
@@ -2834,7 +3541,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						DNSPolicy: "some-invalid-policy",
 					},
 				},
@@ -2848,7 +3554,6 @@ func TestSetupBuildPod(t *testing.T) {
 			RunnerConfig: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Namespace: "default",
 						DNSConfig: common.KubernetesDNSConfig{
 							Nameservers: []string{"1.2.3.4"},
 							Searches:    []string{"ns1.svc.cluster-domain.example", "my.dns.search.suffix"},
@@ -2882,6 +3587,197 @@ func TestSetupBuildPod(t *testing.T) {
 				assert.Nil(t, options[1].Value)
 			},
 		},
+		"windows mode has no default capabilities": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						Namespace: "default",
+					},
+				},
+			},
+			PrepareFn: func(t *testing.T, test setupBuildPodTestDef, e *executor) {
+				e.helperImageInfo.OSType = helperimage.OSTypeWindows
+			},
+			VerifyFn: func(t *testing.T, test setupBuildPodTestDef, pod *api.Pod) {
+				require.NotEmpty(t, pod.Spec.Containers)
+				require.Nil(t, pod.Spec.Containers[0].SecurityContext.Capabilities)
+			},
+		},
+		"supports adding ownerReferences to a created service": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						HelperImage: "custom/helper-image",
+					},
+				},
+			},
+			Options: &kubernetesOptions{
+				Image: common.Image{
+					Name: "test-image",
+					Ports: []common.Port{
+						{
+							Number: 80,
+						},
+					},
+				},
+				Services: common.Services{
+					{
+						Name: "test-service",
+						Ports: []common.Port{
+							{
+								Number: 82,
+							},
+							{
+								Number: 84,
+							},
+						},
+					},
+					{
+						Name: "test-service2",
+						Ports: []common.Port{
+							{
+								Number: 85,
+							},
+						},
+					},
+					{
+						Name: "test-service3",
+					},
+				},
+			},
+			VerifyExecutorFn: func(t *testing.T, test setupBuildPodTestDef, e *executor) {
+				require.Len(t, e.services[0].OwnerReferences, 1)
+
+				ownerReference := e.services[0].OwnerReferences[0]
+				assert.Equal(t, apiVersion, ownerReference.APIVersion)
+				assert.Equal(t, ownerReferenceKind, ownerReference.Kind)
+				assert.Equal(t, e.pod.GetName(), ownerReference.Name)
+				assert.Equal(t, e.pod.GetUID(), ownerReference.UID)
+			},
+		},
+		"supports adding ownerReferences to a configMap": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						HelperImage: "custom/helper-image",
+					},
+				},
+			},
+			Options: &kubernetesOptions{
+				Image: common.Image{
+					Name: "test-image",
+					Ports: []common.Port{
+						{
+							Number: 80,
+						},
+					},
+				},
+			},
+			VerifyExecutorFn: func(t *testing.T, test setupBuildPodTestDef, e *executor) {
+				require.Len(t, e.configMap.OwnerReferences, 1)
+
+				ownerReference := e.configMap.OwnerReferences[0]
+				assert.Equal(t, "v1", ownerReference.APIVersion)
+				assert.Equal(t, "Pod", ownerReference.Kind)
+				assert.Equal(t, e.pod.GetName(), ownerReference.Name)
+				assert.Equal(t, e.pod.GetUID(), ownerReference.UID)
+			},
+		},
+		"supports adding ownerReferences to a credentials": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						HelperImage: "custom/helper-image",
+					},
+				},
+			},
+			Credentials: []common.Credentials{
+				{
+					Type:     "registry",
+					URL:      "http://example.com",
+					Username: "user",
+					Password: "password",
+				},
+			},
+			Options: &kubernetesOptions{
+				Image: common.Image{
+					Name: "test-image",
+					Ports: []common.Port{
+						{
+							Number: 80,
+						},
+					},
+				},
+			},
+			VerifyExecutorFn: func(t *testing.T, test setupBuildPodTestDef, e *executor) {
+				require.Len(t, e.credentials.OwnerReferences, 1)
+
+				ownerReference := e.credentials.OwnerReferences[0]
+				assert.Equal(t, "v1", ownerReference.APIVersion)
+				assert.Equal(t, "Pod", ownerReference.Kind)
+				assert.Equal(t, e.pod.GetName(), ownerReference.Name)
+				assert.Equal(t, e.pod.GetUID(), ownerReference.UID)
+			},
+		},
+		"supports failure to set owner-dependent relationship": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						HelperImage: "custom/helper-image",
+					},
+				},
+			},
+			Options: &kubernetesOptions{
+				Image: common.Image{
+					Name: "test-image",
+					Ports: []common.Port{
+						{
+							Number: 80,
+						},
+					},
+				},
+			},
+			SetHTTPPutResponse: func() (*http.Response, error) {
+				return nil, errors.New("cannot set owner-dependent relationship")
+			},
+			VerifySetupBuildPodErrFn: func(t *testing.T, err error) {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "error setting ownerReferences")
+				assert.Contains(t, err.Error(), "cannot set owner-dependent relationship")
+			},
+		},
+		"supports TerminationGracePeriodSeconds": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						TerminationGracePeriodSeconds: common.Int64Ptr(10),
+					},
+				},
+			},
+			VerifyExecutorFn: func(t *testing.T, test setupBuildPodTestDef, e *executor) {
+				assert.EqualValues(
+					t,
+					test.RunnerConfig.Kubernetes.TerminationGracePeriodSeconds,
+					e.pod.Spec.TerminationGracePeriodSeconds,
+				)
+			},
+		},
+		"supports TerminationGracePeriodSeconds through PodTerminationGracePeriodSeconds": {
+			RunnerConfig: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{
+						PodTerminationGracePeriodSeconds: common.Int64Ptr(10),
+					},
+				},
+			},
+			VerifyExecutorFn: func(t *testing.T, test setupBuildPodTestDef, e *executor) {
+				assert.EqualValues(
+					t,
+					test.RunnerConfig.Kubernetes.PodTerminationGracePeriodSeconds,
+					e.pod.Spec.TerminationGracePeriodSeconds,
+				)
+			},
+		},
 	}
 
 	for testName, test := range tests {
@@ -2897,9 +3793,22 @@ func TestSetupBuildPod(t *testing.T) {
 				vars = []common.JobVariable{}
 			}
 
+			creds := test.Credentials
+			if creds == nil {
+				creds = []common.Credentials{}
+			}
+
 			options := test.Options
 			if options == nil {
 				options = &kubernetesOptions{}
+			}
+
+			if test.RunnerConfig.Kubernetes == nil {
+				test.RunnerConfig.Kubernetes = &common.KubernetesConfig{}
+			}
+
+			if test.RunnerConfig.Kubernetes.Namespace == "" {
+				test.RunnerConfig.Kubernetes.Namespace = "default"
 			}
 
 			rt := setupBuildPodFakeRoundTripper{
@@ -2922,7 +3831,8 @@ func TestSetupBuildPod(t *testing.T) {
 					BuildShell: &common.ShellConfiguration{},
 					Build: &common.Build{
 						JobResponse: common.JobResponse{
-							Variables: vars,
+							Variables:   vars,
+							Credentials: creds,
 						},
 						Runner: &test.RunnerConfig,
 					},
@@ -2961,6 +3871,11 @@ func TestSetupBuildPod(t *testing.T) {
 			err = ex.prepareOverwrites(make(common.JobVariables, 0))
 			assert.NoError(t, err, "error preparing overwrites")
 
+			if test.Credentials != nil {
+				err = ex.setupCredentials()
+				assert.NoError(t, err, "error setting up credentials")
+			}
+
 			err = ex.setupBuildPod(test.InitContainers)
 			if test.VerifySetupBuildPodErrFn == nil {
 				assert.NoError(t, err, "error setting up build pod")
@@ -2977,43 +3892,103 @@ func TestSetupBuildPod(t *testing.T) {
 }
 
 func TestProcessLogs(t *testing.T) {
-	mockTrace := &common.MockJobTrace{}
-	defer mockTrace.AssertExpectations(t)
-	mockTrace.On("Write", []byte("line\n")).Return(0, nil).Once()
-
-	mockLogProcessor := new(mockLogProcessor)
-	defer mockLogProcessor.AssertExpectations(t)
-
-	ch := make(chan string, 2)
-	ch <- "line"
-	exitCode := 1
-	script := "script"
-	status := shells.TrapCommandExitStatus{
-		CommandExitCode: &exitCode,
-		Script:          &script,
+	tests := map[string]struct {
+		lineCh           chan string
+		errCh            chan error
+		expectedExitCode int
+		expectedScript   string
+		run              func(ch chan string, errCh chan error)
+	}{
+		"Successful Processing": {
+			lineCh:           make(chan string, 2),
+			errCh:            make(chan error, 1),
+			expectedExitCode: 1,
+			expectedScript:   "script",
+			run: func(ch chan string, errCh chan error) {
+				ch <- getCommandExitStatus(1, "script")
+			},
+		},
+		"Reattach failure with CodeExitError": {
+			lineCh:           make(chan string, 1),
+			errCh:            make(chan error, 1),
+			expectedExitCode: 2,
+			expectedScript:   "",
+			run: func(ch chan string, errCh chan error) {
+				errCh <- exec.CodeExitError{
+					Err:  fmt.Errorf("giving up reattaching to log"),
+					Code: 2,
+				}
+			},
+		},
+		"Reattach failure with EOF error": {
+			lineCh:           make(chan string, 1),
+			errCh:            make(chan error, 1),
+			expectedExitCode: unknownLogProcessorExitCode,
+			expectedScript:   "",
+			run: func(ch chan string, errCh chan error) {
+				errCh <- fmt.Errorf("Custom error for test with EOF %s", io.EOF)
+			},
+		},
+		"Reattach failure with custom error": {
+			lineCh:           make(chan string, 1),
+			errCh:            make(chan error, 1),
+			expectedExitCode: unknownLogProcessorExitCode,
+			expectedScript:   "",
+			run: func(ch chan string, errCh chan error) {
+				errCh <- errors.New("Custom error")
+			},
+		},
+		"Error channel closed before line channel": {
+			lineCh:           make(chan string, 2),
+			errCh:            make(chan error, 1),
+			expectedExitCode: 3,
+			expectedScript:   "script",
+			run: func(ch chan string, errCh chan error) {
+				close(errCh)
+				ch <- getCommandExitStatus(3, "script")
+				close(ch)
+			},
+		},
 	}
 
-	b, err := json.Marshal(status)
-	require.NoError(t, err)
-	ch <- string(b)
-	mockLogProcessor.On("Process", mock.Anything).
-		Return((<-chan string)(ch)).
-		Once()
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			mockTrace := &common.MockJobTrace{}
+			defer mockTrace.AssertExpectations(t)
+			mockTrace.On("Write", []byte("line\n")).Return(0, nil).Once()
 
-	e := newExecutor()
-	e.Trace = mockTrace
-	e.pod = &api.Pod{}
-	e.pod.Name = "pod_name"
-	e.pod.Namespace = "namespace"
-	e.newLogProcessor = func() logProcessor {
-		return mockLogProcessor
+			mockLogProcessor := new(mockLogProcessor)
+			defer mockLogProcessor.AssertExpectations(t)
+
+			tc.lineCh <- "line"
+			mockLogProcessor.On("Process", mock.Anything).
+				Return((<-chan string)(tc.lineCh), (<-chan error)(tc.errCh)).
+				Once()
+
+			tc.run(tc.lineCh, tc.errCh)
+
+			e := newExecutor()
+			e.Trace = mockTrace
+			e.pod = &api.Pod{}
+			e.pod.Name = "pod_name"
+			e.pod.Namespace = "namespace"
+			e.newLogProcessor = func() logProcessor {
+				return mockLogProcessor
+			}
+
+			go e.processLogs(context.Background())
+
+			exitStatus := <-e.remoteProcessTerminated
+			assert.Equal(t, tc.expectedExitCode, exitStatus.CommandExitCode)
+			if tc.expectedScript != "" {
+				assert.Equal(t, tc.expectedScript, *exitStatus.Script)
+			}
+		})
 	}
+}
 
-	go e.processLogs(context.Background())
-
-	exitStatus := <-e.remoteProcessTerminated
-	assert.Equal(t, exitCode, *exitStatus.CommandExitCode)
-	assert.Equal(t, script, *exitStatus.Script)
+func getCommandExitStatus(exitCode int, script string) string {
+	return fmt.Sprintf(`{"command_exit_code": %v, "script": %q}`, exitCode, script)
 }
 
 func TestRunAttachCheckPodStatus(t *testing.T) {
@@ -3228,7 +4203,7 @@ func TestNewLogStreamerStream(t *testing.T) {
 	assert.Equal(t, pod.Name, s.pod)
 	assert.Equal(t, pod.Namespace, s.namespace)
 
-	err := s.Stream(context.Background(), int64(offset), output)
+	err := s.Stream(int64(offset), output)
 	assert.ErrorIs(t, err, abortErr)
 }
 
@@ -3295,16 +4270,19 @@ func TestGenerateScripts(t *testing.T) {
 	successfulResponse, err := common.GetRemoteSuccessfulMultistepBuild()
 	require.NoError(t, err)
 
-	e := &executor{
-		AbstractExecutor: executors.AbstractExecutor{
-			Build: &common.Build{
-				JobResponse: successfulResponse,
-			},
-		},
+	extension := func(shell *common.ShellScriptInfo) string {
+		switch shell.Shell {
+		case shells.SNPwsh, shells.SNPowershell:
+			return "ps1"
+		}
+		return ""
 	}
-	buildStages := e.Build.BuildStages()
 
-	setupMockShellGenerateScript := func(m *common.MockShell, stages []common.BuildStage) {
+	setupMockShellGenerateScript := func(m *common.MockShell, e *executor, stages []common.BuildStage) {
+		m.On("GetConfiguration", mock.Anything).
+			Return(&common.ShellConfiguration{Extension: extension(e.Shell())}, nil).
+			Maybe()
+
 		for _, s := range stages {
 			m.On("GenerateScript", s, e.ExecutorOptions.Shell).
 				Return("OK", nil).
@@ -3312,72 +4290,126 @@ func TestGenerateScripts(t *testing.T) {
 		}
 	}
 
-	setupScripts := func(stages []common.BuildStage) map[string]string {
+	setupScripts := func(e *executor, stages []common.BuildStage) map[string]string {
 		scripts := map[string]string{}
-		scripts[detectShellScriptName] = detectShellScript
+		shell := e.Shell().Shell
+		ext := extension(e.Shell())
+		if ext != "" {
+			ext = "." + ext
+		}
+		switch shell {
+		case shells.SNPwsh, shells.SNPowershell:
+			scripts[pwshJSONTerminationScriptName+ext] = shells.PwshJSONTerminationScript(shell)
+		default:
+			scripts[detectShellScriptName+ext] = shells.BashDetectShellScript
+		}
 
 		for _, s := range stages {
-			scripts[string(s)] = "OK"
+			scripts[string(s)+ext] = "OK"
 		}
 
 		return scripts
 	}
 
 	tests := map[string]struct {
-		setupMockShell  func() *common.MockShell
-		expectedScripts map[string]string
-		expectedErr     error
+		getExecutor        func() *executor
+		setupMockShell     func(e *executor) *common.MockShell
+		getExpectedScripts func(e *executor) map[string]string
+		expectedErr        error
 	}{
 		"all stages OK": {
-			setupMockShell: func() *common.MockShell {
+			getExecutor: func() *executor {
+				return setupExecutor("bash", successfulResponse)
+			},
+			setupMockShell: func(e *executor) *common.MockShell {
+				buildStages := e.Build.BuildStages()
 				m := new(common.MockShell)
-				setupMockShellGenerateScript(m, buildStages)
+				setupMockShellGenerateScript(m, e, buildStages)
 
 				return m
 			},
-			expectedScripts: setupScripts(buildStages),
-			expectedErr:     nil,
+			getExpectedScripts: func(e *executor) map[string]string {
+				buildStages := e.Build.BuildStages()
+				return setupScripts(e, buildStages)
+			},
+			expectedErr: nil,
+		},
+		"all stages OK with pwsh": {
+			getExecutor: func() *executor {
+				return setupExecutor(shells.SNPwsh, successfulResponse)
+			},
+			setupMockShell: func(e *executor) *common.MockShell {
+				buildStages := e.Build.BuildStages()
+				m := new(common.MockShell)
+				setupMockShellGenerateScript(m, e, buildStages)
+
+				return m
+			},
+			getExpectedScripts: func(e *executor) map[string]string {
+				buildStages := e.Build.BuildStages()
+				return setupScripts(e, buildStages)
+			},
+			expectedErr: nil,
 		},
 		"stage returns skip build stage error": {
-			setupMockShell: func() *common.MockShell {
+			getExecutor: func() *executor {
+				return setupExecutor("bash", successfulResponse)
+			},
+			setupMockShell: func(e *executor) *common.MockShell {
+				buildStages := e.Build.BuildStages()
 				m := new(common.MockShell)
 				m.On("GenerateScript", buildStages[0], e.ExecutorOptions.Shell).
 					Return("", common.ErrSkipBuildStage).
 					Once()
-				setupMockShellGenerateScript(m, buildStages[1:])
+
+				setupMockShellGenerateScript(m, e, buildStages[1:])
 
 				return m
 			},
-			expectedScripts: setupScripts(buildStages[1:]),
-			expectedErr:     nil,
+			getExpectedScripts: func(e *executor) map[string]string {
+				buildStages := e.Build.BuildStages()
+				return setupScripts(e, buildStages[1:])
+			},
+			expectedErr: nil,
 		},
 		"stage returns error": {
-			setupMockShell: func() *common.MockShell {
+			getExecutor: func() *executor {
+				return setupExecutor("bash", successfulResponse)
+			},
+			setupMockShell: func(e *executor) *common.MockShell {
+				buildStages := e.Build.BuildStages()
 				m := new(common.MockShell)
+				m.On("GetConfiguration", mock.Anything).
+					Return(&common.ShellConfiguration{Extension: extension(e.Shell())}, nil).
+					Maybe()
 				m.On("GenerateScript", buildStages[0], e.ExecutorOptions.Shell).
 					Return("", testErr).
 					Once()
 
 				return m
 			},
-			expectedScripts: nil,
-			expectedErr:     testErr,
+			getExpectedScripts: func(e *executor) map[string]string {
+				return nil
+			},
+			expectedErr: testErr,
 		},
 	}
 
 	for tn, tt := range tests {
 		t.Run(tn, func(t *testing.T) {
-			m := tt.setupMockShell()
+			e := tt.getExecutor()
+			expectedScripts := tt.getExpectedScripts(e)
+			m := tt.setupMockShell(e)
 			defer m.AssertExpectations(t)
 
 			scripts, err := e.generateScripts(m)
 			assert.ErrorIs(t, err, tt.expectedErr)
-			assert.Equal(t, tt.expectedScripts, scripts)
+			assert.Equal(t, expectedScripts, scripts)
 		})
 	}
 }
 
-func TestExecutor_buildLogPermissionsInitContainer(t *testing.T) {
+func TestExecutor_buildPermissionsInitContainer(t *testing.T) {
 	dockerHub, err := helperimage.Get(common.REVISION, helperimage.Config{
 		OSType:       helperimage.OSTypeLinux,
 		Architecture: "amd64",
@@ -3396,31 +4428,31 @@ func TestExecutor_buildLogPermissionsInitContainer(t *testing.T) {
 		jobVariables  common.JobVariables
 		config        common.RunnerConfig
 	}{
-		"default helper image from DockerHub": {
-			expectedImage: dockerHub.String(),
+		"default helper image": {
+			expectedImage: gitlabRegistry.String(),
 			config: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Image:      "alpine:3.12",
+						Image:      "alpine:3.14",
 						PullPolicy: common.StringOrArray{common.PullPolicyIfNotPresent},
 						Host:       "127.0.0.1",
 					},
 				},
 			},
 		},
-		"helper image from registry.gitlab.com": {
-			expectedImage: gitlabRegistry.String(),
+		"helper image from DockerHub": {
+			expectedImage: dockerHub.String(),
 			jobVariables: []common.JobVariable{
 				{
 					Key:    featureflags.GitLabRegistryHelperImage,
-					Value:  "true",
+					Value:  "false",
 					Public: true,
 				},
 			},
 			config: common.RunnerConfig{
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
-						Image:      "alpine:3.12",
+						Image:      "alpine:3.14",
 						PullPolicy: common.StringOrArray{common.PullPolicyIfNotPresent},
 						Host:       "127.0.0.1",
 					},
@@ -3433,7 +4465,7 @@ func TestExecutor_buildLogPermissionsInitContainer(t *testing.T) {
 				RunnerSettings: common.RunnerSettings{
 					Kubernetes: &common.KubernetesConfig{
 						HelperImage: "config-image",
-						Image:       "alpine:3.12",
+						Image:       "alpine:3.14",
 						PullPolicy:  common.StringOrArray{common.PullPolicyIfNotPresent},
 						Host:        "127.0.0.1",
 					},
@@ -3466,7 +4498,7 @@ func TestExecutor_buildLogPermissionsInitContainer(t *testing.T) {
 			err := e.Prepare(prepareOptions)
 			require.NoError(t, err)
 
-			c, err := e.buildLogPermissionsInitContainer()
+			c, err := e.buildPermissionsInitContainer(helperimage.OSTypeLinux)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedImage, c.Image)
 			assert.Equal(t, api.PullIfNotPresent, c.ImagePullPolicy)
@@ -3476,7 +4508,7 @@ func TestExecutor_buildLogPermissionsInitContainer(t *testing.T) {
 	}
 }
 
-func TestExecutor_buildLogPermissionsInitContainer_FailPullPolicy(t *testing.T) {
+func TestExecutor_buildPermissionsInitContainer_FailPullPolicy(t *testing.T) {
 	mockPullManager := &pull.MockManager{}
 	defer mockPullManager.AssertExpectations(t)
 
@@ -3499,6 +4531,412 @@ func TestExecutor_buildLogPermissionsInitContainer_FailPullPolicy(t *testing.T) 
 		Return(api.PullAlways, assert.AnError).
 		Once()
 
-	_, err := e.buildLogPermissionsInitContainer()
+	_, err := e.buildPermissionsInitContainer(helperimage.OSTypeLinux)
 	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestExecutor_buildPermissionsInitContainer_CheckResources(t *testing.T) {
+	mockPullManager := &pull.MockManager{}
+	cpu := resource.MustParse("1")
+	memory := resource.MustParse("1Gi")
+	e := &executor{
+		AbstractExecutor: executors.AbstractExecutor{
+			ExecutorOptions: executorOptions,
+			Build: &common.Build{
+				Runner: &common.RunnerConfig{},
+			},
+			Config: common.RunnerConfig{
+				RunnerSettings: common.RunnerSettings{
+					Kubernetes: &common.KubernetesConfig{},
+				},
+			},
+		},
+		pullManager: mockPullManager,
+		configurationOverwrites: &overwrites{
+			helperLimits: api.ResourceList{
+				"cpu":    cpu,
+				"memory": memory,
+			},
+			helperRequests: api.ResourceList{
+				"cpu":    cpu,
+				"memory": memory,
+			},
+		},
+	}
+
+	mockPullManager.On("GetPullPolicyFor", mock.Anything).
+		Return(api.PullAlways, nil).
+		Once()
+
+	container, err := e.buildPermissionsInitContainer(helperimage.OSTypeLinux)
+
+	require.NoError(t, err)
+
+	assert.True(t, container.Resources.Limits.Cpu().Equal(cpu))
+	assert.True(t, container.Resources.Requests.Cpu().Equal(cpu))
+
+	assert.True(t, container.Resources.Limits.Memory().Equal(memory))
+	assert.True(t, container.Resources.Requests.Memory().Equal(memory))
+}
+
+func TestShellRetrieval(t *testing.T) {
+	successfulResponse, err := common.GetRemoteSuccessfulMultistepBuild()
+	require.NoError(t, err)
+
+	tests := map[string]struct {
+		executor     *executor
+		expectedName string
+		expectedErr  error
+	}{
+		"retrieve bash": {
+			executor:     setupExecutor("bash", successfulResponse),
+			expectedName: "bash",
+		},
+		"retrieve pwsh": {
+			executor:     setupExecutor(shells.SNPwsh, successfulResponse),
+			expectedName: shells.SNPwsh,
+		},
+		"failure for no shell": {
+			executor:    setupExecutor("no shell", successfulResponse),
+			expectedErr: errIncorrectShellType,
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			shell, err := tt.executor.retrieveShell()
+			assert.Equal(t, err, tt.expectedErr, "The retrievalShell error and the expected one should be the same")
+			if tt.expectedErr == nil {
+				assert.Equal(t, tt.expectedName, shell.GetName())
+			}
+		})
+	}
+}
+
+func TestGetContainerInfo(t *testing.T) {
+	successfulResponse, err := common.GetRemoteSuccessfulMultistepBuild()
+	require.NoError(t, err)
+
+	tests := map[string]struct {
+		executor              *executor
+		command               common.ExecutorCommand
+		expectedContainerName string
+		getExpectedCommand    func(e *executor, cmd common.ExecutorCommand) []string
+	}{
+		"bash container info": {
+			executor: setupExecutor("bash", successfulResponse),
+			command: common.ExecutorCommand{
+				Stage: common.BuildStagePrepare,
+			},
+			expectedContainerName: buildContainerName,
+			getExpectedCommand: func(e *executor, cmd common.ExecutorCommand) []string {
+				return []string{
+					"sh",
+					e.scriptPath(detectShellScriptName),
+					e.scriptPath(cmd.Stage),
+					e.buildRedirectionCmd("bash"),
+				}
+			},
+		},
+		"predefined bash container info": {
+			executor: setupExecutor("bash", successfulResponse),
+			command: common.ExecutorCommand{
+				Stage:      common.BuildStagePrepare,
+				Predefined: true,
+			},
+			expectedContainerName: helperContainerName,
+			getExpectedCommand: func(e *executor, cmd common.ExecutorCommand) []string {
+				return append(
+					e.helperImageInfo.Cmd,
+					"<<<",
+					e.scriptPath(cmd.Stage),
+					e.buildRedirectionCmd("bash"),
+				)
+			},
+		},
+		"pwsh container info": {
+			executor: setupExecutor(shells.SNPwsh, successfulResponse),
+			command: common.ExecutorCommand{
+				Stage: common.BuildStagePrepare,
+			},
+			expectedContainerName: buildContainerName,
+			getExpectedCommand: func(e *executor, cmd common.ExecutorCommand) []string {
+				return []string{
+					e.scriptPath(pwshJSONTerminationScriptName),
+					e.scriptPath(cmd.Stage),
+					e.buildRedirectionCmd("pwsh"),
+				}
+			},
+		},
+		"predefined pwsh container info": {
+			executor: setupExecutor(shells.SNPwsh, successfulResponse),
+			command: common.ExecutorCommand{
+				Stage:      common.BuildStagePrepare,
+				Predefined: true,
+			},
+			expectedContainerName: helperContainerName,
+			getExpectedCommand: func(e *executor, cmd common.ExecutorCommand) []string {
+				return []string{
+					e.scriptPath(pwshJSONTerminationScriptName),
+					e.scriptPath(cmd.Stage),
+					e.buildRedirectionCmd("pwsh"),
+				}
+			},
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			containerName, containerCommand := tt.executor.getContainerInfo(tt.command)
+			assert.Equal(t, tt.expectedContainerName, containerName)
+			assert.Equal(t, tt.getExpectedCommand(tt.executor, tt.command), containerCommand)
+		})
+	}
+}
+
+func setupExecutor(shell string, successfulResponse common.JobResponse) *executor {
+	build := &common.Build{
+		JobResponse: successfulResponse,
+		Runner: &common.RunnerConfig{
+			RunnerSettings: common.RunnerSettings{
+				Executor: "kubernetes",
+				Shell:    shell,
+			},
+		},
+	}
+
+	return &executor{
+		helperImageInfo: helperimage.Info{
+			Cmd: []string{"custom", "command"},
+		},
+		AbstractExecutor: executors.AbstractExecutor{
+			ExecutorOptions: executors.ExecutorOptions{
+				DefaultBuildsDir: "/builds",
+				DefaultCacheDir:  "/cache",
+				Shell: common.ShellScriptInfo{
+					Shell: shell,
+					Build: build,
+				},
+			},
+			Build: build,
+		},
+	}
+}
+
+func TestLifecyclePrepare(t *testing.T) {
+	initExecutor := func(lifecycleCfg common.KubernetesContainerLifecyle) *executor {
+		return &executor{
+			AbstractExecutor: executors.AbstractExecutor{
+				ExecutorOptions: executorOptions,
+				Build: &common.Build{
+					Runner: &common.RunnerConfig{},
+				},
+				Config: common.RunnerConfig{
+					RunnerSettings: common.RunnerSettings{
+						Kubernetes: &common.KubernetesConfig{
+							ContainerLifecycle: lifecycleCfg,
+						},
+					},
+				},
+			},
+		}
+	}
+
+	execHandler := &api.ExecAction{
+		Command: []string{"ls", "-alF"},
+	}
+
+	httpGetHandler := &api.HTTPGetAction{
+		Port:        intstr.FromInt(8080),
+		Path:        "/test",
+		Host:        "localhost",
+		HTTPHeaders: []api.HTTPHeader{},
+	}
+
+	tcpSocketHander := &api.TCPSocketAction{
+		Port: intstr.FromInt(8080),
+		Host: "localhost",
+	}
+
+	tests := map[string]struct {
+		lifecycleCfg        common.KubernetesContainerLifecyle
+		validateHookHandler func(*testing.T, *api.Lifecycle)
+	}{
+		"empty container lifecycle": {
+			lifecycleCfg: common.KubernetesContainerLifecyle{},
+			validateHookHandler: func(t *testing.T, lifecycle *api.Lifecycle) {
+				assert.Nil(t, lifecycle)
+			},
+		},
+		"valid preStop exec hook configuration": {
+			lifecycleCfg: common.KubernetesContainerLifecyle{
+				PreStop: &common.KubernetesLifecycleHandler{
+					Exec: &common.KubernetesLifecycleExecAction{
+						Command: []string{"ls", "-alF"},
+					},
+				},
+			},
+			validateHookHandler: func(t *testing.T, lifecycle *api.Lifecycle) {
+				assert.Nil(t, lifecycle.PostStart)
+
+				assert.Equal(t, execHandler, lifecycle.PreStop.Exec)
+				assert.Nil(t, lifecycle.PreStop.HTTPGet)
+				assert.Nil(t, lifecycle.PreStop.TCPSocket)
+			},
+		},
+		"valid preStop httpGet hook configuration": {
+			lifecycleCfg: common.KubernetesContainerLifecyle{
+				PreStop: &common.KubernetesLifecycleHandler{
+					HTTPGet: &common.KubernetesLifecycleHTTPGet{
+						Port: 8080,
+						Host: "localhost",
+						Path: "/test",
+					},
+				},
+			},
+			validateHookHandler: func(t *testing.T, lifecycle *api.Lifecycle) {
+				assert.Nil(t, lifecycle.PostStart)
+
+				assert.Equal(t, httpGetHandler, lifecycle.PreStop.HTTPGet)
+				assert.Nil(t, lifecycle.PreStop.Exec)
+				assert.Nil(t, lifecycle.PreStop.TCPSocket)
+			},
+		},
+		"valid preStop TCPSocket hook configuration": {
+			lifecycleCfg: common.KubernetesContainerLifecyle{
+				PreStop: &common.KubernetesLifecycleHandler{
+					TCPSocket: &common.KubernetesLifecycleTCPSocket{
+						Port: 8080,
+						Host: "localhost",
+					},
+				},
+			},
+			validateHookHandler: func(t *testing.T, lifecycle *api.Lifecycle) {
+				assert.Nil(t, lifecycle.PostStart)
+
+				assert.Equal(t, tcpSocketHander, lifecycle.PreStop.TCPSocket)
+				assert.Nil(t, lifecycle.PreStop.Exec)
+				assert.Nil(t, lifecycle.PreStop.HTTPGet)
+			},
+		},
+		"valid postStart exec hook configuration": {
+			lifecycleCfg: common.KubernetesContainerLifecyle{
+				PostStart: &common.KubernetesLifecycleHandler{
+					Exec: &common.KubernetesLifecycleExecAction{
+						Command: []string{"ls", "-alF"},
+					},
+				},
+			},
+			validateHookHandler: func(t *testing.T, lifecycle *api.Lifecycle) {
+				assert.Nil(t, lifecycle.PreStop)
+
+				assert.Equal(t, execHandler, lifecycle.PostStart.Exec)
+				assert.Nil(t, lifecycle.PostStart.HTTPGet)
+				assert.Nil(t, lifecycle.PostStart.TCPSocket)
+			},
+		},
+		"valid postStart httpGet hook configuration": {
+			lifecycleCfg: common.KubernetesContainerLifecyle{
+				PostStart: &common.KubernetesLifecycleHandler{
+					HTTPGet: &common.KubernetesLifecycleHTTPGet{
+						Port: 8080,
+						Host: "localhost",
+						Path: "/test",
+					},
+				},
+			},
+			validateHookHandler: func(t *testing.T, lifecycle *api.Lifecycle) {
+				assert.Nil(t, lifecycle.PreStop)
+
+				assert.Equal(t, httpGetHandler, lifecycle.PostStart.HTTPGet)
+				assert.Nil(t, lifecycle.PostStart.Exec)
+				assert.Nil(t, lifecycle.PostStart.TCPSocket)
+			},
+		},
+		"valid postStart TCPSocket hook configuration": {
+			lifecycleCfg: common.KubernetesContainerLifecyle{
+				PostStart: &common.KubernetesLifecycleHandler{
+					TCPSocket: &common.KubernetesLifecycleTCPSocket{
+						Port: 8080,
+						Host: "localhost",
+					},
+				},
+			},
+			validateHookHandler: func(t *testing.T, lifecycle *api.Lifecycle) {
+				assert.Nil(t, lifecycle.PreStop)
+
+				assert.Equal(t, tcpSocketHander, lifecycle.PostStart.TCPSocket)
+				assert.Nil(t, lifecycle.PostStart.Exec)
+				assert.Nil(t, lifecycle.PostStart.HTTPGet)
+			},
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			executor := initExecutor(tt.lifecycleCfg)
+			lifecycle := executor.prepareLifecycleHooks()
+
+			if tt.validateHookHandler != nil {
+				tt.validateHookHandler(t, lifecycle)
+			}
+		})
+	}
+}
+
+func TestBuildContainerSecurityContext(t *testing.T) {
+	tests := map[string]struct {
+		getSecurityContext func() *api.SecurityContext
+	}{
+		"build security context": {
+			getSecurityContext: func() *api.SecurityContext {
+				runAsNonRoot := true
+				readOnlyRootFileSystem := true
+				privileged := false
+				allowPrivilageEscalation := false
+				var uid int64 = 1000
+				var gid int64 = 1000
+				return &api.SecurityContext{
+					RunAsNonRoot:             &runAsNonRoot,
+					ReadOnlyRootFilesystem:   &readOnlyRootFileSystem,
+					Privileged:               &privileged,
+					AllowPrivilegeEscalation: &allowPrivilageEscalation,
+					RunAsUser:                &uid,
+					RunAsGroup:               &gid,
+					Capabilities: &api.Capabilities{
+						Drop: []api.Capability{"ALL"},
+					},
+				}
+			},
+		},
+		"no security context": {
+			getSecurityContext: func() *api.SecurityContext {
+				return nil
+			},
+		},
+	}
+
+	mockPullManager := &pull.MockManager{}
+	mockPullManager.On("GetPullPolicyFor", mock.Anything).
+		Return(api.PullAlways, nil).
+		Times(2)
+
+	defer mockPullManager.AssertExpectations(t)
+
+	executor := newExecutor()
+	executor.pullManager = mockPullManager
+	executor.Build = new(common.Build)
+	executor.Config.Kubernetes = new(common.KubernetesConfig)
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			opts := containerBuildOpts{
+				name:            buildContainerName,
+				securityContext: tt.getSecurityContext(),
+			}
+			container, err := executor.buildContainer(opts)
+			require.NoError(t, err)
+			assert.Equal(t, tt.getSecurityContext(), container.SecurityContext)
+		})
+	}
 }

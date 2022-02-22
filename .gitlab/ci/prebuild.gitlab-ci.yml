@@ -1,20 +1,48 @@
-helper images:
+.helper images base:
   extends:
-  - .merge_request_pipelines
   - .docker
   - .go-cache-docker-qemu
+  - .rules:merge_request_pipelines:no_docs
   stage: prebuild
   variables:
     TAR_XZ_ARGS: -f -9
   script:
-  - make helper-bin helper-dockerarchive
+  - make "helper-dockerarchive-${IMAGE_BASE}"
   retry: 2
   artifacts:
     paths:
     - out/helper-images/
+    expire_in: 7d
+
+helper images:
+  extends:
+  - '.helper images base'
+  parallel:
+    matrix:
+    - IMAGE_BASE: "alpine"
+    - IMAGE_BASE: "alpine3.13"
+    - IMAGE_BASE: "alpine3.14"
+    - IMAGE_BASE: "alpine3.15"
+    - IMAGE_BASE: "ubuntu"
+
+helper images fips:
+  extends:
+    - '.helper images base'
+  needs:
+    - 'fips helper binaries'
+  parallel:
+    matrix:
+      - IMAGE_BASE: "ubi-fips"
+
+helper images binaries:
+  extends:
+  - .rules:merge_request_pipelines:no_docs
+  stage: prebuild
+  script:
+  - make helper-bin
+  artifacts:
+    paths:
     - out/binaries/gitlab-runner-helper/gitlab-runner-helper*
-    - .gopath/bin
-    - .gopath/.ok
     expire_in: 7d
 
 clone test repo:
@@ -27,14 +55,14 @@ clone test repo:
   script:
   - mkdir tmp
   - succeed=0
-  - for i in {1..3}; do git clone https://gitlab.com/gitlab-org/ci-cd/tests/gitlab-test.git tmp/gitlab-test && succeed=1 && break; echo "retrying"; done
+  - for i in {1..3}; do git clone https://gitlab.com/gitlab-org/ci-cd/gitlab-runner-pipeline-tests/gitlab-test tmp/gitlab-test && succeed=1 && break; echo "retrying"; done
   - '[[ "$succeed" -eq 1 ]]'
   artifacts:
     paths:
     - tmp/gitlab-test
     expire_in: 7d
 
-tests definitions:
+.test definitions:
   extends:
   - .rules:merge_request_pipelines:no_docs
   - .go-cache
@@ -43,11 +71,26 @@ tests definitions:
   - apt-get update
   - apt-get install -y make
   - source ci/touch_make_dependencies
+  - mkdir -p $(dirname $TESTSDEFINITIONSPATH)
   - make parallel_test_prepare
   artifacts:
     paths:
-    - testsdefinitions.txt
+    - $TESTSDEFINITIONSPATH
     expire_in: 7d
+
+unit test definitions:
+  extends:
+  - .test definitions
+  variables:
+    TESTFLAGS: -cover
+    TESTSDEFINITIONSPATH: unit/testsdefinitions.txt
+
+integration test definitions:
+  extends:
+  - .test definitions
+  variables:
+    TESTFLAGS: -cover -tags=integration
+    TESTSDEFINITIONSPATH: integration/testsdefinitions.txt
 
 ecr public token:
   extends:

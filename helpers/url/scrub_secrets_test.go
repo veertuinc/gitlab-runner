@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package url_helpers
 
 import (
@@ -15,6 +18,10 @@ func TestScrubSecrets(t *testing.T) {
 		{
 			input:  "Get http://localhost/?id=123&X-Amz-Signature=abcd1234&private_token=abcd1234",
 			output: "Get http://localhost/?id=123&X-Amz-Signature=[FILTERED]&private_token=[FILTERED]",
+		},
+		{
+			input:  "Get http://localhost/?id=123&X-Amz-Security-Token=abcd1234&private_token=abcd1234",
+			output: "Get http://localhost/?id=123&X-Amz-Security-Token=[FILTERED]&private_token=[FILTERED]",
 		},
 		{
 			input: "Get http://localhost/?id=123&" +
