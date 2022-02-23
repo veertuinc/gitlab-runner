@@ -89,9 +89,9 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	s.connector = MakeNewAnkaCloudConnector(s.Config.Anka)
 
 	s.Println(fmt.Sprintf("%s%s%s", helpers.ANSI_BOLD_CYAN, "Starting Anka VM using:", helpers.ANSI_RESET))
-	s.Println("  - Template UUID:", s.Config.Anka.TemplateUUID)
+	s.Println("  - VM Template UUID:", s.Config.Anka.TemplateUUID)
 	if s.Config.Anka.Tag != nil {
-		s.Println("  - Tag:", *s.Config.Anka.Tag)
+		s.Println("  - VM Template Tag Name:", *s.Config.Anka.Tag)
 	}
 	if s.Config.Anka.NodeGroup != nil {
 		s.Println("  - Node Group:", *s.Config.Anka.NodeGroup)
@@ -115,20 +115,20 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 
 	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
 
-	connectInfo, err := s.connector.StartInstance(s.Config.Anka, &done, options)
+	vmInfo, err := s.connector.StartInstance(s.Config.Anka, &done, options)
 	if err != nil {
 		return err
 	}
 
-	s.vmConnectInfo = connectInfo
-	s.Println(fmt.Sprintf("Verifying connectivity to the VM - Host: %v Port: %v Instance UUID: %v ", s.vmConnectInfo.Host, s.vmConnectInfo.Port, s.vmConnectInfo.InstanceId))
+	s.vmConnectInfo = vmInfo
+	s.Println(fmt.Sprintf("Verifying connectivity to the VM: %s (%s) | Controller Instance ID: %s | Host: %s | Port: %d ", s.vmConnectInfo.Name, s.vmConnectInfo.UUID, s.vmConnectInfo.InstanceId, s.vmConnectInfo.Host, s.vmConnectInfo.Port))
 	err = s.verifyNode()
 	if err != nil {
 		LogAndUIPrint(s, options, fmt.Sprint("SSH Error to VM:", err, s.vmConnectInfo))
 		return err
 	}
 
-	LogAndUIPrint(s, options, fmt.Sprintf("%sAnka VM %s, running on Node %s (%s), is ready for work (%s:%v%s)", helpers.ANSI_BOLD_GREEN, connectInfo.InstanceId, connectInfo.NodeName, connectInfo.NodeIP, connectInfo.Host, connectInfo.Port, helpers.ANSI_RESET))
+	LogAndUIPrint(s, options, fmt.Sprintf("%sVM \"%s\" (%s) / Controller Instance ID %s running on Node %s (%s), is ready for work (%s:%v%s)", helpers.ANSI_BOLD_GREEN, vmInfo.Name, vmInfo.UUID, vmInfo.InstanceId, vmInfo.NodeName, vmInfo.NodeIP, vmInfo.Host, vmInfo.Port, helpers.ANSI_RESET))
 
 	err = s.startSSHClient()
 	if err != nil {

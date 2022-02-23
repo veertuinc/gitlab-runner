@@ -90,6 +90,8 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig, don
 		connector.client.TerminateVm(instanceId)
 		return nil, err
 	}
+	connectInfo.Name = vm.VMInfo.Name
+	connectInfo.UUID = vm.VMInfo.Id
 
 	// Get Node Name
 	err, node := connector.client.GetNode(vm.VMInfo.NodeId)
@@ -280,6 +282,8 @@ func MakeNewAnkaCloudConnector(ankaConfig *common.AnkaConfig) *AnkaConnector {
 }
 
 type AnkaVmConnectInfo struct {
+	Name       string
+	UUID       string
 	InstanceId string
 	Host       string
 	Port       int
