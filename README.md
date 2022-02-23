@@ -4,7 +4,7 @@
 
 For a list of compatible versions between GitLab and GitLab Runner, see the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
 
-> This is a stripped down and modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner/tree/13-11-stable) (version 13.11-stable).
+> This is a lightly modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner). See the VERSION file for information on which version of the core gitlab-runner we're using.
 
 ## Anka GitLab Runner Registration Example
 
@@ -48,6 +48,17 @@ test:
   script:
     - hostname
     - echo "Echo from inside of the VM!"
+```
+
+### Variable interpolation in your YAML
+
+Gitlab level variables set under the Project, Group, Instance, etc, can be used in your `gitlab-ci.yml`. These are set using $ before the variable's name:
+
+```yaml
+build:
+  stage: build
+  variables:
+    ANKA_TEMPLATE_UUID: "$DEFAULT_ANKA_TEMPLATE_UUID"
 ```
 
 ## Development Setup and Details

@@ -49,7 +49,6 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 
 	if s.Config.Anka.ControllerAddress == "" {
 		s.Errorln("No Anka Controller config")
-
 		return errors.New("No Anka Cloud controller configured")
 	}
 
@@ -58,27 +57,30 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		return errors.New("Missing template_uuid from configuration")
 	}
 
-	ankaTemplateUUIDENV := s.Build.Variables.Get("ANKA_TEMPLATE_UUID")
+	ankaTemplateUUIDENV := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_TEMPLATE_UUID"))
+	if err != nil {
+		return err
+	}
 	if ankaTemplateUUIDENV != "" { // OVERRIDE of default Template
 		s.Config.Anka.TemplateUUID = ankaTemplateUUIDENV
 	}
 
-	ankaTagNameENV := s.Build.Variables.Get("ANKA_TAG_NAME")
+	ankaTagNameENV := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_TAG_NAME"))
 	if ankaTagNameENV != "" { // OVERRIDE of default Tag
 		s.Config.Anka.Tag = &ankaTagNameENV
 	}
 
-	ankaGroupENV := s.Build.Variables.Get("ANKA_NODE_GROUP")
+	ankaGroupENV := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_NODE_GROUP"))
 	if ankaGroupENV != "" {
 		s.Config.Anka.NodeGroup = &ankaGroupENV
 	}
 
-	ankaControllerInstanceName := s.Build.Variables.Get("ANKA_CONTROLLER_INSTANCE_NAME")
+	ankaControllerInstanceName := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_CONTROLLER_INSTANCE_NAME"))
 	if ankaControllerInstanceName != "" {
 		s.Config.Anka.ControllerInstanceName = ankaControllerInstanceName
 	}
 
-	ankaControllerExternalId := s.Build.Variables.Get("ANKA_CONTROLLER_EXTERNAL_ID")
+	ankaControllerExternalId := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_CONTROLLER_EXTERNAL_ID"))
 	if ankaControllerExternalId != "" {
 		s.Config.Anka.ControllerExternalID = ankaControllerExternalId
 	}

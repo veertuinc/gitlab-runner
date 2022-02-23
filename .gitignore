@@ -37,3 +37,5 @@ debug.test
 
 # Ignore the generated binary
 /gitlab-runner*
+
+.dccache
