@@ -143,7 +143,11 @@ func (s *executor) verifyNode() error {
 	if err != nil {
 		return err
 	}
-	err = s.sshClient.Run(s.Context, ssh.Command{Command: []string{"exit"}})
+	err = s.sshClient.Run(
+		s.Context,
+		ssh.Command{Command: []string{"exit"}},
+		s.Shell().Shell,
+	)
 	if err != nil {
 		return err
 	}
@@ -176,11 +180,15 @@ func (s *executor) Run(cmd common.ExecutorCommand) error {
 		Command:     s.BuildShell.GetCommandWithArguments(),
 		Stdin:       cmd.Script,
 	})
-	err := s.sshClient.Run(cmd.Context, ssh.Command{
-		Environment: s.BuildShell.Environment,
-		Command:     s.BuildShell.GetCommandWithArguments(),
-		Stdin:       cmd.Script,
-	})
+	err := s.sshClient.Run(
+		cmd.Context,
+		ssh.Command{
+			Environment: s.BuildShell.Environment,
+			Command:     s.BuildShell.GetCommandWithArguments(),
+			Stdin:       cmd.Script,
+		},
+		s.Shell().Shell,
+	)
 	if _, ok := err.(*ssh.ExitError); ok {
 		err = &common.BuildError{Inner: err}
 	}
