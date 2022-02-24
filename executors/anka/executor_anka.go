@@ -201,7 +201,7 @@ func (s *executor) Cleanup() {
 	s.sshClient.Cleanup()
 	if s.connector != nil && s.vmConnectInfo != nil {
 		if s.Trace.IsJobSuccessful() || !s.Config.Anka.KeepAliveOnError {
-			s.Println("Terminating Anka VM ", s.vmConnectInfo.InstanceId)
+			s.Println(fmt.Sprintf("Terminating VM: %s (%s) | Controller Instance ID: %s | Host: %s", s.vmConnectInfo.Name, s.vmConnectInfo.UUID, s.vmConnectInfo.InstanceId, s.vmConnectInfo.Host))
 			s.connector.TerminateInstance(s.vmConnectInfo.InstanceId)
 		}
 	}
