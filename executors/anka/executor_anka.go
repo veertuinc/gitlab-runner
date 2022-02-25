@@ -165,15 +165,24 @@ func (s *executor) startSSHClient() error {
 			Password:     s.Config.SSH.Password,
 			IdentityFile: s.Config.SSH.IdentityFile,
 		},
-		Stdout:         s.Trace,
-		Stderr:         s.Trace,
-		ConnectRetries: 1,
+		Stdout: s.Trace,
+		Stderr: s.Trace,
 	}
-	err := s.sshClient.Connect()
-	if err != nil {
-		return err
+
+	var finalError error
+	retryLimit := 6
+	for tries := 1; tries <= retryLimit; tries++ {
+		err := s.sshClient.Connect()
+		if err != nil {
+			if tries > 1 {
+				s.Println(fmt.Sprintf("%s%s (retry %d of %d)%s", helpers.ANSI_BOLD_YELLOW, err, tries, retryLimit, helpers.ANSI_RESET))
+			} else {
+				s.Println(fmt.Sprintf("%s%s%s", helpers.ANSI_BOLD_YELLOW, err, helpers.ANSI_RESET))
+			}
+			finalError = fmt.Errorf("executor_anka.go: sshClient.Connect (to VM): %w", err)
+		}
 	}
-	return nil
+	return finalError
 }
 
 func (s *executor) Run(cmd common.ExecutorCommand) error {
