@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package common
 
 import (
@@ -173,15 +176,15 @@ func TestJobImageExposed(t *testing.T) {
 		expectImageName string
 	}{
 		"normal image exposed": {
-			image:           "alpine:3.11",
+			image:           "alpine:3.14",
 			expectVarExists: true,
-			expectImageName: "alpine:3.11",
+			expectImageName: "alpine:3.14",
 		},
 		"image with variable expansion": {
-			image:           "${IMAGE}:3.11",
+			image:           "${IMAGE}:3.14",
 			vars:            []JobVariable{{Key: "IMAGE", Value: "alpine", Public: true}},
 			expectVarExists: true,
-			expectImageName: "alpine:3.11",
+			expectImageName: "alpine:3.14",
 		},
 		"no image specified": {
 			image:           "",
@@ -362,7 +365,7 @@ func TestJobFailure(t *testing.T) {
 	executor.On("Shell").Return(&ShellScriptInfo{Shell: "script-shell"})
 	executor.On("Run", matchBuildStage(BuildStagePrepare)).Return(nil).Once()
 	executor.On("Run", mock.Anything).Return(thrownErr).Times(3)
-	executor.On("Run", matchBuildStage(BuildStageCleanupFileVariables)).Return(nil).Once()
+	executor.On("Run", matchBuildStage(BuildStageCleanup)).Return(nil).Once()
 	executor.On("Finish", thrownErr).Once()
 
 	RegisterExecutorProvider("build-run-job-failure", provider)
@@ -448,7 +451,7 @@ func TestRunFailureRunsAfterScriptAndArtifactsOnFailure(t *testing.T) {
 	executor.On("Run", matchBuildStage(BuildStageAfterScript)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageUploadOnFailureArtifacts)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageArchiveOnFailureCache)).Return(nil).Once()
-	executor.On("Run", matchBuildStage(BuildStageCleanupFileVariables)).Return(nil).Once()
+	executor.On("Run", matchBuildStage(BuildStageCleanup)).Return(nil).Once()
 	executor.On("Finish", errors.New("build fail")).Once()
 
 	RegisterExecutorProvider("build-run-run-failure", provider)
@@ -481,7 +484,7 @@ func TestGetSourcesRunFailure(t *testing.T) {
 	executor.On("Run", matchBuildStage(BuildStageGetSources)).Return(errors.New("build fail")).Times(3)
 	executor.On("Run", matchBuildStage(BuildStageArchiveOnFailureCache)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageUploadOnFailureArtifacts)).Return(nil).Once()
-	executor.On("Run", matchBuildStage(BuildStageCleanupFileVariables)).Return(nil).Once()
+	executor.On("Run", matchBuildStage(BuildStageCleanup)).Return(nil).Once()
 	executor.On("Finish", errors.New("build fail")).Once()
 
 	build := registerExecutorWithSuccessfulBuild(t, provider, new(RunnerConfig))
@@ -506,7 +509,7 @@ func TestArtifactDownloadRunFailure(t *testing.T) {
 	executor.On("Run", matchBuildStage(BuildStageDownloadArtifacts)).Return(errors.New("build fail")).Times(3)
 	executor.On("Run", matchBuildStage(BuildStageArchiveOnFailureCache)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageUploadOnFailureArtifacts)).Return(nil).Once()
-	executor.On("Run", matchBuildStage(BuildStageCleanupFileVariables)).Return(nil).Once()
+	executor.On("Run", matchBuildStage(BuildStageCleanup)).Return(nil).Once()
 	executor.On("Finish", errors.New("build fail")).Once()
 
 	build := registerExecutorWithSuccessfulBuild(t, provider, new(RunnerConfig))
@@ -533,7 +536,7 @@ func TestArtifactUploadRunFailure(t *testing.T) {
 	executor.On("Run", matchBuildStage(BuildStageAfterScript)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageArchiveOnSuccessCache)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageUploadOnSuccessArtifacts)).Return(errors.New("upload fail")).Once()
-	executor.On("Run", matchBuildStage(BuildStageCleanupFileVariables)).Return(nil).Once()
+	executor.On("Run", matchBuildStage(BuildStageCleanup)).Return(nil).Once()
 	executor.On("Finish", errors.New("upload fail")).Once()
 
 	build := registerExecutorWithSuccessfulBuild(t, provider, new(RunnerConfig))
@@ -567,7 +570,7 @@ func TestArchiveCacheOnScriptFailure(t *testing.T) {
 	executor.On("Run", matchBuildStage(BuildStageAfterScript)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageArchiveOnFailureCache)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageUploadOnFailureArtifacts)).Return(nil).Once()
-	executor.On("Run", matchBuildStage(BuildStageCleanupFileVariables)).Return(nil).Once()
+	executor.On("Run", matchBuildStage(BuildStageCleanup)).Return(nil).Once()
 	executor.On("Finish", errors.New("script failure")).Once()
 
 	build := registerExecutorWithSuccessfulBuild(t, provider, new(RunnerConfig))
@@ -593,7 +596,7 @@ func TestUploadArtifactsOnArchiveCacheFailure(t *testing.T) {
 	executor.On("Run", matchBuildStage(BuildStageAfterScript)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageArchiveOnSuccessCache)).Return(errors.New("cache failure")).Once()
 	executor.On("Run", matchBuildStage(BuildStageUploadOnSuccessArtifacts)).Return(nil).Once()
-	executor.On("Run", matchBuildStage(BuildStageCleanupFileVariables)).Return(nil).Once()
+	executor.On("Run", matchBuildStage(BuildStageCleanup)).Return(nil).Once()
 	executor.On("Finish", errors.New("cache failure")).Once()
 
 	build := registerExecutorWithSuccessfulBuild(t, provider, new(RunnerConfig))
@@ -616,7 +619,7 @@ func TestRestoreCacheRunFailure(t *testing.T) {
 	executor.On("Run", matchBuildStage(BuildStageRestoreCache)).Return(errors.New("build fail")).Times(3)
 	executor.On("Run", matchBuildStage(BuildStageArchiveOnFailureCache)).Return(nil).Once()
 	executor.On("Run", matchBuildStage(BuildStageUploadOnFailureArtifacts)).Return(nil).Once()
-	executor.On("Run", matchBuildStage(BuildStageCleanupFileVariables)).Return(nil).Once()
+	executor.On("Run", matchBuildStage(BuildStageCleanup)).Return(nil).Once()
 	executor.On("Finish", errors.New("build fail")).Once()
 
 	build := registerExecutorWithSuccessfulBuild(t, provider, new(RunnerConfig))
@@ -1257,7 +1260,7 @@ func TestWaitForTerminal(t *testing.T) {
 			require.NoError(t, err)
 			build.Session = sess
 
-			srv := httptest.NewServer(build.Session.Mux())
+			srv := httptest.NewServer(build.Session.Handler())
 			defer srv.Close()
 
 			mockConn := terminal.MockConn{}
@@ -1441,6 +1444,42 @@ func TestGitFetchFlags(t *testing.T) {
 			}
 
 			result := build.GetGitFetchFlags()
+			assert.Equal(t, test.expectedResult, result)
+		})
+	}
+}
+
+func TestGitSubmoduleUpdateFlags(t *testing.T) {
+	tests := map[string]struct {
+		value          string
+		expectedResult []string
+	}{
+		"empty update flags": {
+			value:          "",
+			expectedResult: []string{},
+		},
+		"use custom update flags": {
+			value:          "custom-flags",
+			expectedResult: []string{"custom-flags"},
+		},
+		"use custom update flags with multiple arguments": {
+			value:          "--remote --jobs 4",
+			expectedResult: []string{"--remote", "--jobs", "4"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			build := &Build{
+				Runner: &RunnerConfig{},
+				JobResponse: JobResponse{
+					Variables: JobVariables{
+						{Key: "GIT_SUBMODULE_UPDATE_FLAGS", Value: test.value},
+					},
+				},
+			}
+
+			result := build.GetGitSubmoduleUpdateFlags()
 			assert.Equal(t, test.expectedResult, result)
 		})
 	}
@@ -1723,7 +1762,7 @@ func setupSuccessfulMockExecutor(
 	executor.On("Run", matchBuildStage(BuildStageUploadOnSuccessArtifacts)).
 		Return(nil).
 		Once()
-	executor.On("Run", matchBuildStage(BuildStageCleanupFileVariables)).
+	executor.On("Run", matchBuildStage(BuildStageCleanup)).
 		Return(nil).
 		Once()
 
@@ -1877,6 +1916,121 @@ func TestSecretsResolving(t *testing.T) {
 				return
 			}
 			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestBuildSupportedFailureReasons(t *testing.T) {
+	supportedReason := JobFailureReason("supported")
+	unsupportedReason := JobFailureReason("unsupported")
+
+	tests := map[string]struct {
+		supported      []JobFailureReason
+		reason         JobFailureReason
+		expectedReason JobFailureReason
+	}{
+		"empty list with widely supported reason": {
+			supported:      nil,
+			reason:         ScriptFailure,
+			expectedReason: ScriptFailure,
+		},
+		"empty list with unsupported reason": {
+			supported:      nil,
+			reason:         unsupportedReason,
+			expectedReason: UnknownFailure,
+		},
+		"populated list with widely supported reason": {
+			supported:      []JobFailureReason{supportedReason},
+			reason:         ScriptFailure,
+			expectedReason: ScriptFailure,
+		},
+		"populated list with supported reason": {
+			supported:      []JobFailureReason{supportedReason},
+			reason:         supportedReason,
+			expectedReason: supportedReason,
+		},
+		"populated list with unsupported reason": {
+			supported:      []JobFailureReason{supportedReason},
+			reason:         unsupportedReason,
+			expectedReason: UnknownFailure,
+		},
+	}
+
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			b := &Build{
+				Runner: &RunnerConfig{},
+				JobResponse: JobResponse{
+					Features: GitlabFeatures{
+						FailureReasons: tc.supported,
+					},
+				},
+			}
+			b.logger = NewBuildLogger(nil, b.Log())
+
+			err := &BuildError{
+				FailureReason: tc.reason,
+			}
+
+			trace := new(MockJobTrace)
+			defer trace.AssertExpectations(t)
+			trace.On(
+				"Fail",
+				err,
+				JobFailureData{
+					Reason:   tc.expectedReason,
+					ExitCode: 0,
+				},
+			).Once()
+
+			b.setTraceStatus(trace, err)
+		})
+	}
+}
+
+func TestSetTraceStatus(t *testing.T) {
+	tests := map[string]struct {
+		err    error
+		assert func(*testing.T, *MockJobTrace, error)
+	}{
+		"nil error is successful": {
+			err: nil,
+			assert: func(t *testing.T, mt *MockJobTrace, err error) {
+				mt.On("Success").Once()
+			},
+		},
+		"build error, script failure": {
+			err: &BuildError{FailureReason: ScriptFailure},
+			assert: func(t *testing.T, mt *MockJobTrace, err error) {
+				mt.On("Fail", err, JobFailureData{Reason: ScriptFailure}).Once()
+			},
+		},
+		"build error, wrapped script failure": {
+			err: fmt.Errorf("wrapped: %w", &BuildError{FailureReason: ScriptFailure}),
+			assert: func(t *testing.T, mt *MockJobTrace, err error) {
+				mt.On("Fail", err, JobFailureData{Reason: ScriptFailure}).Once()
+			},
+		},
+		"non-build error": {
+			err: fmt.Errorf("some error"),
+			assert: func(t *testing.T, mt *MockJobTrace, err error) {
+				mt.On("Fail", err, JobFailureData{Reason: RunnerSystemFailure}).Once()
+			},
+		},
+	}
+
+	for tn, tc := range tests {
+		t.Run(tn, func(t *testing.T) {
+			b := &Build{
+				Runner: &RunnerConfig{},
+			}
+			b.logger = NewBuildLogger(nil, b.Log())
+
+			trace := new(MockJobTrace)
+			defer trace.AssertExpectations(t)
+
+			tc.assert(t, trace, tc.err)
+			b.setTraceStatus(trace, tc.err)
 		})
 	}
 }

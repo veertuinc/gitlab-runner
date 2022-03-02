@@ -1,9 +1,11 @@
+//go:build !integration
+// +build !integration
+
 package docker
 
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -37,13 +39,6 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/test"
 	"gitlab.com/gitlab-org/gitlab-runner/shells"
 )
-
-func TestMain(m *testing.M) {
-	PrebuiltImagesPaths = []string{"../../out/helper-images/"}
-
-	flag.Parse()
-	os.Exit(m.Run())
-}
 
 func TestParseDeviceStringOne(t *testing.T) {
 	e := new(executor)
@@ -149,36 +144,36 @@ type testAllowedImageDescription struct {
 
 var testAllowedImages = []testAllowedImageDescription{
 	{true, "ruby", []string{"*"}},
-	{true, "ruby:2.6", []string{"*"}},
+	{true, "ruby:2.7", []string{"*"}},
 	{true, "ruby:latest", []string{"*"}},
 	{true, "library/ruby", []string{"*/*"}},
-	{true, "library/ruby:2.6", []string{"*/*"}},
-	{true, "library/ruby:2.6", []string{"*/*:*"}},
+	{true, "library/ruby:2.7", []string{"*/*"}},
+	{true, "library/ruby:2.7", []string{"*/*:*"}},
 	{true, "my.registry.tld/library/ruby", []string{"my.registry.tld/*/*"}},
-	{true, "my.registry.tld/library/ruby:2.6", []string{"my.registry.tld/*/*:*"}},
+	{true, "my.registry.tld/library/ruby:2.7", []string{"my.registry.tld/*/*:*"}},
 	{true, "my.registry.tld/group/subgroup/ruby", []string{"my.registry.tld/*/*/*"}},
-	{true, "my.registry.tld/group/subgroup/ruby:2.6", []string{"my.registry.tld/*/*/*:*"}},
+	{true, "my.registry.tld/group/subgroup/ruby:2.7", []string{"my.registry.tld/*/*/*:*"}},
 	{true, "ruby", []string{"**/*"}},
-	{true, "ruby:2.6", []string{"**/*"}},
+	{true, "ruby:2.7", []string{"**/*"}},
 	{true, "ruby:latest", []string{"**/*"}},
 	{true, "library/ruby", []string{"**/*"}},
-	{true, "library/ruby:2.6", []string{"**/*"}},
-	{true, "library/ruby:2.6", []string{"**/*:*"}},
+	{true, "library/ruby:2.7", []string{"**/*"}},
+	{true, "library/ruby:2.7", []string{"**/*:*"}},
 	{true, "my.registry.tld/library/ruby", []string{"my.registry.tld/**/*"}},
-	{true, "my.registry.tld/library/ruby:2.6", []string{"my.registry.tld/**/*:*"}},
+	{true, "my.registry.tld/library/ruby:2.7", []string{"my.registry.tld/**/*:*"}},
 	{true, "my.registry.tld/group/subgroup/ruby", []string{"my.registry.tld/**/*"}},
-	{true, "my.registry.tld/group/subgroup/ruby:2.6", []string{"my.registry.tld/**/*:*"}},
+	{true, "my.registry.tld/group/subgroup/ruby:2.7", []string{"my.registry.tld/**/*:*"}},
 	{false, "library/ruby", []string{"*"}},
-	{false, "library/ruby:2.6", []string{"*"}},
+	{false, "library/ruby:2.7", []string{"*"}},
 	{false, "my.registry.tld/ruby", []string{"*"}},
-	{false, "my.registry.tld/ruby:2.6", []string{"*"}},
+	{false, "my.registry.tld/ruby:2.7", []string{"*"}},
 	{false, "my.registry.tld/library/ruby", []string{"*"}},
-	{false, "my.registry.tld/library/ruby:2.6", []string{"*"}},
+	{false, "my.registry.tld/library/ruby:2.7", []string{"*"}},
 	{false, "my.registry.tld/group/subgroup/ruby", []string{"*"}},
-	{false, "my.registry.tld/group/subgroup/ruby:2.6", []string{"*"}},
+	{false, "my.registry.tld/group/subgroup/ruby:2.7", []string{"*"}},
 	{false, "library/ruby", []string{"*/*:*"}},
 	{false, "my.registry.tld/group/subgroup/ruby", []string{"my.registry.tld/*/*"}},
-	{false, "my.registry.tld/group/subgroup/ruby:2.6", []string{"my.registry.tld/*/*:*"}},
+	{false, "my.registry.tld/group/subgroup/ruby:2.7", []string{"my.registry.tld/*/*:*"}},
 	{false, "library/ruby", []string{"**/*:*"}},
 }
 
@@ -1538,7 +1533,7 @@ func TestGetServiceDefinitions(t *testing.T) {
 				},
 			},
 			allowedServices: []string{"name"},
-			expectedErr:     "invalid image",
+			expectedErr:     "disallowed image",
 		},
 		"build service not in allowed services but in internal images": {
 			services: []common.Service{
@@ -1710,7 +1705,7 @@ func TestHelperImageRegistry(t *testing.T) {
 		// logic and leaking abstractions.
 		expectedHelperImageName string
 	}{
-		"Docker Hub helper image": {
+		"Default helper image": {
 			build: &common.Build{
 				JobResponse: common.JobResponse{
 					Image: common.Image{
@@ -1723,9 +1718,9 @@ func TestHelperImageRegistry(t *testing.T) {
 					},
 				},
 			},
-			expectedHelperImageName: helperimage.DockerHubName,
+			expectedHelperImageName: helperimage.GitLabRegistryName,
 		},
-		"GitLab Registry helper image": {
+		"DockerHub helper image": {
 			build: &common.Build{
 				JobResponse: common.JobResponse{
 					Image: common.Image{
@@ -1734,7 +1729,7 @@ func TestHelperImageRegistry(t *testing.T) {
 					Variables: common.JobVariables{
 						common.JobVariable{
 							Key:      featureflags.GitLabRegistryHelperImage,
-							Value:    "true",
+							Value:    "false",
 							Public:   false,
 							Internal: false,
 							File:     false,
@@ -1749,7 +1744,7 @@ func TestHelperImageRegistry(t *testing.T) {
 					},
 				},
 			},
-			expectedHelperImageName: helperimage.GitLabRegistryName,
+			expectedHelperImageName: helperimage.DockerHubName,
 		},
 		"helper image overridden still use default helper image in prepare": {
 			build: &common.Build{
@@ -1768,15 +1763,15 @@ func TestHelperImageRegistry(t *testing.T) {
 			},
 			// We expect the default image to still be chosen since the check of
 			// the override happens at a later stage.
-			expectedHelperImageName: helperimage.DockerHubName,
+			expectedHelperImageName: helperimage.GitLabRegistryName,
 		},
-		"helper image overridden still use registry.gitlab.com helper image in prepare": {
+		"helper image overridden still use DockerHub helper image in prepare": {
 			build: &common.Build{
 				JobResponse: common.JobResponse{
 					Variables: common.JobVariables{
 						common.JobVariable{
 							Key:   featureflags.GitLabRegistryHelperImage,
-							Value: "true",
+							Value: "false",
 						},
 					},
 					Image: common.Image{
@@ -1791,9 +1786,9 @@ func TestHelperImageRegistry(t *testing.T) {
 					},
 				},
 			},
-			// We expect the registry.gitlab.com image to still be chosen since
+			// We expect the DockerHub image to still be chosen since
 			// the check of the override happens at a later stage.
-			expectedHelperImageName: helperimage.GitLabRegistryName,
+			expectedHelperImageName: helperimage.DockerHubName,
 		},
 	}
 
@@ -1852,6 +1847,7 @@ func TestLocalHelperImage(t *testing.T) {
 	tests := map[string]struct {
 		jobVariables     common.JobVariables
 		helperImageInfo  helperimage.Info
+		imageFlavor      string
 		shell            string
 		clientAssertions func(*docker.MockClient)
 		expectedImage    *types.ImageInspect
@@ -1953,34 +1949,6 @@ func TestLocalHelperImage(t *testing.T) {
 			},
 			expectedImage: &types.ImageInspect{},
 		},
-		"entrypoint not added when feature flag turned off": {
-			jobVariables: common.JobVariables{
-				common.JobVariable{
-					Key:   featureflags.ResetHelperImageEntrypoint,
-					Value: "false",
-				},
-			},
-			helperImageInfo: defaultHelperImageInfo,
-			clientAssertions: func(c *docker.MockClient) {
-				c.On(
-					"ImageImportBlocking",
-					mock.Anything,
-					mock.Anything,
-					mock.Anything,
-					types.ImageImportOptions{
-						Tag:     "localimageimport",
-						Changes: nil,
-					},
-				).Return(nil)
-
-				c.On(
-					"ImageInspectWithRaw",
-					mock.Anything,
-					mock.Anything,
-				).Return(types.ImageInspect{}, []byte{}, nil)
-			},
-			expectedImage: &types.ImageInspect{},
-		},
 		"nil is returned if error on import": {
 			helperImageInfo: defaultHelperImageInfo,
 			clientAssertions: func(c *docker.MockClient) {
@@ -2024,7 +1992,45 @@ func TestLocalHelperImage(t *testing.T) {
 						return assert.IsType(t, new(os.File), source.Source) &&
 							assert.Equal(
 								t,
-								"prebuilt-x86_64-pwsh.tar.xz",
+								"prebuilt-alpine-x86_64-pwsh.tar.xz",
+								path.Base((source.Source.(*os.File)).Name()),
+							)
+					}),
+					helperimage.DockerHubName,
+					mock.Anything,
+				).Return(nil)
+
+				imageInspect := types.ImageInspect{
+					RepoTags: []string{
+						dockerHubHelperImage,
+					},
+				}
+
+				c.On(
+					"ImageInspectWithRaw",
+					mock.Anything,
+					dockerHubHelperImage,
+				).Return(imageInspect, []byte{}, nil)
+			},
+			expectedImage: &types.ImageInspect{
+				RepoTags: []string{
+					dockerHubHelperImage,
+				},
+			},
+		},
+		"Powershell image is used when shell is pwsh and flavor ubuntu": {
+			helperImageInfo: defaultHelperImageInfo,
+			imageFlavor:     "ubuntu",
+			shell:           shells.SNPwsh,
+			clientAssertions: func(c *docker.MockClient) {
+				c.On(
+					"ImageImportBlocking",
+					mock.Anything,
+					mock.MatchedBy(func(source types.ImageImportSource) bool {
+						return assert.IsType(t, new(os.File), source.Source) &&
+							assert.Equal(
+								t,
+								"prebuilt-ubuntu-x86_64-pwsh.tar.xz",
 								path.Base((source.Source.(*os.File)).Name()),
 							)
 					}),
@@ -2069,6 +2075,9 @@ func TestLocalHelperImage(t *testing.T) {
 					Config: common.RunnerConfig{
 						RunnerSettings: common.RunnerSettings{
 							Shell: tt.shell,
+							Docker: &common.DockerConfig{
+								HelperImageFlavor: tt.imageFlavor,
+							},
 						},
 					},
 				},
@@ -2093,8 +2102,10 @@ func createFakePrebuiltImages(t *testing.T, architecture string) func() {
 	prevPrebuiltImagesPaths := PrebuiltImagesPaths
 	PrebuiltImagesPaths = []string{tempImgDir}
 	for _, fakeImgName := range []string{
-		fmt.Sprintf("prebuilt-%s.tar.xz", architecture),
-		fmt.Sprintf("prebuilt-%s-pwsh.tar.xz", architecture),
+		fmt.Sprintf("prebuilt-alpine-%s.tar.xz", architecture),
+		fmt.Sprintf("prebuilt-alpine-%s-pwsh.tar.xz", architecture),
+		fmt.Sprintf("prebuilt-ubuntu-%s.tar.xz", architecture),
+		fmt.Sprintf("prebuilt-ubuntu-%s-pwsh.tar.xz", architecture),
 	} {
 		fakeLocalImage, err := os.Create(path.Join(tempImgDir, fakeImgName))
 		require.NoError(t, err)

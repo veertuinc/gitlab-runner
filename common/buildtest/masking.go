@@ -11,8 +11,13 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/trace"
 )
 
-func RunBuildWithMasking(t *testing.T, config *common.RunnerConfig, setup buildSetupFn) {
-	resp, err := common.GetRemoteSuccessfulBuildWithEnvs(config.Shell, false)
+func RunBuildWithMasking(t *testing.T, config *common.RunnerConfig, setup BuildSetupFn) {
+	resp, err := common.GetRemoteSuccessfulBuildPrintVars(
+		config.Shell,
+		"MASKED_KEY",
+		"CLEARTEXT_KEY",
+		"MASKED_KEY_OTHER",
+	)
 	require.NoError(t, err)
 
 	build := &common.Build{
@@ -24,6 +29,7 @@ func RunBuildWithMasking(t *testing.T, config *common.RunnerConfig, setup buildS
 		build.Variables,
 		common.JobVariable{Key: "MASKED_KEY", Value: "MASKED_VALUE", Masked: true},
 		common.JobVariable{Key: "CLEARTEXT_KEY", Value: "CLEARTEXT_VALUE", Masked: false},
+		common.JobVariable{Key: "MASKED_KEY_OTHER", Value: "MASKED_VALUE_OTHER", Masked: true},
 	)
 
 	if setup != nil {
@@ -44,6 +50,10 @@ func RunBuildWithMasking(t *testing.T, config *common.RunnerConfig, setup buildS
 
 	assert.NotContains(t, string(contents), "MASKED_KEY=MASKED_VALUE")
 	assert.Contains(t, string(contents), "MASKED_KEY=[MASKED]")
+
+	assert.NotContains(t, string(contents), "MASKED_KEY_OTHER=MASKED_VALUE_OTHER")
+	assert.NotContains(t, string(contents), "MASKED_KEY_OTHER=[MASKED]_OTHER")
+	assert.Contains(t, string(contents), "MASKED_KEY_OTHER=[MASKED]")
 
 	assert.NotContains(t, string(contents), "CLEARTEXT_KEY=[MASKED]")
 	assert.Contains(t, string(contents), "CLEARTEXT_KEY=CLEARTEXT_VALUE")

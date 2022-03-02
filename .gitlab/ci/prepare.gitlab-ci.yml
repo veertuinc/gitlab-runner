@@ -4,31 +4,72 @@
   stage: prepare
   image: docker:${DOCKER_VERSION}-git
   script:
+  - apk add --no-cache curl
   - source ./ci/build_ci_image
-  only:
-    refs:
-    - merge_requests@gitlab-org/gitlab-runner
 
 prepare ci image:
   extends:
   - .image_builder
+  - .linux-dependency-checksums
+  - .rules:prepare:ci:image:merge-requests
   variables:
     BUILD_IMAGE: $CI_IMAGE
     BUILD_DOCKERFILE: ./dockerfiles/ci/Dockerfile
-    GIT_LFS_256_CHECKSUM: 46508eb932c2ec0003a940f179246708d4ddc2fec439dcacbf20ff9e98b957c9
-  only:
-    changes:
-    - dockerfiles/ci/*
-    - .gitlab/ci/_common.gitlab-ci.yml
-    - .gitlab/ci/prepare.gitlab-ci.yml
+    PWSH_VERSION: 7.1.1
 
 prepare alpine-no-root image:
   extends:
   - .image_builder
+  - .rules:prepare:alpine-no-root:image:merge-requests
   variables:
     BUILD_IMAGE: registry.gitlab.com/gitlab-org/gitlab-runner/alpine-no-root:latest
     BUILD_DOCKERFILE: ./tests/dockerfiles/alpine-no-root/Dockerfile
-  only:
-    changes:
-    - tests/dockerfiles/alpine-no-root/*
-    - .gitlab/ci/prepare.gitlab-ci.yml
+
+prepare alpine-entrypoint image:
+  extends:
+  - .image_builder
+  - .rules:prepare:alpine-entrypoint:image:merge-requests
+  variables:
+    BUILD_IMAGE: registry.gitlab.com/gitlab-org/gitlab-runner/alpine-entrypoint:latest
+    BUILD_DOCKERFILE: ./tests/dockerfiles/alpine-entrypoint/Dockerfile
+
+prepare alpine-entrypoint-stderr image:
+  extends:
+  - .image_builder
+  - .rules:prepare:alpine-entrypoint:image:merge-requests
+  variables:
+    BUILD_IMAGE: registry.gitlab.com/gitlab-org/gitlab-runner/alpine-entrypoint-stderr:latest
+    BUILD_DOCKERFILE: ./tests/dockerfiles/alpine-entrypoint/Dockerfile.stderr
+
+prepare alpine-id-overflow image:
+  extends:
+  - .image_builder
+  - .rules:prepare:alpine-id-overflow:image:merge-requests
+  variables:
+    BUILD_IMAGE: registry.gitlab.com/gitlab-org/gitlab-runner/alpine-id-overflow:latest
+    BUILD_DOCKERFILE: ./tests/dockerfiles/alpine-id-overflow/Dockerfile
+
+prepare go fips:
+  extends:
+    - .docker
+    - .rules:prepare:go-fips:image:merge-requests
+  stage: prepare
+  image: docker:${DOCKER_VERSION}-git
+  variables:
+    GO_VERSION: $GO_FIPS_VERSION
+    BUILD_IMAGE: $GO_FIPS_IMAGE
+  script:
+    - apk add --no-cache curl make bash
+    - make go-fips-docker
+
+prepare runner-incept variables:
+  stage: prepare
+  extends:
+    - .rules:merge_request_pipelines:no_docs
+  script:
+    - echo "UPSTREAM_CI_COMMIT_REF=$(./ci/upstream_commit_ref)" >> incept.env
+  after_script:
+    - cat incept.env
+  artifacts:
+    reports:
+      dotenv: incept.env

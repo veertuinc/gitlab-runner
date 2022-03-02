@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package network
 
 import (
@@ -17,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -27,6 +31,14 @@ import (
 const (
 	validToken   = "valid"
 	invalidToken = "invalid"
+)
+
+type registerRunnerResponse int
+
+const (
+	registerRunnerResponseOK = iota
+	registerRunnerResponseRunnerNamespacesLimitHit
+	registerRunnerResponseRunnerProjectsLimitHit
 )
 
 var brokenCredentials = RunnerCredentials{
@@ -75,7 +87,7 @@ func TestClients(t *testing.T) {
 	assert.Error(t, c8err)
 }
 
-func testRegisterRunnerHandler(w http.ResponseWriter, r *http.Request, t *testing.T) {
+func testRegisterRunnerHandler(w http.ResponseWriter, r *http.Request, response registerRunnerResponse, t *testing.T) {
 	if r.URL.Path != "/api/v4/runners" {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -102,6 +114,20 @@ func testRegisterRunnerHandler(w http.ResponseWriter, r *http.Request, t *testin
 			return
 		}
 
+		w.Header().Set("Content-Type", "application/json")
+
+		//nolint:lll
+		mapResponseToBody := map[registerRunnerResponse]string{
+			registerRunnerResponseRunnerNamespacesLimitHit: `{"message":{"runner_namespaces.base":["Maximum number of ci registered group runners (3) exceeded"]}}`,
+			registerRunnerResponseRunnerProjectsLimitHit:   `{"message":{"runner_projects.base":["Maximum number of ci registered project runners (3) exceeded"]}}`,
+		}
+		if badRequestBody := mapResponseToBody[response]; badRequestBody != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(badRequestBody))
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
 		res["token"] = req["token"].(string)
 	case invalidToken:
 		w.WriteHeader(http.StatusForbidden)
@@ -129,7 +155,7 @@ func testRegisterRunnerHandler(w http.ResponseWriter, r *http.Request, t *testin
 
 func TestRegisterRunner(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		testRegisterRunnerHandler(w, r, t)
+		testRegisterRunnerHandler(w, r, registerRunnerResponseOK, t)
 	}))
 	defer s.Close()
 
@@ -210,6 +236,72 @@ func TestRegisterRunner(t *testing.T) {
 			Active:      true,
 		})
 	assert.Nil(t, res)
+}
+
+func TestRegisterRunnerOnRunnerLimitHit(t *testing.T) {
+	type testCase struct {
+		response registerRunnerResponse
+
+		expectedMessage string
+	}
+
+	//nolint:lll
+	testCases := map[string]testCase{
+		"namespace runner limit hit": {
+			response:        registerRunnerResponseRunnerNamespacesLimitHit,
+			expectedMessage: "400 Bad Request (runner_namespaces.base: Maximum number of ci registered group runners (3) exceeded)",
+		},
+		"project runner limit hit": {
+			response:        registerRunnerResponseRunnerProjectsLimitHit,
+			expectedMessage: "400 Bad Request (runner_projects.base: Maximum number of ci registered project runners (3) exceeded)",
+		},
+	}
+
+	c := NewGitLabClient()
+
+	for tn, tc := range testCases {
+		t.Run(tn, func(t *testing.T) {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				testRegisterRunnerHandler(w, r, tc.response, t)
+			}))
+			defer s.Close()
+
+			validToken := RunnerCredentials{
+				URL:   s.URL,
+				Token: validToken,
+			}
+
+			h := registerRunnerLogHook{}
+			logrus.AddHook(&h)
+
+			res := c.RegisterRunner(
+				validToken,
+				RegisterRunnerParameters{
+					Description: "test",
+					Tags:        "tags",
+					RunUntagged: true,
+					Locked:      true,
+					Active:      true,
+				})
+			assert.Nil(t, res)
+			require.Len(t, h.entries, 1)
+			assert.Equal(t, "Registering runner... failed", h.entries[0].Message)
+			assert.Contains(t, h.entries[0].Data["status"], tc.expectedMessage)
+		})
+	}
+}
+
+type registerRunnerLogHook struct {
+	entries []*logrus.Entry
+}
+
+func (s *registerRunnerLogHook) Levels() []logrus.Level {
+	return []logrus.Level{logrus.ErrorLevel}
+}
+
+func (s *registerRunnerLogHook) Fire(entry *logrus.Entry) error {
+	s.entries = append(s.entries, entry)
+	return nil
 }
 
 func testUnregisterRunnerHandler(w http.ResponseWriter, r *http.Request, t *testing.T) {
@@ -361,7 +453,7 @@ func getRequestJobResponse() map[string]interface{} {
 
 	gitInfo := make(map[string]interface{})
 	gitInfo["repo_url"] = "https://gitlab-ci-token:testTokenHere1234@gitlab.example.com/test/test-project.git"
-	gitInfo["ref"] = "master"
+	gitInfo["ref"] = "main"
 	gitInfo["sha"] = "abcdef123456"
 	gitInfo["before_sha"] = "654321fedcba"
 	gitInfo["ref_type"] = "branch"
@@ -374,7 +466,7 @@ func getRequestJobResponse() map[string]interface{} {
 	variables := make([]map[string]interface{}, 1)
 	variables[0] = make(map[string]interface{})
 	variables[0]["key"] = "CI_REF_NAME"
-	variables[0]["value"] = "master"
+	variables[0]["value"] = "main"
 	variables[0]["public"] = true
 	variables[0]["file"] = true
 	variables[0]["raw"] = true
@@ -396,7 +488,7 @@ func getRequestJobResponse() map[string]interface{} {
 	res["steps"] = steps
 
 	image := make(map[string]interface{})
-	image["name"] = "ruby:2.6"
+	image["name"] = "ruby:2.7"
 	image["entrypoint"] = []string{"/bin/sh"}
 	res["image"] = image
 
@@ -534,7 +626,7 @@ func TestRequestJob(t *testing.T) {
 	}
 	assert.True(t, ok)
 
-	assert.Equal(t, "ruby:2.6", res.Image.Name)
+	assert.Equal(t, "ruby:2.7", res.Image.Name)
 	assert.Equal(t, []string{"/bin/sh"}, res.Image.Entrypoint)
 	require.Len(t, res.Services, 2)
 	assert.Equal(t, "postgresql:9.5", res.Services[0].Name)
@@ -546,7 +638,7 @@ func TestRequestJob(t *testing.T) {
 
 	require.Len(t, res.Variables, 1)
 	assert.Equal(t, "CI_REF_NAME", res.Variables[0].Key)
-	assert.Equal(t, "master", res.Variables[0].Value)
+	assert.Equal(t, "main", res.Variables[0].Value)
 	assert.True(t, res.Variables[0].Public)
 	assert.True(t, res.Variables[0].File)
 	assert.True(t, res.Variables[0].Raw)
@@ -1290,6 +1382,7 @@ func checkTestArtifactsUploadHandlerContent(w http.ResponseWriter, r *http.Reque
 	cases := map[string]struct {
 		formValueKey string
 		statusCode   int
+		body         string
 	}{
 		"too-large": {
 			statusCode: http.StatusRequestEntityTooLarge,
@@ -1312,6 +1405,14 @@ func checkTestArtifactsUploadHandlerContent(w http.ResponseWriter, r *http.Reque
 		"service-unavailable": {
 			statusCode: http.StatusServiceUnavailable,
 		},
+		"bad-request": {
+			statusCode: http.StatusBadRequest,
+			body:       `{"message": "duplicate variables"}`,
+		},
+		"bad-request-not-json": {
+			statusCode: http.StatusBadRequest,
+			body:       `not JSON response`,
+		},
 	}
 
 	testCase, ok := cases[body]
@@ -1320,6 +1421,8 @@ func checkTestArtifactsUploadHandlerContent(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+
 	if len(testCase.formValueKey) > 0 {
 		if r.FormValue(testCase.formValueKey) != body {
 			return
@@ -1327,6 +1430,7 @@ func checkTestArtifactsUploadHandlerContent(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.WriteHeader(testCase.statusCode)
+	_, _ = w.Write([]byte(testCase.body))
 }
 
 func testArtifactsUploadHandler(w http.ResponseWriter, r *http.Request, t *testing.T) {
@@ -1337,6 +1441,12 @@ func testArtifactsUploadHandler(w http.ResponseWriter, r *http.Request, t *testi
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusNotAcceptable)
+		return
+	}
+
+	if r.Header.Get("JOB-TOKEN") == "redirect" {
+		w.Header().Set("Location", "new-location")
+		w.WriteHeader(http.StatusTemporaryRedirect)
 		return
 	}
 
@@ -1363,19 +1473,19 @@ func uploadArtifacts(
 	artifactsFile,
 	artifactType string,
 	artifactFormat ArtifactFormat,
-) UploadState {
+) (UploadState, string) {
 	file, err := os.Open(artifactsFile)
 	if err != nil {
-		return UploadFailed
+		return UploadFailed, ""
 	}
 	defer file.Close()
 
 	fi, err := file.Stat()
 	if err != nil {
-		return UploadFailed
+		return UploadFailed, ""
 	}
 	if fi.IsDir() {
-		return UploadFailed
+		return UploadFailed, ""
 	}
 
 	options := ArtifactsOptions{
@@ -1403,6 +1513,11 @@ func TestArtifactsUpload(t *testing.T) {
 		URL:   s.URL,
 		Token: "invalid-token",
 	}
+	redirectToken := JobCredentials{
+		ID:    10,
+		URL:   s.URL,
+		Token: "redirect",
+	}
 
 	tempFile, err := ioutil.TempFile("", "artifacts")
 	assert.NoError(t, err)
@@ -1412,34 +1527,57 @@ func TestArtifactsUpload(t *testing.T) {
 	c := NewGitLabClient()
 
 	require.NoError(t, ioutil.WriteFile(tempFile.Name(), []byte("content"), 0600))
-	state := uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatDefault)
+	state, location := uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatDefault)
 	assert.Equal(t, UploadSucceeded, state, "Artifacts should be uploaded")
+	assert.Empty(t, location)
 
 	require.NoError(t, ioutil.WriteFile(tempFile.Name(), []byte("too-large"), 0600))
-	state = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatDefault)
+	state, location = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatDefault)
 	assert.Equal(t, UploadTooLarge, state, "Artifacts should be not uploaded, because of too large archive")
+	assert.Empty(t, location)
 
 	require.NoError(t, ioutil.WriteFile(tempFile.Name(), []byte("zip"), 0600))
-	state = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatZip)
+	state, location = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatZip)
 	assert.Equal(t, UploadSucceeded, state, "Artifacts should be uploaded, as zip")
+	assert.Empty(t, location)
 
 	require.NoError(t, ioutil.WriteFile(tempFile.Name(), []byte("gzip"), 0600))
-	state = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatGzip)
+	state, location = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatGzip)
 	assert.Equal(t, UploadSucceeded, state, "Artifacts should be uploaded, as gzip")
+	assert.Empty(t, location)
 
 	require.NoError(t, ioutil.WriteFile(tempFile.Name(), []byte("junit"), 0600))
-	state = uploadArtifacts(c, config, tempFile.Name(), "junit", ArtifactFormatGzip)
+	state, location = uploadArtifacts(c, config, tempFile.Name(), "junit", ArtifactFormatGzip)
 	assert.Equal(t, UploadSucceeded, state, "Artifacts should be uploaded, as gzip")
+	assert.Empty(t, location)
 
-	state = uploadArtifacts(c, config, "not/existing/file", "", ArtifactFormatDefault)
+	state, location = uploadArtifacts(c, config, "not/existing/file", "", ArtifactFormatDefault)
 	assert.Equal(t, UploadFailed, state, "Artifacts should fail to be uploaded")
+	assert.Empty(t, location)
 
-	state = uploadArtifacts(c, invalidToken, tempFile.Name(), "", ArtifactFormatDefault)
+	state, location = uploadArtifacts(c, invalidToken, tempFile.Name(), "", ArtifactFormatDefault)
 	assert.Equal(t, UploadForbidden, state, "Artifacts should be rejected if invalid token")
+	assert.Empty(t, location)
 
 	require.NoError(t, ioutil.WriteFile(tempFile.Name(), []byte("service-unavailable"), 0600))
-	state = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatDefault)
+	state, location = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatDefault)
 	assert.Equal(t, UploadServiceUnavailable, state, "Artifacts should get service unavailable")
+	assert.Empty(t, location)
+
+	require.NoError(t, ioutil.WriteFile(tempFile.Name(), []byte("bad-request"), 0600))
+	state, location = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatDefault)
+	assert.Equal(t, UploadFailed, state, "Artifacts should fail to be uploaded")
+	assert.Empty(t, location)
+
+	require.NoError(t, ioutil.WriteFile(tempFile.Name(), []byte("bad-request-not-json"), 0600))
+	state, location = uploadArtifacts(c, config, tempFile.Name(), "", ArtifactFormatDefault)
+	assert.Equal(t, UploadFailed, state, "Artifacts should fail to be uploaded")
+	assert.Empty(t, location)
+
+	require.NoError(t, ioutil.WriteFile(tempFile.Name(), []byte("content"), 0600))
+	state, location = uploadArtifacts(c, redirectToken, tempFile.Name(), "", ArtifactFormatDefault)
+	assert.Equal(t, UploadRedirected, state, "Artifacts upload should be redirected")
+	assert.Equal(t, "new-location", location)
 }
 
 func testArtifactsDownloadHandler(w http.ResponseWriter, r *http.Request) {
@@ -1621,6 +1759,10 @@ func TestRunnerVersionToGetExecutorAndShellFeaturesWithTheDefaultShell(t *testin
 		features := args[0].(*FeaturesInfo)
 		features.Shared = true
 	})
+	executorProvider.On("GetConfigInfo", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		info := args[1].(*ConfigInfo)
+		info.Gpus = "all"
+	})
 	RegisterExecutorProvider("my-test-executor", &executorProvider)
 
 	shell := MockShell{}
@@ -1645,4 +1787,5 @@ func TestRunnerVersionToGetExecutorAndShellFeaturesWithTheDefaultShell(t *testin
 	assert.False(t, info.Features.Artifacts, "dry-run that this is not enabled")
 	assert.True(t, info.Features.Shared, "feature is enabled by executor")
 	assert.True(t, info.Features.Variables, "feature is enabled by shell")
+	assert.Equal(t, "all", info.Config.Gpus)
 }

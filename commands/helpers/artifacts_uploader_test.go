@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package helpers
 
 import (
@@ -328,7 +331,7 @@ func TestFileArchiverCompressionLevel(t *testing.T) {
 			archive.Register(
 				"zip",
 				func(w io.Writer, dir string, level archive.CompressionLevel) (archive.Archiver, error) {
-					assert.Equal(t, getCompressionLevel(expectedLevel), level)
+					assert.Equal(t, GetCompressionLevel(expectedLevel), level)
 					return mockArchiver, nil
 				},
 				nil,

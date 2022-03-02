@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package command
 
 import (
@@ -19,7 +22,8 @@ func newCommand(
 	ctx context.Context,
 	t *testing.T,
 	executable string,
-	options process.CommandOptions,
+	cmdOpts process.CommandOptions,
+	options Options,
 ) (*process.MockCommander, *process.MockKillWaiter, Command, func()) {
 	commanderMock := new(process.MockCommander)
 	processKillWaiterMock := new(process.MockKillWaiter)
@@ -43,7 +47,7 @@ func newCommand(
 		return processKillWaiterMock
 	}
 
-	c := New(ctx, executable, []string{}, options)
+	c := New(ctx, executable, []string{}, cmdOpts, options)
 
 	return commanderMock, processKillWaiterMock, c, cleanup
 }
@@ -98,13 +102,13 @@ func TestCommand_Run(t *testing.T) {
 			ctx, ctxCancel := context.WithCancel(context.Background())
 			defer ctxCancel()
 
-			options := process.CommandOptions{
+			cmdOpts := process.CommandOptions{
 				Logger:              new(process.MockLogger),
 				GracefulKillTimeout: 100 * time.Millisecond,
 				ForceKillTimeout:    100 * time.Millisecond,
 			}
 
-			commanderMock, processKillWaiterMock, c, cleanup := newCommand(ctx, t, "exec", options)
+			commanderMock, processKillWaiterMock, c, cleanup := newCommand(ctx, t, "exec", cmdOpts, Options{})
 			defer cleanup()
 
 			commanderMock.On("Start").

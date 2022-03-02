@@ -5,9 +5,9 @@ info: To determine the technical writer assigned to the Stage/Group associated w
 comments: false
 ---
 
-# Shells supported by GitLab Runner
+# Types of shells supported by GitLab Runner **(FREE)**
 
-GitLab Runner implements a few shell script generators that allow to execute
+GitLab Runner implements a few shell script generators that allow executing
 builds on different systems.
 
 ## Overview
@@ -21,19 +21,19 @@ The shell scripts contain commands to execute all steps of the build:
 1. Generate and upload the build artifacts
 
 The shells don't have any configuration options. The build steps are received
-from the commands defined in the [`script` directive in `.gitlab-ci.yml`](https://docs.gitlab.com/ee/ci/yaml/README.html#script).
+from the commands defined in the [`script` directive in `.gitlab-ci.yml`](https://docs.gitlab.com/ee/ci/yaml/index.html#script).
 
-The currently supported shells are:
+The supported shells are:
 
 | Shell         | Status             |  Description |
 | --------------| ------------------ |  ----------- |
-| `bash`        | Fully Supported    | Bash (Bourne-shell) shell. All commands executed in Bash context (default for all Unix systems) |
-| `sh`          | Fully Supported    | Sh (Bourne-shell) shell. All commands executed in Sh context (fallback for `bash` for all Unix systems) |
-| `powershell`  | Fully Supported    | PowerShell script. All commands are executed in Windows PowerShell Desktop context. Default when registering a new runner in version 12.0 or newer. |
-| `pwsh`        | Fully Supported    | PowerShell script. All commands are executed in PowerShell Core context. |
-| `cmd`         | Deprecated         | Windows Batch script. All commands are executed in Batch context. Deprecated in favor of PowerShell Desktop. Default when no [`shell`](../configuration/advanced-configuration.md#the-runners-section) is specified. [Learn how to gain access to the CMD shell when PowerShell is the default shell](#access-cmd-shell-when-powershell-is-the-default). |
+| `bash`        | Fully Supported    | Bash (Bourne Again Shell). All commands executed in Bash context (default for all Unix systems) |
+| `sh`          | Fully Supported    | Sh (Bourne shell). All commands executed in Sh context (fallback for `bash` for all Unix systems) |
+| `powershell`  | Fully Supported    | PowerShell script. All commands are executed in PowerShell Desktop context. In GitLab Runner 12.0-13.12, this is the default when registering a new runner. |
+| `pwsh`        | Fully Supported    | PowerShell script. All commands are executed in PowerShell Core context. In GitLab Runner 14.0 and later, this is the default when registering a new runner. |
+| `cmd`         | Deprecated         | Windows Batch script. All commands are executed in Batch context. Deprecated in favor of PowerShell Core. Default when no [`shell`](../configuration/advanced-configuration.md#the-runners-section) is specified. [Learn how to gain access to the CMD shell when PowerShell is the default shell](#access-cmd-shell-when-powershell-is-the-default). |
 
-If you want to select a particular shell to use other than the default, you need to [specify the shell](../executors/shell.md#selecting-your-shell) in your `config.toml` file.
+If you want to select a particular shell to use other than the default, you must [specify the shell](../executors/shell.md#selecting-your-shell) in your `config.toml` file.
 
 ## Sh/Bash shells
 
@@ -64,7 +64,7 @@ dotfile](https://tldp.org/LDP/Bash-Beginners-Guide/html/sect_03_01.html#sect_03_
 is executed in your job.
 
 If a [job fails on the `Prepare
-environment`](../faq/README.md#job-failed-system-failure-preparing-environment) stage, it
+environment`](../faq/index.md#job-failed-system-failure-preparing-environment) stage, it
 is likely that something in the shell profile is causing the failure. A common
 failure is when you have a `.bash_logout` that tries to clear the console.
 
@@ -79,22 +79,30 @@ Executors that load shell profiles:
 
 ## PowerShell
 
-The default shell when a new runner is registered using GitLab Runner
-12.0 or newer.
+PowerShell Desktop Edition is the default shell when a new runner is registered on Windows using GitLab Runner
+12.0-13.12. In 14.0 and later, the default is PowerShell Core Edition.
 
 PowerShell doesn't support executing the build in context of another user.
 
 The generated PowerShell script is executed by saving its content to a file and
 passing the filename to the following command:
 
-```batch
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command generated-windows-powershell.ps1
-```
+- For PowerShell Desktop Edition:
+
+  ```batch
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command generated-windows-powershell.ps1
+  ```
+
+- For PowerShell Core Edition:
+
+  ```batch
+  pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command generated-windows-powershell.ps1
+  ```
 
 This is how an example PowerShell script looks like:
 
 ```powershell
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Continue" # This will be set to 'Stop' when targetting PowerShell Core
 
 echo "Running on $([Environment]::MachineName)..."
 
@@ -105,7 +113,7 @@ echo "Running on $([Environment]::MachineName)..."
   $env:CI_COMMIT_SHA=$CI_COMMIT_SHA
   $CI_COMMIT_BEFORE_SHA="d63117656af6ff57d99e50cc270f854691f335ad"
   $env:CI_COMMIT_BEFORE_SHA=$CI_COMMIT_BEFORE_SHA
-  $CI_COMMIT_REF_NAME="master"
+  $CI_COMMIT_REF_NAME="main"
   $env:CI_COMMIT_REF_NAME=$CI_COMMIT_REF_NAME
   $CI_JOB_ID="1"
   $env:CI_JOB_ID=$CI_JOB_ID
@@ -148,19 +156,19 @@ echo "Running on $([Environment]::MachineName)..."
   cd "C:\GitLab-Runner\builds\0\project-1"
   if(!$?) { Exit $LASTEXITCODE }
 
-  echo "Checking out db45ad9a as master..."
+  echo "Checking out db45ad9a as main..."
   & "git" "checkout" "db45ad9af9d7af5e61b829442fd893d96e31250c"
   if(!$?) { Exit $LASTEXITCODE }
 
-  if(Test-Path "..\..\..\cache\project-1\pages\master\cache.tgz" -PathType Leaf) {
+  if(Test-Path "..\..\..\cache\project-1\pages\main\cache.tgz" -PathType Leaf) {
     echo "Restoring cache..."
-    & "gitlab-runner-windows-amd64.exe" "extract" "--file" "..\..\..\cache\project-1\pages\master\cache.tgz"
+    & "gitlab-runner-windows-amd64.exe" "extract" "--file" "..\..\..\cache\project-1\pages\main\cache.tgz"
     if(!$?) { Exit $LASTEXITCODE }
 
   } else {
-    if(Test-Path "..\..\..\cache\project-1\pages\master\cache.tgz" -PathType Leaf) {
+    if(Test-Path "..\..\..\cache\project-1\pages\main\cache.tgz" -PathType Leaf) {
       echo "Restoring cache..."
-      & "gitlab-runner-windows-amd64.exe" "extract" "--file" "..\..\..\cache\project-1\pages\master\cache.tgz"
+      & "gitlab-runner-windows-amd64.exe" "extract" "--file" "..\..\..\cache\project-1\pages\main\cache.tgz"
       if(!$?) { Exit $LASTEXITCODE }
 
     }
@@ -175,7 +183,7 @@ if(!$?) { Exit $LASTEXITCODE }
   $env:CI_COMMIT_SHA=$CI_COMMIT_SHA
   $CI_COMMIT_BEFORE_SHA="d63117656af6ff57d99e50cc270f854691f335ad"
   $env:CI_COMMIT_BEFORE_SHA=$CI_COMMIT_BEFORE_SHA
-  $CI_COMMIT_REF_NAME="master"
+  $CI_COMMIT_REF_NAME="main"
   $env:CI_COMMIT_REF_NAME=$CI_COMMIT_REF_NAME
   $CI_JOB_ID="1"
   $env:CI_JOB_ID=$CI_JOB_ID
@@ -220,7 +228,7 @@ if(!$?) { Exit $LASTEXITCODE }
   $env:CI_COMMIT_SHA=$CI_COMMIT_SHA
   $CI_COMMIT_BEFORE_SHA="d63117656af6ff57d99e50cc270f854691f335ad"
   $env:CI_COMMIT_BEFORE_SHA=$CI_COMMIT_BEFORE_SHA
-  $CI_COMMIT_REF_NAME="master"
+  $CI_COMMIT_REF_NAME="main"
   $env:CI_COMMIT_REF_NAME=$CI_COMMIT_REF_NAME
   $CI_JOB_ID="1"
   $env:CI_JOB_ID=$CI_JOB_ID
@@ -254,7 +262,7 @@ if(!$?) { Exit $LASTEXITCODE }
   if(!$?) { Exit $LASTEXITCODE }
 
   echo "Archiving cache..."
-  & "gitlab-runner-windows-amd64.exe" "archive" "--file" "..\..\..\cache\project-1\pages\master\cache.tgz" "--path" "vendor"
+  & "gitlab-runner-windows-amd64.exe" "archive" "--file" "..\..\..\cache\project-1\pages\main\cache.tgz" "--path" "vendor"
   if(!$?) { Exit $LASTEXITCODE }
 
 }
@@ -319,7 +327,7 @@ goto :EOF
 SET CI=true
 SET CI_COMMIT_SHA=db45ad9af9d7af5e61b829442fd893d96e31250c
 SET CI_COMMIT_BEFORE_SHA=d63117656af6ff57d99e50cc270f854691f335ad
-SET CI_COMMIT_REF_NAME=master
+SET CI_COMMIT_REF_NAME=main
 SET CI_JOB_ID=1
 SET CI_REPOSITORY_URL=http://gitlab.example.com/group/project.git
 SET CI_PROJECT_ID=1
@@ -343,19 +351,19 @@ IF !errorlevel! NEQ 0 exit /b !errorlevel!
 cd /D "C:\GitLab-Runner\builds\0\project-1"
 IF !errorlevel! NEQ 0 exit /b !errorlevel!
 
-echo Checking out db45ad9a as master...
+echo Checking out db45ad9a as main...
 "git" "checkout" "db45ad9af9d7af5e61b829442fd893d96e31250c"
 IF !errorlevel! NEQ 0 exit /b !errorlevel!
 
-IF EXIST "..\..\..\cache\project-1\pages\master\cache.tgz" (
+IF EXIST "..\..\..\cache\project-1\pages\main\cache.tgz" (
   echo Restoring cache...
-  "gitlab-runner-windows-amd64.exe" "extract" "--file" "..\..\..\cache\project-1\pages\master\cache.tgz"
+  "gitlab-runner-windows-amd64.exe" "extract" "--file" "..\..\..\cache\project-1\pages\main\cache.tgz"
   IF !errorlevel! NEQ 0 exit /b !errorlevel!
 
 ) ELSE (
-  IF EXIST "..\..\..\cache\project-1\pages\master\cache.tgz" (
+  IF EXIST "..\..\..\cache\project-1\pages\main\cache.tgz" (
     echo Restoring cache...
-    "gitlab-runner-windows-amd64.exe" "extract" "--file" "..\..\..\cache\project-1\pages\master\cache.tgz"
+    "gitlab-runner-windows-amd64.exe" "extract" "--file" "..\..\..\cache\project-1\pages\main\cache.tgz"
     IF !errorlevel! NEQ 0 exit /b !errorlevel!
 
   )
@@ -366,7 +374,7 @@ goto :EOF
 SET CI=true
 SET CI_COMMIT_SHA=db45ad9af9d7af5e61b829442fd893d96e31250c
 SET CI_COMMIT_BEFORE_SHA=d63117656af6ff57d99e50cc270f854691f335ad
-SET CI_COMMIT_REF_NAME=master
+SET CI_COMMIT_REF_NAME=main
 SET CI_JOB_ID=1
 SET CI_REPOSITORY_URL=Z:\Gitlab\tests\test
 SET CI_PROJECT_ID=1
@@ -393,7 +401,7 @@ goto :EOF
 SET CI=true
 SET CI_COMMIT_SHA=db45ad9af9d7af5e61b829442fd893d96e31250c
 SET CI_COMMIT_BEFORE_SHA=d63117656af6ff57d99e50cc270f854691f335ad
-SET CI_COMMIT_REF_NAME=master
+SET CI_COMMIT_REF_NAME=main
 SET CI_JOB_ID=1
 SET CI_REPOSITORY_URL=Z:\Gitlab\tests\test
 SET CI_PROJECT_ID=1
@@ -413,7 +421,7 @@ cd /D "C:\GitLab-Runner\builds\0\project-1"
 IF !errorlevel! NEQ 0 exit /b !errorlevel!
 
 echo Archiving cache...
-"gitlab-runner-windows-amd64.exe" "archive" "--file" "..\..\..\cache\project-1\pages\master\cache.tgz" "--path" "vendor"
+"gitlab-runner-windows-amd64.exe" "archive" "--file" "..\..\..\cache\project-1\pages\main\cache.tgz" "--path" "vendor"
 IF !errorlevel! NEQ 0 exit /b !errorlevel!
 
 goto :EOF
@@ -429,7 +437,7 @@ The [Slicing and Dicing with PowerShell on GitLab CI](https://www.youtube.com/wa
 video is a walkthrough of the [PowerShell Pipelines on GitLab CI](https://gitlab.com/guided-explorations/gitlab-ci-yml-powershell-tips-tricks-and-hacks/powershell-pipelines-on-gitlab-ci)
 Guided Exploration project. It was tested on:
 
-- Windows PowerShell and PowerShell Core 7 on GitLab [Windows shared runners](https://docs.gitlab.com/ee/user/gitlab_com/#windows-shared-runners-beta).
+- Windows PowerShell and PowerShell Core 7 on GitLab [Windows shared runners](https://docs.gitlab.com/ee/ci/runners/build_cloud/windows_build_cloud.html).
 - PowerShell Core 7 in Linux Containers with the [Docker-Machine runner](../executors/docker_machine.md).
 
 The example can be copied to your own group or instance for testing. More details

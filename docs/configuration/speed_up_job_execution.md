@@ -4,7 +4,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#designated-technical-writers
 ---
 
-# Speed up job execution
+# Speed up job execution **(FREE)**
 
 You can improve performance of your jobs by caching your images and dependencies.
 
@@ -14,6 +14,7 @@ You can speed up the time it takes to download Docker images by using:
 
 - The GitLab Dependency Proxy or
 - A mirror of the DockerHub Registry
+- Other open source solutions
 
 ### GitLab Dependency Proxy
 
@@ -66,13 +67,17 @@ To create a Docker Hub Registry mirror:
    You should choose the private network IP address. The private
    network is usually the fastest solution for internal communication
    between machines on a single provider, like DigitalOcean, AWS, or Azure.
-   Usually, storage on a private network is not applied against your monthly
-   bandwidth limit.
+   Usually, data transferred on a private network is not applied against
+   your monthly bandwidth limit.
 
 The Docker Hub registry is accessible under `MY_REGISTRY_IP:6000`.
 
 You can now [configure `config.toml`](../configuration/autoscale.md#distributed-container-registry-mirroring)
 to use the new registry server.
+
+### Other open source solutions
+
+- [`rpardini/docker-registry-proxy`](https://github.com/rpardini/docker-registry-proxy) can proxy most container registries locally, including the GitLab Container Registry.
 
 ## Use a distributed cache
 

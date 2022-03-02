@@ -42,23 +42,9 @@ type statePermutation struct {
 }
 
 func newStatePermutationFromBuild(build *common.Build) statePermutation {
-	state := build.CurrentState()
-
-	// the "finished" state was broken out into "success" and "failed",
-	// but our metrics are a public API, so to maintain backwards compatibility
-	// for now we convert these states back to "finished".
-	//
-	// DEPRECATED
-	// TODO: Remove in 14.0. For more details read
-	// https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26900
-	switch state {
-	case common.BuildRunRuntimeFailed, common.BuildRunRuntimeCanceled:
-		state = common.BuildRuntimeState("finished")
-	}
-
 	return statePermutation{
 		runner:        build.Runner.ShortDescription(),
-		buildState:    state,
+		buildState:    build.CurrentState(),
 		buildStage:    build.CurrentStage(),
 		executorStage: build.CurrentExecutorStage(),
 	}
@@ -233,10 +219,24 @@ func (b *buildsHelper) statesAndStages() map[statePermutation]int {
 	defer b.lock.Unlock()
 
 	data := make(map[statePermutation]int)
+
+	for token := range b.counters {
+		// 'idle' state will ensure the metric is always present, even if no
+		// builds are being processed at the moment
+		idleState := statePermutation{
+			runner:        helpers.ShortenToken(token),
+			buildState:    "idle",
+			buildStage:    "idle",
+			executorStage: "idle",
+		}
+		data[idleState] = 0
+	}
+
 	for _, build := range b.builds {
 		state := newStatePermutationFromBuild(build)
 		data[state]++
 	}
+
 	return data
 }
 

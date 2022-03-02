@@ -5,22 +5,25 @@ info: To determine the technical writer assigned to the Stage/Group associated w
 comments: false
 ---
 
-# Registering runners
+# Registering runners **(FREE)**
 
-Registering a runner is the process that binds the runner with a GitLab instance.
+Registering a runner is the process that binds the runner with one or more GitLab instances.
+
+You can register multiple runners on the same host machine,
+each with a different configuration, by repeating the `register` command.
 
 ## Requirements
 
-Before registering a runner, you need to first:
+Before registering a runner, you must first:
 
 - [Install it](../install/index.md) on a server separate than where GitLab
   is installed
 - Obtain a token:
-  - For a [shared runner](https://docs.gitlab.com/ee/ci/runners/#shared-runners),
+  - For a [shared runner](https://docs.gitlab.com/ee/ci/runners/runners_scope.html#shared-runners),
     have an administrator go to the GitLab Admin Area and click **Overview > Runners**
-  - For a [group runner](https://docs.gitlab.com/ee/ci/runners/README.html#group-runners),
+  - For a [group runner](https://docs.gitlab.com/ee/ci/runners/runners_scope.html#group-runners),
     go to **Settings > CI/CD** and expand the **Runners** section
-  - For a [project-specific runner](https://docs.gitlab.com/ee/ci/runners/README.html#specific-runners),
+  - For a [project-specific runner](https://docs.gitlab.com/ee/ci/runners/runners_scope.html#specific-runners),
     go to **Settings > CI/CD** and expand the **Runners** section
 
 NOTE:
@@ -35,7 +38,7 @@ The instructions in this section are meant to be used *after* you
 The following steps describe launching a short-lived `gitlab-runner` container to
 register the container you created during install. After you finish
 registration, the resulting configuration is written to your chosen
-configuration volume (for example, `/srv/gitlab-runner/config`) and will be
+configuration volume (for example, `/srv/gitlab-runner/config`) and is
 loaded by the runner using that configuration volume.
 
 To register a runner using a Docker container:
@@ -62,12 +65,13 @@ To register a runner using a Docker container:
 1. Enter the token you obtained to register the runner.
 1. Enter a description for the runner. You can change this value later in the
    GitLab user interface.
-1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/#using-tags),
+1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/configure_runners.html#use-tags-to-control-which-jobs-a-runner-can-run),
    separated by commas. You can change this value later in the GitLab user
    interface.
-1. Provide the [runner executor](../executors/README.md). For most use cases, enter
+1. Enter any optional maintenance note for the runner.
+1. Provide the [runner executor](../executors/index.md). For most use cases, enter
    `docker`.
-1. If you entered `docker` as your executor, you'll be asked for the default
+1. If you entered `docker` as your executor, you are asked for the default
    image to be used for projects that do not define one in `.gitlab-ci.yml`.
 
 ## Linux
@@ -80,16 +84,27 @@ To register a runner under Linux:
    sudo gitlab-runner register
    ```
 
+   If you are behind a proxy, add an environment variable and then run the
+   registration command:
+
+   ```shell
+   export HTTP_PROXY=http://yourproxyurl:3128
+   export HTTPS_PROXY=http://yourproxyurl:3128
+
+   sudo -E gitlab-runner register
+   ```
+
 1. Enter your GitLab instance URL (also known as the `gitlab-ci coordinator URL`).
 1. Enter the token you obtained to register the runner.
 1. Enter a description for the runner. You can change this value later in the
    GitLab user interface.
-1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/#using-tags),
+1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/configure_runners.html#use-tags-to-control-which-jobs-a-runner-can-run),
    separated by commas. You can change this value later in the GitLab user
    interface.
-1. Provide the [runner executor](../executors/README.md). For most use cases, enter
+1. Enter any optional maintenance note for the runner.
+1. Provide the [runner executor](../executors/index.md). For most use cases, enter
    `docker`.
-1. If you entered `docker` as your executor, you'll be asked for the default
+1. If you entered `docker` as your executor, you are asked for the default
    image to be used for projects that do not define one in `.gitlab-ci.yml`.
 
 ## macOS
@@ -110,10 +125,11 @@ To register a runner under macOS:
 1. Enter the token you obtained to register the runner.
 1. Enter a description for the runner. You can change this value later in the
    GitLab user interface.
-1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/#using-tags),
+1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/configure_runners.html#use-tags-to-control-which-jobs-a-runner-can-run),
    separated by commas. You can change this value later in the GitLab user
    interface.
-1. Provide the [runner executor](../executors/README.md). For most use cases, enter
+1. Enter any optional maintenance note for the runner.
+1. Provide the [runner executor](../executors/index.md). For most use cases, enter
    `docker`.
 1. If you entered `docker` as your executor, you'll be asked for the default
    image to be used for projects that do not define one in `.gitlab-ci.yml`.
@@ -132,16 +148,14 @@ To register a runner under Windows:
 1. Enter the token you obtained to register the runner.
 1. Enter a description for the runner. You can change this value later in the
    GitLab user interface.
-1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/#using-tags),
+1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/configure_runners.html#use-tags-to-control-which-jobs-a-runner-can-run),
    separated by commas. You can change this value later in the GitLab user
    interface.
-1. Provide the [runner executor](../executors/README.md). For most use cases, enter
+1. Enter any optional maintenance note for the runner.
+1. Provide the [runner executor](../executors/index.md). For most use cases, enter
    `docker`.
-1. If you entered `docker` as your executor, you'll be asked for the default
+1. If you entered `docker` as your executor, you are asked for the default
    image to be used for projects that do not define one in `.gitlab-ci.yml`.
-
-If you'd like to register multiple runners on the same machine with different
-configurations repeat the `./gitlab-runner.exe register` command.
 
 ## FreeBSD
 
@@ -157,12 +171,13 @@ To register a runner under FreeBSD:
 1. Enter the token you obtained to register the runner.
 1. Enter a description for the runner. You can change this value later in the
    GitLab user interface.
-1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/#using-tags),
+1. Enter the [tags associated with the runner](https://docs.gitlab.com/ee/ci/runners/configure_runners.html#use-tags-to-control-which-jobs-a-runner-can-run),
    separated by commas. You can change this value later in the GitLab user
    interface.
-1. Provide the [runner executor](../executors/README.md). For most use cases, enter
+1. Enter any optional maintenance note for the runner.
+1. Provide the [runner executor](../executors/index.md). For most use cases, enter
    `docker`.
-1. If you entered `docker` as your executor, you'll be asked for the default
+1. If you entered `docker` as your executor, you are asked for the default
    image to be used for projects that do not define one in `.gitlab-ci.yml`.
 
 ## One-line registration command
@@ -187,6 +202,7 @@ sudo gitlab-runner register \
   --executor "docker" \
   --docker-image alpine:latest \
   --description "docker-runner" \
+  --maintenance-note "Free-form maintainer notes about this runner" \
   --tag-list "docker,aws" \
   --run-untagged="true" \
   --locked="false" \
@@ -204,6 +220,7 @@ docker run --rm -v /srv/gitlab-runner/config:/etc/gitlab-runner gitlab/gitlab-ru
   --url "https://gitlab.com/" \
   --registration-token "PROJECT_REGISTRATION_TOKEN" \
   --description "docker-runner" \
+  --maintenance-note "Free-form maintainer notes about this runner" \
   --tag-list "docker,aws" \
   --run-untagged="true" \
   --locked="false" \
@@ -211,10 +228,13 @@ docker run --rm -v /srv/gitlab-runner/config:/etc/gitlab-runner gitlab/gitlab-ru
 ```
 
 The `--access-level` parameter was added in GitLab Runner 12.0. It uses a registration API parameter introduced in GitLab 11.11.
-Use this parameter during registration to create a [protected runner](https://docs.gitlab.com/ee/ci/runners/#prevent-runners-from-revealing-sensitive-information).
+Use this parameter during registration to create a [protected runner](https://docs.gitlab.com/ee/ci/runners/configure_runners.html#prevent-runners-from-revealing-sensitive-information).
 For a protected runner, use the `--access-level="ref_protected"` parameter.
 For an unprotected runner, use `--access-level="not_protected"` instead or leave the value undefined.
 This value can later be toggled on or off in the project's **Settings > CI/CD** menu.
+
+The `--maintenance-note` parameter was [added](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/3268) in GitLab Runner 14.8.
+You can use it to add information related to runner maintenance. The maximum allowed length is 255 characters.
 
 ## `[[runners]]` configuration template file
 
@@ -225,7 +245,7 @@ Some runner configuration settings can't be set with environment variables or co
 For example:
 
 - Environment variables do not support slices.
-- Command line option support is internationally unavailable for the settings for the
+- Command line option support is intentionally unavailable for the settings for the
   whole Kubernetes executor volumes tree.
 
 This is a problem for environments that are handled by any kind of automation, such as the
@@ -289,7 +309,7 @@ Registering runner... succeeded                     runner=__REDACTED__
 Runner registered successfully. Feel free to start it, but if it's running already the config should be automatically reloaded!
 ```
 
-The command above will create the following `config.toml` file:
+The command above creates the following `config.toml` file:
 
 ```toml
 concurrent = 1
@@ -325,12 +345,12 @@ We can see the basic configuration created from the provided command line option
 - The default, empty section `runners.kubernetes` with only the one option
   provided during the registration filled out.
 
-Normally one would need to set few more options to make the Kubernetes executor
+Normally one would have to set few more options to make the Kubernetes executor
 usable, but the above is enough for the purpose of our example.
 
-Let's now assume that we need to configure an `emptyDir` volume for our Kubernetes executor. There is
+Let's now assume that we have to configure an `emptyDir` volume for our Kubernetes executor. There is
 no way to add this while registering with neither environment variables nor command line options.
-We would need to **manually append** something like this to the end of the file:
+We would have to **manually append** something like this to the end of the file:
 
 ```toml
 [[runners.kubernetes.volumes.empty_dir]]
@@ -344,7 +364,7 @@ relies on entries ordering), we could just append the required changes to the en
 file.
 ​
 However, this becomes tricky when more `[[runners]]` sections are being registered
-within one `config.toml` file. The assumption that the new one will be always at the
+within one `config.toml` file. The assumption that the new one is always at the
 end is risky.
 
 With GitLab Runner 12.2, this becomes much easier using the `--template-config` flag.
@@ -363,7 +383,7 @@ EOF
 
 Having the file, we can now try to register the runner again, but this time adding the
 `--template-config /tmp/test-config.template.toml` option. Apart from this change, the
-rest of registration command will be exactly the same:
+rest of registration command is exactly the same:
 
 ```shell
 $ sudo gitlab-runner register \

@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package network
 
 import (
@@ -18,8 +21,10 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/jpillora/backoff"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -43,11 +48,15 @@ func clientHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	case "/api/v4/test/json":
 		if r.Header.Get("Content-Type") != "application/json" {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"message":{"some-key":["some error"]}}`)
 			return
 		}
 		if r.Header.Get("Accept") != "application/json" {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotAcceptable)
+			fmt.Fprint(w, `{"message":"406 Not Acceptable"}`)
 			return
 		}
 
@@ -140,12 +149,21 @@ func TestClientDo(t *testing.T) {
 
 	statusCode, statusText, _ = c.doJSON(context.Background(), "test/json", http.MethodGet, http.StatusOK, nil, &res)
 	assert.Equal(t, http.StatusBadRequest, statusCode, statusText)
+	assert.Contains(t, statusText, `test/json: 400 Bad Request (some-key: some error)`)
 
 	statusCode, statusText, _ = c.doJSON(context.Background(), "test/json", http.MethodGet, http.StatusOK, &req, nil)
 	assert.Equal(t, http.StatusNotAcceptable, statusCode, statusText)
+	assert.True(
+		t,
+		strings.HasSuffix(statusText, "test/json: 406 Not Acceptable"),
+		"%q should contain %q suffix",
+		statusText,
+		"test/json: 406 Not Acceptable",
+	)
 
 	statusCode, statusText, _ = c.doJSON(context.Background(), "test/json", http.MethodGet, http.StatusOK, nil, nil)
 	assert.Equal(t, http.StatusBadRequest, statusCode, statusText)
+	assert.Contains(t, statusText, `test/json: 400 Bad Request (some-key: some error)`)
 
 	statusCode, statusText, _ = c.doJSON(context.Background(), "test/json", http.MethodGet, http.StatusOK, &req, &res)
 	assert.Equal(t, http.StatusOK, statusCode, statusText)
@@ -523,4 +541,105 @@ func TestRequesterCalled(t *testing.T) {
 
 	res, _ := c.do(context.Background(), "http://mockURL", http.MethodGet, nil, "", nil)
 	assert.Equal(t, resReturn, res)
+}
+
+func Test307and308Redirections(t *testing.T) {
+	testPayload := []byte("test payload")
+
+	type codes struct {
+		sent     int
+		expected int
+	}
+
+	defaultCodes := []codes{
+		{sent: http.StatusTemporaryRedirect, expected: http.StatusOK},
+		{sent: http.StatusPermanentRedirect, expected: http.StatusOK},
+	}
+
+	tests := map[string]struct {
+		getRequest   func(t *testing.T) io.Reader
+		expectedBody []byte
+		codes        []codes
+	}{
+		"nil body": {
+			getRequest: func(t *testing.T) io.Reader {
+				return nil
+			},
+			expectedBody: []byte{},
+			codes:        defaultCodes,
+		},
+		"bytes buffer": {
+			getRequest: func(t *testing.T) io.Reader {
+				return bytes.NewReader(testPayload)
+			},
+			expectedBody: testPayload,
+			codes:        defaultCodes,
+		},
+		"piped data": {
+			getRequest: func(t *testing.T) io.Reader {
+				pr, pw := io.Pipe()
+
+				go func() {
+					defer func() {
+						_ = pw.Close()
+					}()
+
+					_, err := io.Copy(pw, bytes.NewReader(testPayload))
+					assert.NoError(t, err)
+				}()
+
+				return pr
+			},
+			codes: []codes{
+				{sent: http.StatusTemporaryRedirect, expected: http.StatusTemporaryRedirect},
+				{sent: http.StatusPermanentRedirect, expected: http.StatusPermanentRedirect},
+			},
+		},
+	}
+
+	for tn, tt := range tests {
+		for _, code := range tt.codes {
+			t.Run(fmt.Sprintf("code-%d-%s", code.sent, tn), func(t *testing.T) {
+				s := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+					const redirectionURI = "/redirected"
+
+					if r.RequestURI == redirectionURI {
+						body, err := ioutil.ReadAll(r.Body)
+						assert.NoError(t, err)
+
+						if !assert.Equal(t, tt.expectedBody, body) {
+							rw.WriteHeader(http.StatusInternalServerError)
+							return
+						}
+
+						rw.WriteHeader(http.StatusOK)
+						return
+					}
+
+					_, err := io.Copy(ioutil.Discard, r.Body)
+					assert.NoError(t, err)
+
+					_ = r.Body.Close()
+
+					rw.Header().Set("Location", redirectionURI)
+					rw.WriteHeader(code.sent)
+				}))
+
+				u, err := url.Parse(s.URL)
+				require.NoError(t, err)
+
+				c := &client{
+					url:             u,
+					requestBackOffs: make(map[string]*backoff.Backoff),
+				}
+				c.requester = &c.Client
+
+				response, err := c.do(context.Background(), "/", http.MethodPatch, tt.getRequest(t), "", nil)
+				assert.NoError(t, err)
+				if assert.NotNil(t, response) {
+					assert.Equal(t, code.expected, response.StatusCode)
+				}
+			})
+		}
+	}
 }

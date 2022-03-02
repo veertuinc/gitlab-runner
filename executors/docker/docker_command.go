@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/executors/docker/internal/volumes/permission"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/limitwriter"
 )
 
 type commandExecutor struct {
@@ -180,7 +182,7 @@ func (s *commandExecutor) changeFilesOwnership() error {
 		return nil
 	}
 
-	dockerExec := exec.NewDocker(s.client, s.waiter, s.Build.Log())
+	dockerExec := exec.NewDocker(s.Context, s.client, s.waiter, s.Build.Log())
 	inspect := user.NewInspect(s.client, dockerExec)
 	imageSHA := s.buildContainer.Image
 	imageName := s.Build.Image.Name
@@ -227,7 +229,7 @@ func getUIDandGID(
 
 	uid, err := inspect.UID(ctx, buildContainerID)
 	if err != nil {
-		return 0, 0, fmt.Errorf("checking %q image's UID: %w", imageSHA, err)
+		return 0, 0, fmt.Errorf("checking %q image UID: %w", imageSHA, err)
 	}
 
 	containerLog.Debugf("Container UID=%d", uid)
@@ -235,7 +237,7 @@ func getUIDandGID(
 
 	gid, err := inspect.GID(ctx, buildContainerID)
 	if err != nil {
-		return 0, 0, fmt.Errorf("checking %q image's GID: %w", imageSHA, err)
+		return 0, 0, fmt.Errorf("checking %q image GID: %w", imageSHA, err)
 	}
 
 	containerLog.Debugf("Container GID=%d", gid)
@@ -271,10 +273,17 @@ func (s *commandExecutor) executeChownOnDir(
 ) error {
 	s.Println(fmt.Sprintf("Changing ownership of files at %q to %d:%d", dir, uid, gid))
 
-	input := bytes.NewBufferString(fmt.Sprintf("chown -RP -- %d:%d %q", uid, gid, dir))
 	output := new(bytes.Buffer)
+	// limit how much data we read from the container log to
+	// avoid memory exhaustion
+	lw := limitwriter.New(output, 1024)
+	streams := exec.IOStreams{
+		Stdin:  strings.NewReader(fmt.Sprintf("chown -RP -- %d:%d %q", uid, gid, dir)),
+		Stderr: lw,
+		Stdout: lw,
+	}
 
-	err := dockerExec.Exec(s.Context, c.ID, input, output)
+	err := dockerExec.Exec(s.Context, c.ID, streams)
 
 	log := s.Build.Log().WithField("updatedDir", dir)
 	log.WithField("output", output.String()).Debug("Changing ownership of files")
@@ -336,11 +345,13 @@ func init() {
 		features.Services = true
 		features.Session = true
 		features.Terminal = true
+		features.ServiceVariables = true
 	}
 
 	common.RegisterExecutorProvider("docker", executors.DefaultExecutorProvider{
 		Creator:          creator,
 		FeaturesUpdater:  featuresUpdater,
+		ConfigUpdater:    configUpdater,
 		DefaultShellName: options.Shell.Shell,
 	})
 }

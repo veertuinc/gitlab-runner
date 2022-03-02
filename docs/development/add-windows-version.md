@@ -20,7 +20,7 @@ your host OS and container OS versions to match.
 
 ## Infrastructure
 
-We need to build the helper image for it to be used for the user job.
+We must build the helper image for it to be used for the user job.
 
 ### Create a base image for infrastructure to use
 
@@ -28,7 +28,7 @@ Windows requires us to have the host OS version match the container
 OS, so if we are building `Windows Server Core 2004` image we need to
 have `gitlab-runner` installed on `Windows Server Core 2004`.
 
-To do this we need to update the
+To do this we must update the
 [windows-containers](https://gitlab.com/gitlab-org/ci-cd/shared-runners/images/gcp/windows-containers)
 repository to build a base image. The base image will be used by the
 [autoscaler](https://gitlab.com/gitlab-org/ci-cd/custom-executor-drivers/autoscaler)
@@ -82,8 +82,21 @@ Managers the following:
 1. `windows-2004-private-runner-manager-2`
 
 Once registered, make sure you safely store the runner tokens found in
-the `config.toml` file since we are going to need these for the next
+the `config.toml` file since we are going to need these for the [installation](#install)
 step.
+
+Finally, we'll need to assign the new Runner Managers to the [security](https://gitlab.com/gitlab-org/security/gitlab-runner)
+fork project and to the ['liveness' test support](https://gitlab.com/gitlab-org/ci-cd/tests/liveness) project. So for each of the new Runner Managers:
+
+1. Go to the Runners section of the [Runner project CI/CD settings page](https://gitlab.com/gitlab-org/gitlab-runner/-/settings/ci_cd);
+1. Unlock the new Runner by editing its properties and unchecking `Lock to current projects`;
+1. For the [security](https://gitlab.com/gitlab-org/security/gitlab-runner) fork project:
+    1. Go to the Runners section of the [project's CI/CD settings page](https://gitlab.com/gitlab-org/security/gitlab-runner/-/settings/ci_cd);
+    1. Scroll down to the `Other available runners` section and enable the runner for this project;
+1. For the ['liveness' test support](https://gitlab.com/gitlab-org/ci-cd/tests/liveness) project:
+    1. Go to the Runners section of the [project's CI/CD settings page](https://gitlab.com/gitlab-org/ci-cd/tests/liveness/-/settings/ci_cd);
+    1. Scroll down to the `Other available runners` section and enable the runner for this project;
+1. Lock the Runner back again in the [Runner project CI/CD settings page](https://gitlab.com/gitlab-org/gitlab-runner/-/settings/ci_cd).
 
 #### Install
 

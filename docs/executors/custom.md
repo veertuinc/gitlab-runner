@@ -4,7 +4,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
 ---
 
-# The Custom executor
+# The Custom executor **(FREE)**
 
 > [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/2885) in GitLab Runner 12.1
 
@@ -85,7 +85,7 @@ be present in the `PATH`:
 ## Stages
 
 The Custom executor provides the stages for you to configure some
-details of the job, prepare and cleanup the environment and run the job
+details of the job, prepare and clean up the environment and run the job
 script within it. Each stage is responsible for specific things and has
 different things to keep in mind.
 
@@ -394,7 +394,7 @@ GitLab Runner will try to gracefully terminate an executable under any
 of the following conditions:
 
 - `config_exec_timeout`, `prepare_exec_timeout` or `cleanup_exec_timeout` are met.
-- The job [times out](https://docs.gitlab.com/ee/user/project/pipelines/settings.html#timeout).
+- The job [times out](https://docs.gitlab.com/ee/ci/pipelines/settings.html#timeout).
 - The job is cancelled.
 
 When a timeout is reached, a `SIGTERM` is sent to the executable, and
@@ -467,3 +467,18 @@ NOTE:
 We strongly suggest using `SYSTEM_FAILURE_EXIT_CODE` to exit
 instead of a hard coded value since it can change in any release, making
 your binary/script future proof.
+
+## Job response
+
+You can change job-level `CUSTOM_ENV_` variables as they observe the documented
+[CI/CD variable precedence](https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence).
+Though this functionality can be desirable, when the trusted job context
+is required, the full JSON job response is provided automatically. The runner
+generates a temporary file, which is referenced in the `JOB_RESPONSE_FILE`
+environment variable. This file exists in every stage and is automatically
+removed during cleanup.
+
+```shell
+$ cat ${JOB_RESPONSE_FILE}
+{"id": 123456, "token": "jobT0ken",...}
+```

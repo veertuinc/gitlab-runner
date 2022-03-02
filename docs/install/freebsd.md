@@ -4,11 +4,11 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
 ---
 
-# Install GitLab Runner on FreeBSD
+# Install GitLab Runner on FreeBSD **(FREE)**
 
 NOTE:
 The FreeBSD version is also available as a [bleeding edge](bleeding-edge.md)
-release. Make sure that you read the [FAQ](../faq/README.md) section which
+release. Make sure that you read the [FAQ](../faq/index.md) section which
 describes some of the most common problems with GitLab Runner.
 
 WARNING:

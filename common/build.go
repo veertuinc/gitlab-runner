@@ -80,7 +80,10 @@ const (
 	BuildStageArchiveOnFailureCache    BuildStage = "archive_cache_on_failure"
 	BuildStageUploadOnSuccessArtifacts BuildStage = "upload_artifacts_on_success"
 	BuildStageUploadOnFailureArtifacts BuildStage = "upload_artifacts_on_failure"
-	BuildStageCleanupFileVariables     BuildStage = "cleanup_file_variables"
+	// We only renamed the variable name here as a first step to renaming the stage.
+	// a separate issue will address changing the variable value, since it affects the
+	// contract with the custom executor: https://gitlab.com/gitlab-org/gitlab-runner/-/issues/28152.
+	BuildStageCleanup BuildStage = "cleanup_file_variables"
 )
 
 // staticBuildStages is a list of BuildStages which are executed on every build
@@ -95,7 +98,7 @@ var staticBuildStages = []BuildStage{
 	BuildStageArchiveOnFailureCache,
 	BuildStageUploadOnSuccessArtifacts,
 	BuildStageUploadOnFailureArtifacts,
-	BuildStageCleanupFileVariables,
+	BuildStageCleanup,
 }
 
 const (
@@ -137,11 +140,10 @@ type Build struct {
 	// Unique ID for all running builds on this runner and this project
 	ProjectRunnerID int `json:"project_runner_id"`
 
-	// statusLock handles access to currentStage, currentState and
-	// executorStageResolver. These variables can be accessed via
-	// CurrentStage(), CurrentState() and CurrentExecutorStage() from the
-	// metrics go routine whilst a build is in-flight.
-	statusLock            sync.RWMutex
+	// CurrentStage(), CurrentState() and CurrentExecutorStage() are called
+	// from the metrics go routine whilst a build is in-flight, so access
+	// to these variables requires a lock.
+	statusLock            sync.Mutex
 	currentStage          BuildStage
 	currentState          BuildRuntimeState
 	executorStageResolver func() ExecutorStage
@@ -158,7 +160,7 @@ type Build struct {
 	createdAt time.Time
 
 	Referees         []referees.Referee
-	ArtifactUploader func(config JobCredentials, reader io.ReadCloser, options ArtifactsOptions) UploadState
+	ArtifactUploader func(config JobCredentials, reader io.ReadCloser, options ArtifactsOptions) (UploadState, string)
 }
 
 func (b *Build) setCurrentStage(stage BuildStage) {
@@ -169,8 +171,8 @@ func (b *Build) setCurrentStage(stage BuildStage) {
 }
 
 func (b *Build) CurrentStage() BuildStage {
-	b.statusLock.RLock()
-	defer b.statusLock.RUnlock()
+	b.statusLock.Lock()
+	defer b.statusLock.Unlock()
 
 	return b.currentStage
 }
@@ -183,8 +185,8 @@ func (b *Build) setCurrentState(state BuildRuntimeState) {
 }
 
 func (b *Build) CurrentState() BuildRuntimeState {
-	b.statusLock.RLock()
-	defer b.statusLock.RUnlock()
+	b.statusLock.Lock()
+	defer b.statusLock.Unlock()
 
 	return b.currentState
 }
@@ -387,7 +389,7 @@ func getPredefinedEnv(buildStage BuildStage) bool {
 		BuildStageArchiveOnFailureCache:    true,
 		BuildStageUploadOnFailureArtifacts: true,
 		BuildStageUploadOnSuccessArtifacts: true,
-		BuildStageCleanupFileVariables:     true,
+		BuildStageCleanup:                  true,
 	}
 
 	predefined, ok := env[buildStage]
@@ -409,7 +411,7 @@ func GetStageDescription(stage BuildStage) string {
 		BuildStageArchiveOnFailureCache:    "Saving cache for failed job",
 		BuildStageUploadOnFailureArtifacts: "Uploading artifacts for failed job",
 		BuildStageUploadOnSuccessArtifacts: "Uploading artifacts for successful job",
-		BuildStageCleanupFileVariables:     "Cleaning up file based variables",
+		BuildStageCleanup:                  "Cleaning up project directory and file based variables",
 	}
 
 	description, ok := descriptions[stage]
@@ -525,7 +527,7 @@ func (b *Build) createReferees(executor Executor) {
 }
 
 func (b *Build) removeFileBasedVariables(ctx context.Context, executor Executor) {
-	err := b.executeStage(ctx, BuildStageCleanupFileVariables, executor)
+	err := b.executeStage(ctx, BuildStageCleanup, executor)
 	if err != nil {
 		b.Log().WithError(err).Warning("Error while executing file based variables removal script")
 	}
@@ -789,6 +791,19 @@ func (b *Build) getTerminalTimeout(ctx context.Context, timeout time.Duration) t
 	return timeout
 }
 
+// setTraceStatus sets the final status of a job. If the err
+// is nil, the job is successful.
+//
+// What we send back to GitLab for a failure reason when the err
+// is not nil depends:
+//
+// If the error can be unwrapped to `BuildError`, the BuildError's
+// failure reason is given. If the failure reason is not supported
+// by GitLab, it's converted to an `UnknownFailure`. If the failure
+// reason is not specified, `ScriptFailure` is used.
+//
+// If an error cannot be unwrapped to `BuildError`, `SystemFailure`
+// is used as the failure reason.
 func (b *Build) setTraceStatus(trace JobTrace, err error) {
 	logger := b.logger.WithFields(logrus.Fields{
 		"duration_s": b.Duration().Seconds(),
@@ -801,21 +816,46 @@ func (b *Build) setTraceStatus(trace JobTrace, err error) {
 		return
 	}
 
-	if buildError, ok := err.(*BuildError); ok {
-		logger.SoftErrorln("Job failed:", err)
-
-		failureReason := buildError.FailureReason
-		if failureReason == "" {
-			failureReason = ScriptFailure
+	var buildError *BuildError
+	if errors.As(err, &buildError) {
+		msg := fmt.Sprintln("Job failed:", err)
+		if buildError.FailureReason == RunnerSystemFailure {
+			msg = fmt.Sprintln("Job failed (system failure):", err)
 		}
 
-		trace.Fail(err, JobFailureData{Reason: failureReason, ExitCode: buildError.ExitCode})
+		logger.SoftErrorln(msg)
+
+		trace.Fail(err, JobFailureData{
+			Reason:   b.ensureSupportedFailureReason(buildError.FailureReason),
+			ExitCode: buildError.ExitCode,
+		})
 
 		return
 	}
 
 	logger.Errorln("Job failed (system failure):", err)
 	trace.Fail(err, JobFailureData{Reason: RunnerSystemFailure})
+}
+
+func (b *Build) ensureSupportedFailureReason(reason JobFailureReason) JobFailureReason {
+	if reason == "" {
+		return ScriptFailure
+	}
+
+	// GitLab provides a list of supported failure reasons with the job. Should the list be empty, we use
+	// the minmum subset of failure reasons we know all GitLab instances support.
+	for _, supported := range append(
+		b.Features.FailureReasons,
+		ScriptFailure,
+		RunnerSystemFailure,
+		JobExecutionTimeout,
+	) {
+		if reason == supported {
+			return reason
+		}
+	}
+
+	return UnknownFailure
 }
 
 func (b *Build) setExecutorStageResolver(resolver func() ExecutorStage) {
@@ -826,8 +866,8 @@ func (b *Build) setExecutorStageResolver(resolver func() ExecutorStage) {
 }
 
 func (b *Build) CurrentExecutorStage() ExecutorStage {
-	b.statusLock.RLock()
-	defer b.statusLock.RUnlock()
+	b.statusLock.Lock()
+	defer b.statusLock.Unlock()
 
 	if b.executorStageResolver == nil {
 		return ExecutorStage("")
@@ -1208,6 +1248,12 @@ func (b *Build) GetSubmoduleStrategy() SubmoduleStrategy {
 	}
 }
 
+// GetSubmodulePaths https://git-scm.com/docs/git-submodule#Documentation/git-submodule.txt-ltpathgt82308203
+func (b *Build) GetSubmodulePaths() string {
+	paths := b.GetAllVariables().Get("GIT_SUBMODULE_PATHS")
+	return paths
+}
+
 func (b *Build) GetGitCleanFlags() []string {
 	flags := b.GetAllVariables().Get("GIT_CLEAN_FLAGS")
 	if flags == "" {
@@ -1231,6 +1277,11 @@ func (b *Build) GetGitFetchFlags() []string {
 		return []string{}
 	}
 
+	return strings.Fields(flags)
+}
+
+func (b *Build) GetGitSubmoduleUpdateFlags() []string {
+	flags := b.GetAllVariables().Get("GIT_SUBMODULE_UPDATE_FLAGS")
 	return strings.Fields(flags)
 }
 

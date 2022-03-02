@@ -7,20 +7,23 @@ import (
 )
 
 const (
-	CmdDisableDelayedErrorLevelExpansion        string = "FF_CMD_DISABLE_DELAYED_ERROR_LEVEL_EXPANSION"
-	NetworkPerBuild                             string = "FF_NETWORK_PER_BUILD"
-	UseLegacyKubernetesExecutionStrategy        string = "FF_USE_LEGACY_KUBERNETES_EXECUTION_STRATEGY"
-	UseDirectDownload                           string = "FF_USE_DIRECT_DOWNLOAD"
-	SkipNoOpBuildStages                         string = "FF_SKIP_NOOP_BUILD_STAGES"
-	ShellExecutorUseLegacyProcessKill           string = "FF_SHELL_EXECUTOR_USE_LEGACY_PROCESS_KILL"
-	ResetHelperImageEntrypoint                  string = "FF_RESET_HELPER_IMAGE_ENTRYPOINT"
-	UseGoCloudWithCacheArchiver                 string = "FF_USE_GO_CLOUD_WITH_CACHE_ARCHIVER"
-	UseFastzip                                  string = "FF_USE_FASTZIP"
-	GitLabRegistryHelperImage                   string = "FF_GITLAB_REGISTRY_HELPER_IMAGE"
-	DisableUmaskForDockerExecutor               string = "FF_DISABLE_UMASK_FOR_DOCKER_EXECUTOR"
-	EnableBashExitCodeCheck                     string = "FF_ENABLE_BASH_EXIT_CODE_CHECK"
-	UseWindowsLegacyProcessStrategy             string = "FF_USE_WINDOWS_LEGACY_PROCESS_STRATEGY"
-	SkipDockerMachineProvisionOnCreationFailure string = "FF_SKIP_DOCKER_MACHINE_PROVISION_ON_CREATION_FAILURE"
+	CmdDisableDelayedErrorLevelExpansion string = "FF_CMD_DISABLE_DELAYED_ERROR_LEVEL_EXPANSION"
+	NetworkPerBuild                      string = "FF_NETWORK_PER_BUILD"
+	UseLegacyKubernetesExecutionStrategy string = "FF_USE_LEGACY_KUBERNETES_EXECUTION_STRATEGY"
+	UseDirectDownload                    string = "FF_USE_DIRECT_DOWNLOAD"
+	SkipNoOpBuildStages                  string = "FF_SKIP_NOOP_BUILD_STAGES"
+	UseFastzip                           string = "FF_USE_FASTZIP"
+	GitLabRegistryHelperImage            string = "FF_GITLAB_REGISTRY_HELPER_IMAGE"
+	DisableUmaskForDockerExecutor        string = "FF_DISABLE_UMASK_FOR_DOCKER_EXECUTOR"
+	EnableBashExitCodeCheck              string = "FF_ENABLE_BASH_EXIT_CODE_CHECK"
+	UseWindowsLegacyProcessStrategy      string = "FF_USE_WINDOWS_LEGACY_PROCESS_STRATEGY"
+	UseNewEvalStrategy                   string = "FF_USE_NEW_BASH_EVAL_STRATEGY"
+	UsePowershellPathResolver            string = "FF_USE_POWERSHELL_PATH_RESOLVER"
+	UseDynamicTraceForceSendInterval     string = "FF_USE_DYNAMIC_TRACE_FORCE_SEND_INTERVAL"
+	ScriptSections                       string = "FF_SCRIPT_SECTIONS"
+	UseNewShellEscape                    string = "FF_USE_NEW_SHELL_ESCAPE"
+	EnableJobCleanup                     string = "FF_ENABLE_JOB_CLEANUP"
+	KubernetesHonorEntrypoint            string = "FF_KUBERNETES_HONOR_ENTRYPOINT"
 )
 
 type FeatureFlag struct {
@@ -55,7 +58,7 @@ var flags = []FeatureFlag{
 	},
 	{
 		Name:            UseLegacyKubernetesExecutionStrategy,
-		DefaultValue:    true,
+		DefaultValue:    false,
 		Deprecated:      false,
 		ToBeRemovedWith: "",
 		Description: "When set to `false` disables execution of remote Kubernetes commands through `exec` in " +
@@ -80,31 +83,6 @@ var flags = []FeatureFlag{
 		Description:     "When set to `false` all build stages are executed even if running them has no effect",
 	},
 	{
-		Name:            ShellExecutorUseLegacyProcessKill,
-		DefaultValue:    false,
-		Deprecated:      true,
-		ToBeRemovedWith: "14.0",
-		Description: "Use the old process termination that was used prior to GitLab 13.1 where only `SIGKILL`" +
-			" was sent",
-	},
-	{
-		Name:            ResetHelperImageEntrypoint,
-		DefaultValue:    true,
-		Deprecated:      true,
-		ToBeRemovedWith: "14.0",
-		Description: "Enables adding an ENTRYPOINT layer for Helper images imported from local Docker archives " +
-			"by the `docker` executor, in order to enable [importing of user certificate roots]" +
-			"(tls-self-signed.md#trusting-the-certificate-for-the-other-cicd-stages)",
-	},
-	{
-		Name:            UseGoCloudWithCacheArchiver,
-		DefaultValue:    true,
-		Deprecated:      true,
-		ToBeRemovedWith: "14.0",
-		Description: "Enables the use of Go Cloud to write cache archives to object storage. " +
-			"This mode is only used by Azure Blob storage.",
-	},
-	{
 		Name:            UseFastzip,
 		DefaultValue:    false,
 		Deprecated:      false,
@@ -113,7 +91,7 @@ var flags = []FeatureFlag{
 	},
 	{
 		Name:            GitLabRegistryHelperImage,
-		DefaultValue:    false,
+		DefaultValue:    true,
 		Deprecated:      false,
 		ToBeRemovedWith: "",
 		Description: "Use GitLab Runner helper image for the Docker and " +
@@ -151,14 +129,60 @@ var flags = []FeatureFlag{
 			"be set to `false`.",
 	},
 	{
-		Name:            SkipDockerMachineProvisionOnCreationFailure,
+		Name:            UseNewEvalStrategy,
 		DefaultValue:    false,
 		Deprecated:      false,
 		ToBeRemovedWith: "",
-		Description: "With the `docker+machine` executor, when a machine is " +
-			"not created, `docker-machine provision` runs for X amount of times. When " +
-			"this feature flag is set to `true`, it skips `docker-machine provision` " +
-			"removes the machine, and creates another machine instead.",
+		Description: "When set to `true`, the Bash `eval` call is executed in a subshell to help with proper exit " +
+			"code detection of the script executed.",
+	},
+	{
+		Name:            UsePowershellPathResolver,
+		DefaultValue:    false,
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description: "When enabled, Powershell resolves pathnames rather than Runner using OS-specific filepath " +
+			"functions that are specific to where Runner is hosted.",
+	},
+	{
+		Name:            UseDynamicTraceForceSendInterval,
+		DefaultValue:    false,
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description: "When enabled, the trace force send interval is dynamically adjusted based on the trace " +
+			"update interval.",
+	},
+	{
+		Name:            ScriptSections,
+		DefaultValue:    false,
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description: "When enabled, each script line from the `.gitlab-ci.yml` file will be in a collapsible " +
+			"section in the job output and show the duration of each line.",
+	},
+	{
+		Name:            UseNewShellEscape,
+		DefaultValue:    false,
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description:     "When enabled, a faster implementation of shell escape is used.",
+	},
+	{
+		Name:            EnableJobCleanup,
+		DefaultValue:    false,
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description: "When enabled, the project directory will be cleaned up at the end of the build. " +
+			"If `GIT_CLONE` is used, the whole project directory will be deleted. If `GIT_FETCH` is used, " +
+			"a series of Git `clean` commands will be issued.",
+	},
+	{
+		Name:            KubernetesHonorEntrypoint,
+		DefaultValue:    false,
+		Deprecated:      false,
+		ToBeRemovedWith: "",
+		Description: "When enabled, the Docker entrypoint of an image will be honored if " +
+			"`FF_USE_LEGACY_KUBERNETES_EXECUTION_STRATEGY` is not set to true",
 	},
 }
 

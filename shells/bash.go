@@ -1,10 +1,8 @@
 package shells
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"path"
 	"runtime"
 	"strconv"
@@ -36,6 +34,20 @@ fi
 
 `
 
+// bashJSONTerminationScript prints a json log-line to provide exit code context to
+// executors that cannot directly retrieve the exit status of the script.
+const bashJSONTerminationScript = `runner_script_trap() {
+	exit_code=$?
+	out_json="{\"command_exit_code\": $exit_code, \"script\": \"$0\"}"
+
+	echo ""
+	echo "$out_json"
+	exit 0
+}
+
+trap runner_script_trap EXIT
+`
+
 type BashShell struct {
 	AbstractShell
 	Shell string
@@ -47,7 +59,10 @@ type BashWriter struct {
 	Shell         string
 	indent        int
 
-	checkForErrors bool
+	checkForErrors     bool
+	useNewEval         bool
+	useNewEscape       bool
+	useJSONTermination bool
 }
 
 func (b *BashWriter) GetTemporaryPath() string {
@@ -85,7 +100,7 @@ func (b *BashWriter) Command(command string, arguments ...string) {
 
 func (b *BashWriter) buildCommand(command string, arguments ...string) string {
 	list := []string{
-		helpers.ShellEscape(command),
+		b.escape(command),
 	}
 
 	for _, argument := range arguments {
@@ -107,10 +122,10 @@ func (b *BashWriter) Variable(variable common.JobVariable) {
 	if variable.File {
 		variableFile := b.TmpFile(variable.Key)
 		b.Linef("mkdir -p %q", helpers.ToSlash(b.TemporaryPath))
-		b.Linef("echo -n %s > %q", helpers.ShellEscape(variable.Value), variableFile)
-		b.Linef("export %s=%q", helpers.ShellEscape(variable.Key), variableFile)
+		b.Linef("echo -n %s > %q", b.escape(variable.Value), variableFile)
+		b.Linef("export %s=%q", b.escape(variable.Key), variableFile)
 	} else {
-		b.Linef("export %s=%s", helpers.ShellEscape(variable.Key), helpers.ShellEscape(variable.Value))
+		b.Linef("export %s=%s", b.escape(variable.Key), b.escape(variable.Value))
 	}
 }
 
@@ -170,6 +185,13 @@ func (b *BashWriter) RmFile(path string) {
 	b.Command("rm", "-f", path)
 }
 
+func (b *BashWriter) RmFilesRecursive(path string, name string) {
+	b.IfDirectory(path)
+	// `find -delete` is not portable; https://unix.stackexchange.com/a/194348
+	b.Linef("find %q -name %q -exec rm {} +", path, name)
+	b.EndIf()
+}
+
 func (b *BashWriter) Absolute(dir string) string {
 	if path.IsAbs(dir) {
 		return dir
@@ -183,57 +205,77 @@ func (b *BashWriter) Join(elem ...string) string {
 
 func (b *BashWriter) Printf(format string, arguments ...interface{}) {
 	coloredText := helpers.ANSI_RESET + fmt.Sprintf(format, arguments...)
-	b.Line("echo " + helpers.ShellEscape(coloredText))
+	b.Line("echo " + b.escape(coloredText))
 }
 
 func (b *BashWriter) Noticef(format string, arguments ...interface{}) {
 	coloredText := helpers.ANSI_BOLD_GREEN + fmt.Sprintf(format, arguments...) + helpers.ANSI_RESET
-	b.Line("echo " + helpers.ShellEscape(coloredText))
+	b.Line("echo " + b.escape(coloredText))
 }
 
 func (b *BashWriter) Warningf(format string, arguments ...interface{}) {
 	coloredText := helpers.ANSI_YELLOW + fmt.Sprintf(format, arguments...) + helpers.ANSI_RESET
-	b.Line("echo " + helpers.ShellEscape(coloredText))
+	b.Line("echo " + b.escape(coloredText))
 }
 
 func (b *BashWriter) Errorf(format string, arguments ...interface{}) {
 	coloredText := helpers.ANSI_BOLD_RED + fmt.Sprintf(format, arguments...) + helpers.ANSI_RESET
-	b.Line("echo " + helpers.ShellEscape(coloredText))
+	b.Line("echo " + b.escape(coloredText))
 }
 
 func (b *BashWriter) EmptyLine() {
 	b.Line("echo")
 }
 
+func (b *BashWriter) SectionStart(id, command string) {
+	b.Line("echo -e " +
+		helpers.ANSI_CLEAR +
+		"section_start:`date +%s`:section_" + id +
+		"\r" + helpers.ANSI_CLEAR + helpers.ShellEscape(helpers.ANSI_BOLD_GREEN+command+helpers.ANSI_RESET))
+}
+
+func (b *BashWriter) SectionEnd(id string) {
+	b.Line("echo -e " +
+		helpers.ANSI_CLEAR +
+		"section_end:`date +%s`:section_" + id +
+		"\r" + helpers.ANSI_CLEAR)
+}
+
 func (b *BashWriter) Finish(trace bool) string {
-	var buffer bytes.Buffer
-	w := bufio.NewWriter(&buffer)
+	var buf strings.Builder
 
-	b.writeShebang(w)
-	b.writeTrace(w, trace)
-	b.writeScript(w)
-
-	_ = w.Flush()
-	return buffer.String()
-}
-
-func (b *BashWriter) writeShebang(w io.Writer) {
 	if b.Shell != "" {
-		_, _ = io.WriteString(w, "#!/usr/bin/env "+b.Shell+"\n\n")
+		buf.WriteString("#!/usr/bin/env " + b.Shell + "\n\n")
 	}
-}
 
-func (b *BashWriter) writeTrace(w io.Writer, trace bool) {
+	if b.useJSONTermination {
+		buf.WriteString(bashJSONTerminationScript)
+	}
+
 	if trace {
-		_, _ = io.WriteString(w, "set -o xtrace\n")
+		buf.WriteString("set -o xtrace\n")
 	}
+
+	buf.WriteString("set -eo pipefail\n")
+	buf.WriteString("set +o noclobber\n")
+
+	if b.useNewEval {
+		buf.WriteString(": | (eval " + b.escape(b.String()) + ")\n")
+	} else {
+		buf.WriteString(": | eval " + b.escape(b.String()) + "\n")
+	}
+
+	buf.WriteString("exit 0\n")
+
+	return buf.String()
 }
 
-func (b *BashWriter) writeScript(w io.Writer) {
-	_, _ = io.WriteString(w, "set -eo pipefail\n")
-	_, _ = io.WriteString(w, "set +o noclobber\n")
-	_, _ = io.WriteString(w, ": | eval "+helpers.ShellEscape(b.String())+"\n")
-	_, _ = io.WriteString(w, "exit 0\n")
+func (b *BashWriter) escape(input string) string {
+	if b.useNewEscape {
+		return helpers.ShellEscape(input)
+	}
+
+	return helpers.ShellEscapeLegacy(input)
 }
 
 func (b *BashShell) GetName() string {
@@ -280,6 +322,8 @@ func (b *BashShell) GenerateScript(buildStage common.BuildStage, info common.She
 		TemporaryPath:  info.Build.TmpProjectDir(),
 		Shell:          b.Shell,
 		checkForErrors: info.Build.IsFeatureFlagOn(featureflags.EnableBashExitCodeCheck),
+		useNewEval:     info.Build.IsFeatureFlagOn(featureflags.UseNewEvalStrategy),
+		useNewEscape:   info.Build.IsFeatureFlagOn(featureflags.UseNewShellEscape),
 	}
 
 	return b.generateScript(w, buildStage, info)

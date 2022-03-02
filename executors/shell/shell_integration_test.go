@@ -1,7 +1,11 @@
+//go:build integration
+// +build integration
+
 package shell_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -18,11 +22,13 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gitlab.com/gitlab-org/gitlab-runner/shells"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/common/buildtest"
 	"gitlab.com/gitlab-org/gitlab-runner/executors/shell"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/test"
 	"gitlab.com/gitlab-org/gitlab-runner/session"
 	"gitlab.com/gitlab-org/gitlab-runner/shells/shellstest"
@@ -128,13 +134,17 @@ func newBuild(t *testing.T, getBuildResponse common.JobResponse, shell string) (
 
 func TestBuildSuccess(t *testing.T) {
 	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
-		successfulBuild, err := common.GetSuccessfulBuild()
-		assert.NoError(t, err)
-		build, cleanup := newBuild(t, successfulBuild, shell)
-		defer cleanup()
+		buildtest.WithEachFeatureFlag(t, func(t *testing.T, setup buildtest.BuildSetupFn) {
+			successfulBuild, err := common.GetSuccessfulBuild()
+			assert.NoError(t, err)
+			build, cleanup := newBuild(t, successfulBuild, shell)
+			defer cleanup()
 
-		err = buildtest.RunBuild(t, build)
-		assert.NoError(t, err)
+			setup(build)
+
+			err = buildtest.RunBuild(t, build)
+			assert.NoError(t, err)
+		}, featureflags.UsePowershellPathResolver)
 	})
 }
 
@@ -218,7 +228,7 @@ func TestBuildJobStatusEnvVars(t *testing.T) {
 		fail   bool
 		assert func(t *testing.T, err error, build *common.Build, out string)
 	}{
-		"state and stage on failure": {
+		"state on failure": {
 			fail: true,
 			assert: func(t *testing.T, err error, build *common.Build, out string) {
 				assert.Error(t, err)
@@ -226,7 +236,7 @@ func TestBuildJobStatusEnvVars(t *testing.T) {
 				assert.Equal(t, common.BuildRunRuntimeFailed, build.CurrentState())
 			},
 		},
-		"state and stage on success": {
+		"state on success": {
 			fail: false,
 			assert: func(t *testing.T, err error, build *common.Build, out string) {
 				assert.NoError(t, err)
@@ -245,7 +255,7 @@ func TestBuildJobStatusEnvVars(t *testing.T) {
 	for tn, tc := range tests {
 		t.Run(tn, func(t *testing.T) {
 			shellstest.OnEachShell(t, func(t *testing.T, shell string) {
-				multistepBuildScript, err := common.GetRemoteFailingMultistepBuildWithEnvs(shell, tc.fail)
+				multistepBuildScript, err := common.GetRemoteFailingMultistepBuildPrintVars(shell, tc.fail, "CI_JOB_STATUS")
 				require.NoError(t, err)
 
 				build, cleanup := newBuild(t, multistepBuildScript, shell)
@@ -819,6 +829,87 @@ func TestBuildWithGitSubmoduleStrategyNone(t *testing.T) {
 	}
 }
 
+func TestBuildWithGitSubmodulePaths(t *testing.T) {
+	// Some of these fail on earlier versions of git
+	// We can just skip it since we pass them directly to git and don't care for version support
+	skipOnGit(t, "< 1.9")
+
+	tests := map[string]struct {
+		paths                   string
+		expectedBuildError      error
+		expectedSubmoduleExists bool
+	}{
+		"include submodule": {
+			paths:                   "gitlab-grack",
+			expectedBuildError:      nil,
+			expectedSubmoduleExists: true,
+		},
+		"exclude submodule": {
+			paths:                   ":(exclude)gitlab-grack",
+			expectedBuildError:      nil,
+			expectedSubmoduleExists: false,
+		},
+		"exclude submodule with single space": {
+			paths:                   ":(exclude) gitlab-grack",
+			expectedBuildError:      nil,
+			expectedSubmoduleExists: true,
+		},
+		"exclude submodule with multiple spaces": {
+			paths:                   ":(exclude)  gitlab-grack",
+			expectedBuildError:      nil,
+			expectedSubmoduleExists: true,
+		},
+		"exclude submodule with space between all statements": {
+			paths:                   ": (exclude) gitlab-grack",
+			expectedBuildError:      &exec.ExitError{},
+			expectedSubmoduleExists: false,
+		},
+		"exclude submodule invalid": {
+			paths:                   "::::(exclude) gitlab-grack",
+			expectedBuildError:      &exec.ExitError{},
+			expectedSubmoduleExists: false,
+		},
+		"empty": {
+			paths:                   "    ",
+			expectedBuildError:      nil,
+			expectedSubmoduleExists: true,
+		},
+	}
+
+	for tn, tt := range tests {
+		t.Run(tn, func(t *testing.T) {
+			shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+				successfulBuild, err := common.GetSuccessfulBuild()
+				assert.NoError(t, err)
+
+				build, cleanup := newBuild(t, successfulBuild, shell)
+				defer cleanup()
+
+				build.Variables = append(
+					build.Variables,
+					common.JobVariable{Key: "GIT_SUBMODULE_STRATEGY", Value: "normal"},
+					common.JobVariable{Key: "GIT_SUBMODULE_PATHS", Value: tt.paths},
+				)
+
+				out, err := buildtest.RunBuildReturningOutput(t, build)
+				err = errors.Unwrap(err)
+				require.IsType(t, err, tt.expectedBuildError)
+
+				assert.NotContains(t, out, "Skipping Git submodules setup")
+				assert.Contains(t, out, "Updating/initializing submodules...")
+
+				_, err = os.Stat(filepath.Join(build.BuildDir, "gitlab-grack", ".git"))
+				if tt.expectedSubmoduleExists {
+					require.NoError(t, err, "Submodule should have been initialized")
+					return
+				}
+
+				require.True(t, errors.Is(err, os.ErrNotExist), "Submodule is initialized but shouldn't be")
+			})
+		})
+	}
+}
+
 func TestBuildWithGitSubmoduleStrategyNormal(t *testing.T) {
 	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
 		successfulBuild, err := common.GetSuccessfulBuild()
@@ -900,6 +991,99 @@ func TestBuildWithGitFetchSubmoduleStrategyRecursive(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotContains(t, out, "Created fresh repository")
 		assert.Contains(t, out, "Removing excluded_file")
+	})
+}
+
+func TestBuildGitCloneStrategyCleanup(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		successfulBuild, err := common.GetSuccessfulBuild()
+		assert.NoError(t, err)
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+		build.Runner.RunnerSettings.Shell = shell
+
+		buildtest.RunBuildWithCleanupGitClone(t, build)
+
+		_, err = os.Stat(build.FullProjectDir())
+		assert.Error(t, err, "cleanup should have removed the entire build directory")
+	})
+}
+
+func TestBuildGitFetchStrategyCleanup(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		untrackedFilename := "untracked"
+		successfulBuild, err := common.GetLocalBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFilename, "", "")...,
+		)
+
+		assert.NoError(t, err)
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+		build.Runner.RunnerSettings.Shell = shell
+
+		buildtest.RunBuildWithCleanupGitFetch(t, build, untrackedFilename)
+
+		_, err = os.Stat(build.BuildDir)
+		assert.NoError(t, err, "cleanup should not delete entire build directory")
+		_, err = os.Stat(filepath.Join(build.BuildDir, untrackedFilename))
+		assert.Error(t, err, "cleanup should have removed the untracked file")
+	})
+}
+
+func TestBuildGitFetchStrategySubmoduleNormalCleanup(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		untrackedFilename, untrackedFileInSubmodule := "untracked", "untracked_in_submodule"
+		successfulBuild, err := common.GetLocalBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFilename, untrackedFileInSubmodule, "")...,
+		)
+
+		assert.NoError(t, err)
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+
+		buildtest.RunBuildWithCleanupNormalSubmoduleStrategy(t, build, untrackedFilename, untrackedFileInSubmodule)
+
+		_, err = os.Stat(build.BuildDir)
+		assert.NoError(t, err, "cleanup should not delete entire build directory")
+		_, err = os.Stat(filepath.Join(build.BuildDir, untrackedFilename))
+		assert.Error(t, err, "cleanup should have removed untracked file in main repository")
+		_, err = os.Stat(filepath.Join(build.BuildDir, "gitlab-grack", untrackedFileInSubmodule))
+		assert.Error(t, err, "cleanup should have removed untracked file in submodule")
+	})
+}
+
+func TestBuildGitFetchStrategySubmoduleRecursiveCleanup(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		untrackedFile := "untracked_file"
+		untrackedFileInSubmodule := "untracked_file_in_submodule"
+		untrackedFileInSubSubmodule := "untracked_file_in_sub_submodule"
+
+		successfulBuild, err := common.GetLocalBuildResponse(
+			buildtest.GetNewUntrackedFileIntoSubmodulesCommands(untrackedFile, untrackedFileInSubmodule, untrackedFileInSubSubmodule)...,
+		)
+
+		assert.NoError(t, err)
+		build, cleanup := newBuild(t, successfulBuild, shell)
+		defer cleanup()
+
+		buildtest.RunBuildWithCleanupRecursiveSubmoduleStrategy(
+			t,
+			build,
+			untrackedFile,
+			untrackedFileInSubmodule,
+			untrackedFileInSubSubmodule,
+		)
+
+		_, err = os.Stat(build.BuildDir)
+		assert.NoError(t, err, "cleanup should not delete entire build directory")
+		_, err = os.Stat(filepath.Join(build.BuildDir, untrackedFile))
+		assert.Error(t, err, "cleanup should have removed untracked file in main repository")
+
+		_, err = os.Stat(filepath.Join(build.BuildDir, "gitlab-grack", untrackedFileInSubmodule))
+		assert.Error(t, err, "cleanup should have removed untracked file in submodule")
+
+		_, err = os.Stat(filepath.Join(build.BuildDir, "gitlab-grack", "tests", "example", untrackedFileInSubSubmodule))
+		assert.Error(t, err, "cleanup should have removed untracked file in submodule's submodule")
 	})
 }
 
@@ -1137,7 +1321,7 @@ func TestBuildChangesBranchesWhenFetchingRepo(t *testing.T) {
 		build.GitInfo = common.GetLFSGitInfo(build.GitInfo.RepoURL)
 		out, err = buildtest.RunBuildReturningOutput(t, build)
 		assert.NoError(t, err)
-		assert.Contains(t, out, "Checking out 2371dd05 as add-lfs-object...")
+		assert.Contains(t, out, "Checking out c8f2a61d as add-lfs-object...")
 	})
 }
 
@@ -1243,11 +1427,11 @@ func TestInteractiveTerminal(t *testing.T) {
 			}()
 
 			// Wait until the build starts.
-			for build.Session.Mux() == nil {
+			for build.Session.Handler() == nil {
 				time.Sleep(10 * time.Millisecond)
 			}
 
-			srv := httptest.NewServer(build.Session.Mux())
+			srv := httptest.NewServer(build.Session.Handler())
 			defer srv.Close()
 
 			u := url.URL{
@@ -1325,6 +1509,38 @@ func TestBuildWithGitCleanFlags(t *testing.T) {
 	})
 }
 
+func TestSanitizeGitDirectory(t *testing.T) {
+	test.SkipIfGitLabCIOn(t, test.OSWindows)
+
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		jobResponse, err := common.GetLocalBuildResponse(
+			"git remote set-url origin /tmp/some/invalid/directory",
+		)
+
+		build, cleanup := newBuild(t, jobResponse, shell)
+		defer cleanup()
+
+		build.Variables = append(
+			build.Variables,
+			common.JobVariable{Key: "GIT_STRATEGY", Value: "fetch"},
+			common.JobVariable{Key: featureflags.EnableJobCleanup, Value: "true"},
+		)
+
+		err = buildtest.RunBuild(t, build)
+		require.NoError(t, err)
+
+		_, err = os.Stat(filepath.Join(build.FullProjectDir(), ".git", "config"))
+		assert.True(t, errors.Is(err, os.ErrNotExist))
+
+		out, err := gitInDir(build.BuildDir, "init", "--template", filepath.Join(build.BuildDir, "git-template"))
+		assert.NoError(t, err)
+		assert.Contains(t, string(out), "Reinitialized existing Git repository")
+
+		_, err = gitInDir(build.BuildDir, "fsck")
+		assert.NoError(t, err)
+	})
+}
+
 func TestBuildFileVariablesRemoval(t *testing.T) {
 	getJobResponse := func(t *testing.T, jobResponseRequester func() (common.JobResponse, error)) common.JobResponse {
 		jobResponse, err := jobResponseRequester()
@@ -1347,24 +1563,28 @@ func TestBuildFileVariablesRemoval(t *testing.T) {
 	for tn, tt := range tests {
 		t.Run(tn, func(t *testing.T) {
 			shellstest.OnEachShell(t, func(t *testing.T, shell string) {
-				build, cleanup := newBuild(t, tt.jobResponse, shell)
-				defer cleanup()
+				buildtest.WithEachFeatureFlag(t, func(t *testing.T, setup buildtest.BuildSetupFn) {
+					build, cleanup := newBuild(t, tt.jobResponse, shell)
+					defer cleanup()
 
-				testVariableName := "TEST_VARIABLE"
+					testVariableName := "TEST_VARIABLE"
 
-				build.Variables = append(
-					build.Variables,
-					common.JobVariable{Key: testVariableName, Value: "test", File: true},
-				)
+					build.Variables = append(
+						build.Variables,
+						common.JobVariable{Key: testVariableName, Value: "test", File: true},
+					)
 
-				_ = buildtest.RunBuild(t, build)
+					setup(build)
 
-				tmpDir := fmt.Sprintf("%s.tmp", build.BuildDir)
-				variableFile := filepath.Join(tmpDir, testVariableName)
+					_ = buildtest.RunBuild(t, build)
 
-				_, err := os.Stat(variableFile)
-				assert.Error(t, err)
-				assert.ErrorIs(t, err, os.ErrNotExist)
+					tmpDir := fmt.Sprintf("%s.tmp", build.BuildDir)
+					variableFile := filepath.Join(tmpDir, testVariableName)
+
+					_, err := os.Stat(variableFile)
+					assert.Error(t, err)
+					assert.ErrorIs(t, err, os.ErrNotExist)
+				}, featureflags.UsePowershellPathResolver)
 			})
 		})
 	}
@@ -1381,29 +1601,84 @@ func TestBuildLogLimitExceeded(t *testing.T) {
 
 func TestBuildInvokeBinaryHelper(t *testing.T) {
 	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
-		successfulBuild, err := common.GetRemoteSuccessfulBuild()
-		require.NoError(t, err)
+		buildtest.WithEachFeatureFlag(t, func(t *testing.T, setup buildtest.BuildSetupFn) {
+			successfulBuild, err := common.GetRemoteSuccessfulBuild()
+			require.NoError(t, err)
 
-		build, cleanup := newBuild(t, successfulBuild, shell)
+			build, cleanup := newBuild(t, successfulBuild, shell)
+			defer cleanup()
+
+			setup(build)
+
+			dir, err := ioutil.TempDir("", "")
+			require.NoError(t, err)
+			defer os.RemoveAll(dir)
+
+			build.Runner.RunnerSettings.BuildsDir = filepath.Join(dir, "build")
+			build.Runner.RunnerSettings.CacheDir = filepath.Join(dir, "cache")
+
+			build.Cache = append(build.Cache, common.Cache{
+				Key:    "cache",
+				Paths:  []string{"*"},
+				Policy: common.CachePolicyPullPush,
+			})
+
+			out, err := buildtest.RunBuildReturningOutput(t, build)
+			assert.NoError(t, err)
+			assert.NotContains(t, out, "Extracting cache is disabled.")
+			assert.NotContains(t, out, "Creating cache is disabled.")
+			assert.Contains(t, out, "Created cache")
+		}, featureflags.UsePowershellPathResolver)
+	})
+}
+
+func TestBuildPwshHandlesSyntaxErrors(t *testing.T) {
+	helpers.SkipIntegrationTests(t, shells.SNPwsh)
+
+	successfulBuild, err := common.GetLocalBuildResponse("some syntax error\nWrite-Output $PSVersionTable")
+	require.NoError(t, err)
+
+	build, cleanup := newBuild(t, successfulBuild, shells.SNPwsh)
+	defer cleanup()
+
+	out, err := buildtest.RunBuildReturningOutput(t, build)
+	assert.Error(t, err)
+	assert.NotContains(t, out, "PSEdition")
+}
+
+func TestBuildPwshHandlesScriptEncodingCorrectly(t *testing.T) {
+	helpers.SkipIntegrationTests(t, shells.SNPwsh)
+
+	successfulBuild, err := common.GetLocalBuildResponse("echo $Env:GL_Test1 | Format-Hex")
+	require.NoError(t, err)
+
+	build, cleanup := newBuild(t, successfulBuild, shells.SNPwsh)
+	defer cleanup()
+
+	build.Variables = append(build.Variables, common.JobVariable{
+		Key:   "GL_Test1",
+		Value: "∅",
+		Raw:   true,
+	})
+
+	out, err := buildtest.RunBuildReturningOutput(t, build)
+	assert.NoError(t, err)
+	assert.Contains(t, out, "E2 88 85")
+}
+
+func TestBuildScriptSections(t *testing.T) {
+	shellstest.OnEachShell(t, func(t *testing.T, shell string) {
+		if shell == "cmd" || shell == "pwsh" || shell == "powershell" {
+			// support for pwsh and powershell tracked in https://gitlab.com/gitlab-org/gitlab-runner/-/issues/28119
+			t.Skip("CMD not supported")
+		}
+		build, cleanup := newBuild(t, common.JobResponse{}, shell)
 		defer cleanup()
 
-		dir, err := ioutil.TempDir("", "")
+		successfulBuild, err := common.GetSuccessfulBuild()
 		require.NoError(t, err)
-		defer os.RemoveAll(dir)
-
-		build.Runner.RunnerSettings.BuildsDir = filepath.Join(dir, "build")
-		build.Runner.RunnerSettings.CacheDir = filepath.Join(dir, "cache")
-
-		build.Cache = append(build.Cache, common.Cache{
-			Key:    "cache",
-			Paths:  []string{"*"},
-			Policy: common.CachePolicyPullPush,
-		})
-
-		out, err := buildtest.RunBuildReturningOutput(t, build)
-		assert.NoError(t, err)
-		assert.NotContains(t, out, "Extracting cache is disabled.")
-		assert.NotContains(t, out, "Creating cache is disabled.")
-		assert.Contains(t, out, "Created cache")
+		build.JobResponse = successfulBuild
+		build.Runner.RunnerSettings.Shell = shell
+		buildtest.RunBuildWithSections(t, build)
 	})
 }

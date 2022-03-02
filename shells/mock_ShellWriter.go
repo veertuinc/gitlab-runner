@@ -203,6 +203,21 @@ func (_m *MockShellWriter) RmFile(path string) {
 	_m.Called(path)
 }
 
+// RmFilesRecursive provides a mock function with given fields: path, name
+func (_m *MockShellWriter) RmFilesRecursive(path string, name string) {
+	_m.Called(path, name)
+}
+
+// SectionEnd provides a mock function with given fields: id
+func (_m *MockShellWriter) SectionEnd(id string) {
+	_m.Called(id)
+}
+
+// SectionStart provides a mock function with given fields: id, command
+func (_m *MockShellWriter) SectionStart(id string, command string) {
+	_m.Called(id, command)
+}
+
 // TmpFile provides a mock function with given fields: name
 func (_m *MockShellWriter) TmpFile(name string) string {
 	ret := _m.Called(name)

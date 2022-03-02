@@ -4,6 +4,7 @@ config.toml.lock
 .project
 out
 builds/
+vendor/
 commands/helpers/archive.zip
 dockerfiles/**/checksums-*
 dockerfiles/runner/*/install-deps
@@ -15,8 +16,8 @@ dockerfiles/runner-helper/binaries/
 tests/ubuntu/.vagrant
 artifacts
 tmp/gitlab-test
-/.gopath/
 /.tmp/
+tmp
 
 # Ignore all editorconfig files except the root one
 .editorconfig
@@ -37,3 +38,5 @@ debug.test
 
 # Ignore the generated binary
 /gitlab-runner*
+
+.dccache

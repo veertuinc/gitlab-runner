@@ -14,20 +14,20 @@ endif
 
 PACKAGE_CLOUD ?= ayufan/gitlab-ci-multi-runner
 PACKAGE_CLOUD_URL ?= https://packagecloud.io/
-BUILD_ARCHS ?= -arch '386' -arch 'amd64'
-BUILD_PLATFORMS ?= -osarch 'darwin/amd64' -os 'linux' ${BUILD_ARCHS}
-S3_UPLOAD_PATH ?= master
+BUILD_ARCHS ?= -arch '386' -arch 'amd64' -arch 'arm64'
+BUILD_PLATFORMS ?= -osarch 'darwin/amd64' -osarch 'darwin/arm64' -os 'linux' ${BUILD_ARCHS}
+S3_UPLOAD_PATH ?= main
 
 # Keep in sync with docs/install/linux-repository.md
 DEB_PLATFORMS ?= debian/jessie debian/stretch debian/buster \
-    ubuntu/xenial ubuntu/bionic ubuntu/eoan ubuntu/focal \
+    ubuntu/xenial ubuntu/bionic ubuntu/focal \
     raspbian/jessie raspbian/stretch raspbian/buster \
     linuxmint/sarah linuxmint/serena linuxmint/sonya
-DEB_ARCHS ?= amd64 i386 armel armhf arm64 aarch64 s390x
+DEB_ARCHS ?= amd64 i386 armel armhf arm64 aarch64 s390x ppc64le
 RPM_PLATFORMS ?= el/6 el/7 el/8 \
     ol/6 ol/7 \
-    fedora/30
-RPM_ARCHS ?= x86_64 i686 arm armhf arm64 aarch64 s390x
+    fedora/32 fedora/33 fedora/34
+RPM_ARCHS ?= x86_64 i686 arm armhf arm64 aarch64 s390x ppc64le
 
 PKG = gitlab.com/gitlab-org/$(PACKAGE_NAME)
 COMMON_PACKAGE_NAMESPACE = $(PKG)/common
@@ -53,7 +53,7 @@ GOX = gox
 MOCKERY_VERSION ?= 1.1.0
 MOCKERY ?= .tmp/mockery-$(MOCKERY_VERSION)
 
-GOLANGLINT_VERSION ?= v1.27.0
+GOLANGLINT_VERSION ?= v1.43.0
 GOLANGLINT ?= .tmp/golangci-lint$(GOLANGLINT_VERSION)
 GOLANGLINT_GOARGS ?= .tmp/goargs.so
 
@@ -67,7 +67,6 @@ GITLAB_CHANGELOG = .tmp/gitlab-changelog-$(GITLAB_CHANGELOG_VERSION)
 .PHONY: all
 all: deps runner-and-helper-bin
 
-include Makefile.deprecation.mk
 include Makefile.runner_helper.mk
 include Makefile.build.mk
 include Makefile.package.mk
@@ -113,10 +112,15 @@ version:
 .PHONY: deps
 deps: $(DEVELOPMENT_TOOLS)
 
+.PHONY: check_test_directives
+check_test_directives:
+	@scripts/check_test_directives
+
 .PHONY: lint
 lint: OUT_FORMAT ?= colored-line-number
 lint: LINT_FLAGS ?=
 lint: $(GOLANGLINT)
+	@$(MAKE) check_test_directives >/dev/stderr
 	@$(GOLANGLINT) run ./... --out-format $(OUT_FORMAT) $(LINT_FLAGS)
 
 .PHONY: lint-docs
@@ -131,10 +135,12 @@ test: helper-dockerarchive-host development_setup simple-test
 
 simple-test: TEST_PKG ?= $(shell go list ./...)
 simple-test:
-	go test $(TEST_PKG) $(TESTFLAGS) -ldflags "$(GO_LDFLAGS)"
+	# use env -i to clear parent environment variables for go test
+	./scripts/go_test_no_env $(TEST_PKG) $(TESTFLAGS) -ldflags "$(GO_LDFLAGS)"
 
 git1.8-test: export TEST_PKG = gitlab.com/gitlab-org/gitlab-runner/executors/shell gitlab.com/gitlab-org/gitlab-runner/shells
 git1.8-test:
+	$(MAKE) simple-test TESTFLAGS='-cover -tags=integration'
 	$(MAKE) simple-test
 
 cobertura_report: $(GOCOVER_COBERTURA)
@@ -144,6 +150,10 @@ cobertura_report: $(GOCOVER_COBERTURA)
 	@ # See https://gitlab.com/gitlab-org/gitlab/-/issues/217664
 	sed 's;filename=\"gitlab.com/gitlab-org/gitlab-runner/;filename=\";g' out/cobertura/cobertura-coverage-raw.xml > \
 	  out/cobertura/cobertura-coverage.xml
+
+export_test_env:
+	@echo "export GO_LDFLAGS='$(GO_LDFLAGS)'"
+	@echo "export MAIN_PACKAGE='$(MAIN_PACKAGE)'"
 
 parallel_test_prepare:
 	# Preparing test commands
@@ -162,6 +172,10 @@ parallel_test_junit_report:
 	# Preparing jUnit test report
 	@./scripts/go_test_with_coverage_report junit
 
+check_windows_test_ignore_list:
+	# Checking for orphaned test names in ignore file
+	@./scripts/check_windows_test_ignore_list
+
 pull_images_for_tests:
 	# Pulling images required for some tests
 	@go run ./scripts/pull-images-for-tests/main.go
@@ -172,8 +186,7 @@ dockerfiles:
 .PHONY: mocks
 mocks: $(MOCKERY)
 	rm -rf ./helpers/service/mocks
-	find . -type f ! -path '*vendor/*' -name 'mock_*' -delete
-	$(MOCKERY) -dir=./vendor/github.com/ayufan/golang-kardianos-service -output=./helpers/service/mocks -name='(Interface)'
+	find . -type f -name 'mock_*' -delete
 	$(MOCKERY) -dir=./network -name='requester' -inpkg
 	$(MOCKERY) -dir=./helpers -all -inpkg
 	$(MOCKERY) -dir=./executors/docker -all -inpkg
@@ -192,8 +205,8 @@ check_mocks:
 	@$(MAKE) mocks
 	# Checking the differences
 	@git --no-pager diff --compact-summary --exit-code -- ./helpers/service/mocks \
-		$(shell git ls-files | grep 'mock_' | grep -v 'vendor/') && \
-		!(git ls-files -o | grep 'mock_' | grep -v 'vendor/') && \
+		$(shell git ls-files | grep 'mock_') && \
+		!(git ls-files -o | grep 'mock_') && \
 		echo "Mocks up-to-date!"
 
 test-docker:
@@ -232,21 +245,11 @@ packagecloud-deps:
 
 packagecloud-deb:
 	# Sending Debian compatible packages...
-	-for DIST in $(DEB_PLATFORMS); do \
-		echo "===================="; \
-		echo "$$DIST"; \
-		echo "====================" ;\
-		package_cloud push --verbose --url $(PACKAGE_CLOUD_URL) $(PACKAGE_CLOUD)/$$DIST out/deb/*.deb; \
-	done
+	@-./ci/push_packagecloud $(PACKAGE_CLOUD_URL) $(PACKAGE_CLOUD) deb $(DEB_PLATFORMS)
 
 packagecloud-rpm:
 	# Sending RedHat compatible packages...
-	-for DIST in $(RPM_PLATFORMS); do \
-		echo "===================="; \
-		echo "$$DIST"; \
-		echo "====================" ;\
-		package_cloud push --verbose --url $(PACKAGE_CLOUD_URL) $(PACKAGE_CLOUD)/$$DIST out/rpm/*.rpm; \
-	done
+	@-./ci/push_packagecloud $(PACKAGE_CLOUD_URL) $(PACKAGE_CLOUD) rpm $(RPM_PLATFORMS)
 
 packagecloud-yank:
 ifneq ($(YANK),)
@@ -293,7 +296,7 @@ prepare_windows_zip: out/binaries/gitlab-runner-windows-386.zip out/binaries/git
 
 prepare_zoneinfo:
 	# preparing the zoneinfo file
-	@cp $$GOROOT/lib/time/zoneinfo.zip out/
+	@cp $(shell go env GOROOT)/lib/time/zoneinfo.zip out/
 
 prepare_index: export CI_COMMIT_REF_NAME ?= $(BRANCH)
 prepare_index: export CI_COMMIT_SHA ?= $(REVISION)
@@ -309,8 +312,12 @@ prepare_index: $(RELEASE_INDEX_GENERATOR)
 								-gpg-password-env GPG_PASSPHRASE
 
 release_docker_images:
-	# Releasing Docker images
+	# Releasing GitLab Runner images
 	@./ci/release_docker_images
+
+release_helper_docker_images:
+	# Releasing GitLab Runner Helper images
+	@./ci/release_helper_docker_images
 
 generate_changelog: export CHANGELOG_RELEASE ?= $(VERSION)
 generate_changelog: $(GITLAB_CHANGELOG)
@@ -323,7 +330,7 @@ generate_changelog: $(GITLAB_CHANGELOG)
 
 check-tags-in-changelog:
 	# Looking for tags in CHANGELOG
-	@git status | grep "On branch master" 2>&1 >/dev/null || echo "Check should be done on master branch only. Skipping."
+	@git status | grep "On branch main" 2>&1 >/dev/null || echo "Check should be done on main branch only. Skipping."
 	@for tag in $$(git tag | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$$" | sed 's|v||' | sort -g); do \
 		state="MISSING"; \
 		grep "^v $$tag" CHANGELOG.md 2>&1 >/dev/null; \
@@ -335,18 +342,11 @@ update_feature_flags_docs:
 	go run ./scripts/update-feature-flags-docs/main.go
 
 development_setup:
-	test -d tmp/gitlab-test || git clone https://gitlab.com/gitlab-org/ci-cd/tests/gitlab-test.git tmp/gitlab-test
+	test -d tmp/gitlab-test || git clone https://gitlab.com/gitlab-org/ci-cd/gitlab-runner-pipeline-tests/gitlab-test tmp/gitlab-test
 	if prlctl --version ; then $(MAKE) -C tests/ubuntu parallels ; fi
 	if vboxmanage --version ; then $(MAKE) -C tests/ubuntu virtualbox ; fi
 
 check_modules:
-	# Check if there is any difference in vendor/
-	@git checkout HEAD -- vendor/*
-	@git status -sb vendor/ > /tmp/vendor-$${CI_JOB_ID}-before
-	@go mod vendor
-	@git status -sb vendor/ > /tmp/vendor-$${CI_JOB_ID}-after
-	@diff -U0 /tmp/vendor-$${CI_JOB_ID}-before /tmp/vendor-$${CI_JOB_ID}-after
-
 	# check go.sum
 	@git checkout HEAD -- go.sum
 	@git diff go.sum > /tmp/gosum-$${CI_JOB_ID}-before
@@ -369,7 +369,7 @@ $(GOLANGLINT): $(GOLANGLINT_GOARGS)
 	cd $(TOOL_BUILD_DIR) && \
 	export COMMIT=$(shell git rev-parse --short HEAD) && \
 	export DATE=$(shell date -u '+%FT%TZ') && \
-	CGO_ENABLED=1 go build -o $(BUILD_DIR)/$(GOLANGLINT) \
+	CGO_ENABLED=1 go build --trimpath -o $(BUILD_DIR)/$(GOLANGLINT) \
 		-ldflags "-s -w -X main.version=$(GOLANGLINT_VERSION) -X main.commit=$${COMMIT} -X main.date=$${DATE}" \
 		./cmd/golangci-lint/ && \
 	cd $(BUILD_DIR) && \
@@ -381,7 +381,7 @@ $(GOLANGLINT_GOARGS):
 	rm -rf $(TOOL_BUILD_DIR)
 	git clone https://gitlab.com/gitlab-org/language-tools/go/linters/goargs.git --no-tags --depth 1 $(TOOL_BUILD_DIR)
 	cd $(TOOL_BUILD_DIR) && \
-	CGO_ENABLED=1 go build -buildmode=plugin -o $(BUILD_DIR)/$(GOLANGLINT_GOARGS) plugin/analyzer.go
+	CGO_ENABLED=1 go build --trimpath --buildmode=plugin -o $(BUILD_DIR)/$(GOLANGLINT_GOARGS) plugin/analyzer.go
 	rm -rf $(TOOL_BUILD_DIR)
 
 $(MOCKERY): OS_TYPE ?= $(shell uname -s)

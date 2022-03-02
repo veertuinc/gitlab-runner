@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package wait
 
 import (
@@ -74,7 +77,7 @@ func TestDockerWaiter_Wait(t *testing.T) {
 	}
 }
 
-func TestDockerWaiter_KillWait(t *testing.T) {
+func TestDockerWaiter_StopKillWait(t *testing.T) {
 	mClient := new(docker.MockClient)
 	defer mClient.AssertExpectations(t)
 
@@ -86,7 +89,7 @@ func TestDockerWaiter_KillWait(t *testing.T) {
 	var wg sync.WaitGroup
 
 	wg.Add(2)
-	mClient.On("ContainerKill", mock.Anything, mock.Anything, mock.Anything).
+	mClient.On("ContainerStop", mock.Anything, mock.Anything, mock.Anything).
 		Run(func(mock.Arguments) {
 			wg.Done()
 		}).
@@ -102,7 +105,7 @@ func TestDockerWaiter_KillWait(t *testing.T) {
 		}
 	}()
 
-	err := waiter.KillWait(context.Background(), "id")
+	err := waiter.StopKillWait(context.Background(), "id", nil)
 	assert.NoError(t, err)
 }
 

@@ -4,17 +4,23 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
 ---
 
-# Runners autoscale configuration
+# Docker Machine Executor autoscale configuration **(FREE)**
 
 > The autoscale feature was introduced in GitLab Runner 1.1.0.
 
-Autoscale provides the ability to utilize resources in a more elastic and
+Autoscale provides the ability to use resources in a more elastic and
 dynamic way.
 
 GitLab Runner can autoscale, so that your infrastructure contains only as
 many build instances as are necessary at any time. If you configure GitLab Runner to
 only use autoscale, the system on which GitLab Runner is installed acts as a
 bastion for all the machines it creates. This machine is referred to as a "Runner Manager."
+
+NOTE:
+Docker has deprecated Docker Machine, the underlying technology used to autoscale
+runners on public cloud virtual machines. You can read the issue discussing the
+[strategy in response to the deprecation of Docker Machine](https://gitlab.com/gitlab-org/gitlab/-/issues/341856)
+for more details.
 
 ## Overview
 
@@ -42,8 +48,8 @@ Before configuring autoscale, you must:
 ## Supported cloud providers
 
 The autoscale mechanism is based on [Docker Machine](https://docs.docker.com/machine/overview/).
-All supported virtualization/cloud provider parameters, are available at the
-[Docker Machine drivers documentation](https://docs.docker.com/machine/drivers/).
+All supported virtualization and cloud provider parameters are available at the
+GitLab-managed fork of [Docker Machine](https://gitlab.com/gitlab-org/ci-cd/docker-machine/-/tree/main/).
 
 ## Runner configuration
 
@@ -85,11 +91,101 @@ The machine is waiting for the next jobs, and if no one is executed, after
 the `IdleTime` period, the machine is removed. If there are no jobs, there
 are no machines in _Idle_ state.
 
+If the `IdleCount` is set to a value greater than `0`, then idle VMs are created in the background. The runner acquires an existing idle VM before asking for a new job.
+
+- If the job is assigned to the runner, then that job is sent to the previously acquired VM.
+- If the job is not assigned to the runner, then the lock on the idle VM is released and the VM is returned back to the pool.
+
+## Limit the number of VMs created by the Docker Machine executor
+
+To limit the number of virtual machines (VMs) created by the Docker Machine executor, use the `limit` parameter in the `[[runners]]` section of the `config.toml` file.
+
+The `concurrent` parameter **does not** limit the number of VMs.
+
+As detailed [here](../fleet_scaling/index.md#basic-configuration-one-runner-one-worker), one process can be configured to manage multiple runner workers.
+
+This example illustrates the values set in the `config.toml` file for one runner process:
+
+```toml
+concurrent = 100
+
+[[runners]]
+name = "first"
+executor = "shell"
+limit = 40
+(...)
+
+[[runners]]
+name = "second"
+executor = "docker+machine"
+limit = 30
+(...)
+
+[[runners]]
+name = "third"
+executor = "ssh"
+limit = 10
+
+[[runners]]
+name = "fourth"
+executor = "virtualbox"
+limit = 20
+(...)
+
+```
+
+With this configuration:
+
+- One runner process can create four different runner workers using different execution environments.
+- The `concurrent` value is set to 100, so this one runner will execute a maximum of 100 concurrent GitLab CI/CD jobs. 
+- Only the `second` runner worker is configured to use the Docker Machine executor and therefore can automatically create VMs. 
+- The `limit` setting of `30` means that the `second` runner worker can execute a maximum of 30 CI/CD jobs on autoscaled VMs at any point in time.
+- While `concurrent` defines the global concurrency limit across multiple `[[runners]]` workers, `limit` defines the maximum concurrency for a single `[[runners]]` worker. 
+
+In this example, the runner process handles:
+
+- Across all `[[runners]]` workers, up to 100 concurrent jobs.
+- For the `first` worker, no more than 40 jobs, which are executed with the `shell` executor.
+- For the `second` worker, no more than 30 jobs, which are executed with the `docker+machine` executor. Additionally, Runner will maintain VMs based on the autoscaling configuration in `[runners.machine]`, but no more than 30 VMs in all states (idle, in-use, in-creation, in-removal).
+- For the `third` worker, no more than 10 jobs, executed with the `ssh` executor.
+- For the `fourth` worker, no more than 20 jobs, executed with the `virtualbox` executor.
+
+In this second example, there are two `[[runners]]` workers configured to use the `docker+machine` executor. With this configuration, each runner worker manages a separate pool of VMs that are constrained by the value of the `limit` parameter.
+
+```toml
+concurrent = 100
+
+[[runners]]
+name = "first"
+executor = "docker+machine"
+limit = 80
+(...)
+
+[[runners]]
+name = "second"
+executor = "docker+machine"
+limit = 50
+(...)
+
+```
+
+In this example:
+
+- The runner processes no more than 100 jobs (the value of `concurrent`). 
+- The runner process executes jobs in two `[[runners]]` workers, each of which uses the `docker+machine` executor.
+- The `first` runner can create a maximum of 80 VMs. Therefore this runner can execute a maximum of 80 jobs at any point in time.
+- The `second` runner can create a maximum of 50 VMs. Therefore this runner can execute a maximum of 50 jobs at any point in time.
+
+NOTE:
+Even though the sum of the limit value is `130` (`80 + 50 = 130`), the `concurrent` value of `100` at the global level means that this runner process can execute a maximum of 100 jobs concurrently.
+
 ## Autoscaling algorithm and parameters
 
 The autoscaling algorithm is based on these parameters:
 
 - `IdleCount`
+- `IdleCountMin`
+- `IdleScaleFactor`
 - `IdleTime`
 - `MaxGrowthRate`
 - `limit`
@@ -97,6 +193,10 @@ The autoscaling algorithm is based on these parameters:
 We say that each machine that does not run a job is in _Idle_ state. When
 GitLab Runner is in autoscale mode, it monitors all machines and ensures that
 there is always an `IdleCount` of machines in _Idle_ state.
+
+NOTE:
+In GitLab Runner 14.5 we've added the `IdleScaleFactor` and `IdleCountMin` settings which change this
+behavior a little. Refer to [the dedicated section](#the-idlescalefactor-strategy) for more details.
 
 If there is an insufficient number of _Idle_ machines, GitLab Runner
 starts provisioning new machines, subject to the `MaxGrowthRate` limit.
@@ -238,6 +338,73 @@ concurrent=20
 In this example, you can have a maximum of 20 concurrent jobs and 25 machines.
 In the worst case scenario, you can't have 10 idle machines, but only 5, because the `limit` is 25.
 
+## The `IdleScaleFactor` strategy
+
+> Introduced as experimental feature in [GitLab Runner 14.6](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/3179).
+
+The `IdleCount` parameter defines a static number of _Idle_ machines that runner should sustain.
+The value you assign depends on your use case.
+
+You can start by assigning a reasonable small number of machines in the _Idle_ state, and have them
+automatically adjust to a bigger number, depending on the current usage. To do that, use the experimental
+`IdleScaleFactor` setting.
+
+WARNING:
+`IdleScaleFactor` internally is an `float64` value and requires the float format to be used,
+for example: `0.0`, or `1.0` or ,`1.5` etc. If an integer format will be used (for example `IdleScaleFactor = 1`),
+Runner's process will fail with the error:
+`FATAL: Service run failed   error=toml: cannot load TOML value of type int64 into a Go float`.
+
+When you use this setting, GitLab Runner tries to sustain a defined number of
+machines in the _Idle_ state. However, this number is no longer static. Instead of using `IdleCount`,
+GitLab Runner checks how many machines are currently in use and defines the desired _Idle_ capacity as
+a factor of that number.
+
+Of course if there would be no currently used machines, `IdleScaleFactor` would evaluate to no _Idle_ machines
+to maintain. Because of how the autoscaling algorithm works, if `IdleCount`  is greater than `0` (and only then
+the `IdleScaleFactor` is applicable), Runner will not ask for jobs if there are no _Idle_ machines that can handle
+them. Without new jobs the number of used machines would not rise, so `IdleScaleFactor` would constantly evaluate
+to `0`. And this would block the Runner in unusable state.
+
+Therefore, we've introduced the second setting: `IdleCountMin`. It defines the minimum number of _Idle_ machines
+that need to be sustained no matter what `IdleScaleFactor` will evaluate to. **The setting can't be set to less than
+1 if `IdleScaleFactor` is used. If done so, Runner will automatically set it to 1.**
+
+You can also use `IdleCountMin` to define the minimum number of _Idle_ machines that should always be available.
+This allows new jobs entering the queue to start quickly. As with `IdleCount`, the value you assign
+depends on your use case.
+
+For example:
+
+```toml
+concurrent=200
+
+[[runners]]
+  limit = 200
+  [runners.machine]
+    IdleCount = 100
+    IdleCountMin = 10
+    IdleScaleFactor = 1.1
+```
+
+In this case, when Runner approaches the decision point, it checks how many machines are currently in use.
+Let's say we currently have 5 _Idle_ machines and 10 machines in use. Multiplying it by the `IdleScaleFactor`
+Runner decides that it should have 11 _Idle_ machines. So 6 more are created.
+
+If you have 90 _Idle_ machines and 100 machines in use, based on the `IdleScaleFactor`, GitLab Runner sees that
+it should have `100 * 1.1 = 110` _Idle_ machines. So it again starts creating new ones. However, when it reaches
+the number of `100` _Idle_ machines, it recognizes that this is the upper limit defined by `IdleCount`, and no
+more _Idle_ machines are created.
+
+If the 100 _Idle_ machines in use goes down to 20, the desired number of _Idle_ machines is `20 * 1.1 = 22`,
+and GitLab Runner starts slowly terminating the machines. As described above, GitLab Runner will remove the
+machines that weren't used for the `IdleTime`. Therefore, the removal of too many _Idle_ VMs will not be done
+too aggressively.
+
+If the number of _Idle_ machines goes down to 0, the desired number of _Idle_ machines is `0 * 1.1 = 0`. This,
+however, is less than the defined `IdleCountMin` setting, so Runner will slowly start removing the _Idle_ VMs
+until 10 remain. After that point, scaling down stops and Runner keeps 10 machines in _Idle_ state.
+
 ## Autoscaling periods configuration
 
 > Introduced in [GitLab Runner 13.0](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/5069).
@@ -295,53 +462,54 @@ in [GitLab Runner - Advanced Configuration - The `[runners.machine]` section](ad
 
 ## Off Peak time mode configuration (Deprecated)
 
-> This setting is deprecated and will be removed in 14.0. Use autoscaling periods instead.
-> If both settings are used, the Off Peak settings will be ignored.
+> This setting is deprecated and was removed in GitLab Runner 14.0.
 
-Autoscale can be configured with the support for _Off Peak_ time mode periods.
+Autoscale **can no longer be configured** with _Off Peak_ time mode periods. Convert it into autoscaling periods instead.
 
-**What is _Off Peak_ time mode period?**
+**Converting an Off Peak configuration into an autoscaling one**
 
-Some organizations can select a regular time periods when no work is done.
-These time periods are called _Off Peak_.
+To convert an Off Peak Configuration into an autoscaling one, create a `[[runners.machine.autoscaling]]` section and populate it as follows:
 
-Organizations where _Off Peak_ time periods occur probably don't want
-to pay for the _Idle_ machines when jobs are going to be
-executed in this time. Especially when `IdleCount` is set to a big number.
+- `Periods` field takes the value from `OffpeakPeriods`
+- `IdleCount` field takes the value from `OffpeakIdleCount`
+- `IdleTime` field takes the value from `OffpeakIdleTime`
+- `Timezone` field takes the value from `OffpeakTimezone`
 
-**How it is working?**
-
-Configuration of _Off Peak_ is done by four parameters: `OffPeakPeriods`,
-`OffPeakTimezone`, `OffPeakIdleCount` and `OffPeakIdleTime`. The
-`OffPeakPeriods` setting contains an array of cron-style patterns defining
-when the _Off Peak_ time mode should be set on. For example:
+As an example, consider the conversion of the following **Offpeak configuration**:
 
 ```toml
 [runners.machine]
-  OffPeakPeriods = [
-    "* * 0-8,18-23 * * mon-fri *",
-    "* * * * * sat,sun *"
-  ]
+  MachineName = "auto-scale-%s"
+  MachineDriver = "google"
+  IdleCount = 10
+  IdleTime = 1800
+  OffPeakPeriods = ["* * 9-17 * * mon-fri *"]
+  OffPeakIdleCount = 50
+  OffPeakIdleTime = 3600
+  OffPeakTimezone = "UTC"
 ```
 
-This example enables the _Off Peak_ periods described above, so on weekdays
-from 12:00am through 8:59am and 6:00pm through 11:59pm, plus all of Saturday and Sunday. Machines
-scheduler is checking all patterns from the array and if at least one of
-them describes current time, then the _Off Peak_ time mode is enabled.
+The conversion results in:
 
-When the _Off Peak_ time mode is enabled machines scheduler use
-`OffPeakIdleCount` instead of `IdleCount` setting and `OffPeakIdleTime`
-instead of `IdleTime` setting. The autoscaling algorithm is not changed,
-only the parameters. When machines scheduler discovers that none from
-the `OffPeakPeriods` pattern is fulfilled then it switches back to
-`IdleCount` and `IdleTime` settings.
+```toml
+[runners.machine]
+  MachineName = "auto-scale-%s"
+  MachineDriver = "google"
+  IdleCount = 10
+  IdleTime = 1800
+  [[runners.machine.autoscaling]]
+    Periods = ["* * 9-17 * * mon-fri *"]
+    IdleCount = 50
+    IdleTime = 3600
+    Timezone = "UTC"
+```
 
 ## Distributed runners caching
 
 NOTE:
 Read how to [use a distributed cache](../configuration/speed_up_job_execution.md#use-a-distributed-cache).
 
-To speed up your jobs, GitLab Runner provides a [cache mechanism](https://docs.gitlab.com/ee/ci/yaml/README.html#cache)
+To speed up your jobs, GitLab Runner provides a [cache mechanism](https://docs.gitlab.com/ee/ci/yaml/index.html#cache)
 where selected directories and/or files are saved and shared between subsequent
 jobs.
 
@@ -431,7 +599,7 @@ concurrent = 50   # All registered runners can run up to 50 concurrent jobs
   executor = "docker+machine"        # This runner is using the 'docker+machine' executor
   limit = 10                         # This runner can execute up to 10 jobs (created machines)
   [runners.docker]
-    image = "ruby:2.6"               # The default image used for jobs is 'ruby:2.6'
+    image = "ruby:2.7"               # The default image used for jobs is 'ruby:2.7'
   [runners.machine]
     IdleCount = 5                    # There must be 5 machines in Idle state - when Off Peak time mode is off
     IdleTime = 600                   # Each machine can be in Idle state up to 600 seconds (after this it will be removed) - when Off Peak time mode is off
@@ -450,6 +618,9 @@ concurrent = 50   # All registered runners can run up to 50 concurrent jobs
     [[runners.machine.autoscaling]]  # Define periods with different settings
       Periods = ["* * 9-17 * * mon-fri *"] # Every workday between 9 and 17 UTC
       IdleCount = 50
+      IdleCountMin = 5
+      IdleScaleFactor = 1.5 # Means that current number of Idle machines will be 1.5*in-use machines,
+                            # no more than 50 (the value of IdleCount) and no less than 5 (the value of IdleCountMin) 
       IdleTime = 3600
       Timezone = "UTC"
     [[runners.machine.autoscaling]]

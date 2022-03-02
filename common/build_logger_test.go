@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package common
 
 import (
@@ -98,11 +101,11 @@ func TestLogPrinters(t *testing.T) {
 		"with entry": {
 			entry: logrus.WithField("printer", "test"),
 			assertion: func(t *testing.T, output string) {
-				assert.Contains(t, output, "print\n")
-				assert.Contains(t, output, "info\n")
-				assert.Contains(t, output, "WARNING: warning\n")
-				assert.Contains(t, output, "ERROR: softerror\n")
-				assert.Contains(t, output, "ERROR: error\n")
+				assert.Contains(t, output, "print\033[0;m\n")
+				assert.Contains(t, output, "info\033[0;m\n")
+				assert.Contains(t, output, "WARNING: warning\033[0;m\n")
+				assert.Contains(t, output, "ERROR: softerror\033[0;m\n")
+				assert.Contains(t, output, "ERROR: error\033[0;m\n")
 			},
 		},
 	}

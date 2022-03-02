@@ -15,13 +15,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bmatcuk/doublestar"
 	"github.com/docker/cli/opts"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/kardianos/osext"
 	"github.com/sirupsen/logrus"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
@@ -39,6 +37,7 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/container/services"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/docker"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/limitwriter"
 	"gitlab.com/gitlab-org/gitlab-runner/shells"
 )
 
@@ -52,6 +51,8 @@ const (
 	ExecutorStageCreatingUserVolumes  common.ExecutorStage = "docker_creating_user_volumes"
 	ExecutorStagePullingImage         common.ExecutorStage = "docker_pulling_image"
 )
+
+const ServiceLogOutputLimit = 64 * 1024
 
 var PrebuiltImagesPaths []string
 
@@ -98,7 +99,7 @@ type executor struct {
 }
 
 func init() {
-	runnerFolder, err := osext.ExecutableFolder()
+	runner, err := os.Executable()
 	if err != nil {
 		logrus.Errorln(
 			"Docker executor: unable to detect gitlab-runner folder, "+
@@ -106,6 +107,8 @@ func init() {
 			err,
 		)
 	}
+
+	runnerFolder := filepath.Dir(runner)
 
 	PrebuiltImagesPaths = []string{
 		// When gitlab-runner is running from repository root
@@ -126,8 +129,11 @@ func init() {
 	}
 }
 
-func (e *executor) getServiceVariables() []string {
-	return e.Build.GetAllVariables().PublicOrInternal().StringList()
+func (e *executor) getServiceVariables(serviceDefinition common.Image) []string {
+	variables := e.Build.GetAllVariables().PublicOrInternal()
+	variables = append(variables, serviceDefinition.Variables...)
+
+	return append(variables.Expand().StringList(), e.BuildShell.Environment...)
 }
 
 func (e *executor) expandAndGetDockerImage(imageName string, allowedImages []string) (*types.ImageInspect, error) {
@@ -161,13 +167,11 @@ func (e *executor) loadPrebuiltImage(path, ref, tag string) (*types.ImageInspect
 		Source:     file,
 		SourceName: "-",
 	}
-	options := types.ImageImportOptions{Tag: tag}
-
-	// TODO: Remove check in 14.0 https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26679
-	if e.Build.IsFeatureFlagOn(featureflags.ResetHelperImageEntrypoint) {
+	options := types.ImageImportOptions{
+		Tag: tag,
 		// NOTE: The ENTRYPOINT metadata is not preserved on export, so we need to reapply this metadata on import.
 		// See https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/2058#note_388341301
-		options.Changes = append(options.Changes, `ENTRYPOINT ["/usr/bin/dumb-init", "/entrypoint"]`)
+		Changes: []string{`ENTRYPOINT ["/usr/bin/dumb-init", "/entrypoint"]`},
 	}
 
 	if err = e.client.ImageImportBlocking(e.Context, source, ref, options); err != nil {
@@ -222,8 +226,13 @@ func (e *executor) getLocalHelperImage() *types.ImageInspect {
 		return nil
 	}
 
+	var flavor string
+	if e.Config.Docker != nil {
+		flavor = e.Config.Docker.HelperImageFlavor
+	}
+
 	architecture := e.helperImageInfo.Architecture
-	prebuiltFileName := getPrebuiltFileName(architecture, e.Config.Shell)
+	prebuiltFileName := getPrebuiltFileName(architecture, flavor, e.Config.Shell)
 	for _, dockerPrebuiltImagesPath := range PrebuiltImagesPaths {
 		dockerPrebuiltImageFilePath := filepath.Join(dockerPrebuiltImagesPath, prebuiltFileName)
 		image, err := e.loadPrebuiltImage(
@@ -242,12 +251,16 @@ func (e *executor) getLocalHelperImage() *types.ImageInspect {
 	return nil
 }
 
-func getPrebuiltFileName(architecture, shell string) string {
-	if shell == shells.SNPwsh {
-		return fmt.Sprintf("prebuilt-%s-%s%s", architecture, shell, prebuiltImageExtension)
+func getPrebuiltFileName(architecture, flavor string, shell string) string {
+	if flavor == "" {
+		flavor = helperimage.DefaultFlavor
 	}
 
-	return fmt.Sprintf("prebuilt-%s%s", architecture, prebuiltImageExtension)
+	if shell == shells.SNPwsh {
+		return fmt.Sprintf("prebuilt-%s-%s-%s%s", flavor, architecture, shell, prebuiltImageExtension)
+	}
+
+	return fmt.Sprintf("prebuilt-%s-%s%s", flavor, architecture, prebuiltImageExtension)
 }
 
 func (e *executor) getBuildImage() (*types.ImageInspect, error) {
@@ -364,7 +377,7 @@ func (e *executor) createService(
 	config := &container.Config{
 		Image:  serviceImage.ID,
 		Labels: e.labeler.Labels(labels),
-		Env:    append(e.getServiceVariables(), e.BuildShell.Environment...),
+		Env:    e.getServiceVariables(serviceDefinition),
 	}
 
 	if len(serviceDefinition.Command) > 0 {
@@ -398,6 +411,7 @@ func (e *executor) createHostConfigForService() *container.HostConfig {
 		RestartPolicy: neverRestartPolicy,
 		ExtraHosts:    e.Config.Docker.ExtraHosts,
 		Privileged:    e.Config.Docker.Privileged,
+		Runtime:       e.Config.Docker.Runtime,
 		UsernsMode:    container.UsernsMode(e.Config.Docker.UsernsMode),
 		NetworkMode:   e.networkMode,
 		Binds:         e.volumesManager.Binds(),
@@ -725,9 +739,15 @@ func (e *executor) createHostConfig() (*container.HostConfig, error) {
 }
 
 func (e *executor) startAndWatchContainer(ctx context.Context, id string, input io.Reader) error {
-	dockerExec := exec.NewDocker(e.client, e.waiter, e.Build.Log())
+	dockerExec := exec.NewDocker(e.Context, e.client, e.waiter, e.Build.Log())
 
-	return dockerExec.Exec(ctx, id, input, e.Trace)
+	streams := exec.IOStreams{
+		Stdin:  input,
+		Stderr: e.Trace,
+		Stdout: e.Trace,
+	}
+
+	return dockerExec.Exec(ctx, id, streams)
 }
 
 func (e *executor) removeContainer(ctx context.Context, id string) error {
@@ -787,35 +807,13 @@ func (e *executor) disconnectNetwork(ctx context.Context, id string) {
 }
 
 func (e *executor) verifyAllowedImage(image, optionName string, allowedImages, internalImages []string) error {
-	for _, allowedImage := range allowedImages {
-		ok, _ := doublestar.Match(allowedImage, image)
-		if ok {
-			return nil
-		}
+	options := common.VerifyAllowedImageOptions{
+		Image:          image,
+		OptionName:     optionName,
+		AllowedImages:  allowedImages,
+		InternalImages: internalImages,
 	}
-
-	for _, internalImage := range internalImages {
-		if internalImage == image {
-			return nil
-		}
-	}
-
-	if len(allowedImages) != 0 {
-		e.Println()
-		e.Errorln(fmt.Sprintf("The %q image is not present on list of allowed %s:", image, optionName))
-		for _, allowedImage := range allowedImages {
-			e.Errorln("-", allowedImage)
-		}
-		e.Println()
-	} else {
-		// by default allow to override the image name
-		return nil
-	}
-
-	e.Println(
-		"Please check runner's configuration allowed_images and allowed_services: " +
-			"https://docs.gitlab.com/runner/configuration/advanced-configuration.html#the-runnersdocker-section")
-	return errors.New("invalid image")
+	return common.VerifyAllowedImage(options, e.BuildLogger)
 }
 
 func (e *executor) expandImageName(imageName string, allowedInternalImages []string) (string, error) {
@@ -1027,6 +1025,7 @@ func (e *executor) prepareHelperImage() (helperimage.Info, error) {
 		OperatingSystem: e.info.OperatingSystem,
 		Shell:           e.Config.Shell,
 		GitLabRegistry:  e.Build.IsFeatureFlagOn(featureflags.GitLabRegistryHelperImage),
+		Flavor:          e.Config.Docker.HelperImageFlavor,
 	})
 }
 
@@ -1094,7 +1093,14 @@ func (e *executor) Cleanup() {
 	}
 
 	if e.client != nil {
-		_ = e.client.Close()
+		err = e.client.Close()
+		if err != nil {
+			clientCloseLogger := e.WithFields(logrus.Fields{
+				"error": err,
+			})
+
+			clientCloseLogger.Debugln("Failed to close the client")
+		}
 	}
 
 	e.AbstractExecutor.Cleanup()
@@ -1290,7 +1296,7 @@ func (e *executor) waitForServiceContainer(service *types.Container, timeout tim
 }
 
 func (e *executor) readContainerLogs(containerID string) string {
-	var containerBuffer bytes.Buffer
+	var buf bytes.Buffer
 
 	options := types.ContainerLogsOptions{
 		ShowStdout: true,
@@ -1304,7 +1310,10 @@ func (e *executor) readContainerLogs(containerID string) string {
 	}
 	defer func() { _ = hijacked.Close() }()
 
-	_, _ = stdcopy.StdCopy(&containerBuffer, &containerBuffer, hijacked)
-	containerLog := containerBuffer.String()
-	return strings.TrimSpace(containerLog)
+	// limit how much data we read from the container log to
+	// avoid memory exhaustion
+	w := limitwriter.New(&buf, ServiceLogOutputLimit)
+
+	_, _ = stdcopy.StdCopy(w, w, hijacked)
+	return strings.TrimSpace(buf.String())
 }

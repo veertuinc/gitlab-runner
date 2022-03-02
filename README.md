@@ -4,7 +4,7 @@
 
 For a list of compatible versions between GitLab and GitLab Runner, see the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
 
-> This is a stripped down and modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner/tree/13-11-stable) (version 13.11-stable).
+> This is a lightly modified version of [the official gitlab-runner](https://github.com/gitlabhq/gitlab-runner). See the VERSION file for information on which version of the core gitlab-runner we're using.
 
 ## Anka GitLab Runner Registration Example
 
@@ -50,6 +50,17 @@ test:
     - echo "Echo from inside of the VM!"
 ```
 
+### Variable interpolation in your YAML
+
+Gitlab level variables set under the Project, Group, Instance, etc, can be used in your `gitlab-ci.yml`. These are set using $ before the variable's name:
+
+```yaml
+build:
+  stage: build
+  variables:
+    ANKA_TEMPLATE_UUID: "$DEFAULT_ANKA_TEMPLATE_UUID"
+```
+
 ## Development Setup and Details
 
 ```bash
@@ -70,7 +81,7 @@ Test your changes manually with `anka-gitlab-runner --debug --log-level debug ru
 > Try our https://github.com/veertuinc/getting-started scripts to run Gitlab locally inside of a docker container
 
 ```bash
-export GITLAB_HOSTNAME="localhost";
+export GITLAB_HOSTNAME="anka.gitlab";
 export GITLAB_DOCKER_CONTAINER_NAME="anka.gitlab";
 export GITLAB_PORT="8093";
 export GITLAB_ROOT_PASSWORD="rootpassword";
@@ -92,12 +103,12 @@ export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME
 --ssh-password admin \
 --name "localhost shared runner" \
 --anka-controller-address "http://anka.controller:8090/" \
---anka-template-uuid 5d1b40b9-7e68-4807-a290-c59c66e926b4	\
+--anka-template-uuid 5d1b40b9-7e68-4807-a290-c59c66e926b4 \
 --anka-tag v1 \
 --executor anka \
 --anka-controller-instance-name "triggered by shared runner" \
 --anka-controller-external-id "http://test123share.com" \
---anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Typee\": \"test\" }" \
+--anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Type\": \"test\" }" \
 --clone-url "http://$GITLAB_HOSTNAME:$GITLAB_PORT" \
 --tag-list "localhost-shared,localhost,iOS" && \
 ./out/binaries/anka-gitlab-runner-darwin-amd64 register --non-interactive \
@@ -107,15 +118,15 @@ export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME
 --ssh-password admin \
 --name "localhost specific runner" \
 --anka-controller-address "http://anka.controller:8090/" \
---anka-template-uuid 5d1b40b9-7e68-4807-a290-c59c66e926b4	 \
+--anka-template-uuid 5d1b40b9-7e68-4807-a290-c59c66e926b4 \
 --anka-tag v1 \
 --executor anka \
 --anka-controller-instance-name "triggered by project runner" \
 --anka-controller-external-id "http://test123proj.com" \
---anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Typee\": \"test\" }" \
+--anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Type\": \"test\" }" \
 --clone-url "http://$GITLAB_HOSTNAME:$GITLAB_PORT" \
 --tag-list "localhost-specific,localhost,iOS" && \
-./out/binaries/anka-gitlab-runner-darwin-amd64 stop && ./out/binaries/anka-gitlab-runner-darwin-amd64 --debug --log-level debug run -c $HOME/.gitlab-runner/anka-config.toml
+./out/binaries/anka-gitlab-runner-darwin-amd64 stop; ./out/binaries/anka-gitlab-runner-darwin-amd64 --debug --log-level debug run -c $HOME/.gitlab-runner/anka-config.toml
 ```
 
 > When adding new options/flags, add them to `testRegisterCommandRun`

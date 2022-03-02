@@ -1,4 +1,5 @@
-// +build linux darwin freebsd openbsd
+//go:build aix || android || darwin || dragonfly || freebsd || hurd || illumos || linux || netbsd || openbsd || solaris
+// +build aix android darwin dragonfly freebsd hurd illumos linux netbsd openbsd solaris
 
 package commands
 
@@ -9,9 +10,11 @@ import (
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
 )
 
+var ROOTCONFIGDIR = "/etc/gitlab-runner"
+
 func getDefaultConfigDirectory() string {
 	if os.Getuid() == 0 {
-		return "/etc/gitlab-runner"
+		return ROOTCONFIGDIR
 	} else if homeDir := helpers.GetHomeDir(); homeDir != "" {
 		return filepath.Join(homeDir, ".gitlab-runner")
 	} else if currentDir := helpers.GetCurrentWorkingDirectory(); currentDir != "" {

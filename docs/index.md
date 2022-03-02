@@ -5,7 +5,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
 ---
 
-# GitLab Runner
+# GitLab Runner **(FREE)**
 
 GitLab Runner is an application that works with GitLab CI/CD to run jobs in a pipeline.
 
@@ -15,7 +15,7 @@ GitLab Runner on a machine that's separate from the one that hosts the GitLab in
 for security and performance reasons. When you use separate machines, you can have
 different operating systems and tools, like Kubernetes or Docker, on each.
 
-GitLab Runner is open-source and written in [Go](https://golang.org). It can be run
+GitLab Runner is open-source and written in [Go](https://go.dev). It can be run
 as a single binary; no language-specific requirements are needed.
 
 You can install GitLab Runner on several different supported operating systems.
@@ -36,6 +36,11 @@ Backward compatibility is guaranteed between minor version updates. However, som
 version updates of GitLab can introduce new features that require GitLab Runner to be on the same minor
 version.
 
+If you host your own runners but host your repositories on GitLab.com,
+keep GitLab Runner [updated](install/index.md)
+to the latest version, as GitLab.com is
+[updated continuously](https://gitlab.com/gitlab-org/release/tasks/-/issues).
+
 ## Runner registration
 
 After you install the application, you [**register**](register/index.md)
@@ -52,7 +57,7 @@ in a Kubernetes cluster, or in auto-scaled instances in the cloud.
 
 When you register a runner, you must choose an executor.
 
-An [**executor**](executors/README.md) determines the environment each job runs in.
+An [**executor**](executors/index.md) determines the environment each job runs in.
 
 For example:
 
@@ -76,16 +81,16 @@ should have access to it, or if you want to limit it to a specific GitLab group 
 
 There are three types of runners, based on who you want to have access:
 
-- [Shared runners](https://docs.gitlab.com/ee/ci/runners/README.html#shared-runners) are for use by all projects
-- [Group runners](https://docs.gitlab.com/ee/ci/runners/README.html#group-runners) are for all projects and subgroups in a group
-- [Specific runners](https://docs.gitlab.com/ee/ci/runners/README.html#specific-runners) are for individual projects
+- [Shared runners](https://docs.gitlab.com/ee/ci/runners/runners_scope.html#shared-runners) are for use by all projects
+- [Group runners](https://docs.gitlab.com/ee/ci/runners/runners_scope.html#group-runners) are for all projects and subgroups in a group
+- [Specific runners](https://docs.gitlab.com/ee/ci/runners/runners_scope.html#specific-runners) are for individual projects
 
 When you register a runner, you specify a token for the GitLab instance, group, or project.
 This is how the runner knows which projects it's available for.
 
 ### Tags
 
-When you register a runner, you can add [**tags**](https://docs.gitlab.com/ee/ci/yaml/README.html#tags) to it.
+When you register a runner, you can add [**tags**](https://docs.gitlab.com/ee/ci/yaml/index.html#tags) to it.
 
 When a CI/CD job runs, it knows which runner to use by looking at the assigned tags.
 
@@ -112,25 +117,25 @@ memory, CPU limits, and more.
 
 ## Monitoring runners
 
-You can use Prometheus to [**monitor**](monitoring/README.md) your runners.
+You can use Prometheus to [**monitor**](monitoring/index.md) your runners.
 You can view things like the number of currently-running jobs and how
 much CPU your runners are using.
 
 ## Use a runner to run your job
 
 After a runner is configured and available for your project, your
-[CI/CD](https://docs.gitlab.com/ee/ci/README.html) jobs can use the runner.
+[CI/CD](https://docs.gitlab.com/ee/ci/index.html) jobs can use the runner.
 
 Specify the name of the runner or its tags in your
-[`.gitlab-ci.yml`](https://docs.gitlab.com/ee/ci/yaml/README.html) file.
+[`.gitlab-ci.yml`](https://docs.gitlab.com/ee/ci/yaml/index.html) file.
 Then, when you commit to your repository, the pipeline runs, and
 the runner's executor processes the commands.
 
 ## Runners on GitLab.com
 
-If you use GitLab.com, GitLab [manages runners for you](https://docs.gitlab.com/ee/user/gitlab_com/index.html#shared-runners).
+If you use GitLab.com, you can run your CI jobs on Runner Cloud. These are runners [managed](https://docs.gitlab.com/ee/user/gitlab_com/index.html#shared-runner-cloud-runners) by GitLab and fully integrated with GitLab.com.
 These runners are enabled for all projects, though
-[you can disable them](https://docs.gitlab.com/ee/ci/runners/README.html#disable-shared-runners).
+[you can disable them](https://docs.gitlab.com/ee/ci/runners/runners_scope.html#disable-shared-runners).
 
 If you don't want to use runners managed by GitLab, you can install GitLab Runner and
 register your own runners on GitLab.com.
@@ -161,7 +166,7 @@ GitLab Runner has the following features.
 
 ## Runner execution flow
 
-This diagram shows how runners are registered and how jobs are requested and handled. It also shows which actions use [registration, authentication](https://docs.gitlab.com/ee/api/runners.html#registration-and-authentication-tokens), and [job tokens](https://docs.gitlab.com/ee/user/project/new_ci_build_permissions_model.html#job-token).
+This diagram shows how runners are registered and how jobs are requested and handled. It also shows which actions use [registration, authentication](https://docs.gitlab.com/ee/api/runners.html#registration-and-authentication-tokens), and [job tokens](https://docs.gitlab.com/ee/ci/jobs/ci_job_token.html).
 
 ```mermaid
 sequenceDiagram
@@ -171,7 +176,7 @@ sequenceDiagram
 
     opt registration
       GitLabRunner ->>+ GitLab: POST /api/v4/runners with registration_token
-      GitLab -->>- GitLabRunner: Registered with runner_token 
+      GitLab -->>- GitLabRunner: Registered with runner_token
     end
 
     loop job requesting and handling
@@ -187,22 +192,22 @@ sequenceDiagram
 
 ## Troubleshooting
 
-Learn how to [troubleshoot](faq/README.md) common issues.
+Learn how to [troubleshoot](faq/index.md) common issues.
 
 ## Contributing
 
-Contributions are welcome. See [`CONTRIBUTING.md`](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/CONTRIBUTING.md)
-and the [development documentation](development/README.md) for details.
+Contributions are welcome. See [`CONTRIBUTING.md`](https://gitlab.com/gitlab-org/gitlab-runner/blob/main/CONTRIBUTING.md)
+and the [development documentation](development/index.md) for details.
 
 If you're a reviewer of GitLab Runner project, take a moment to read the
 [Reviewing GitLab Runner](development/reviewing-gitlab-runner.md) document.
 
-You can also review [the release process for the GitLab Runner project](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/PROCESS.md).
+You can also review [the release process for the GitLab Runner project](https://gitlab.com/gitlab-org/gitlab-runner/blob/main/PROCESS.md).
 
 ## Changelog
 
-See the [CHANGELOG](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/CHANGELOG.md) to view recent changes.
+See the [CHANGELOG](https://gitlab.com/gitlab-org/gitlab-runner/blob/main/CHANGELOG.md) to view recent changes.
 
 ## License
 
-This code is distributed under the MIT license. View the [LICENSE](https://gitlab.com/gitlab-org/gitlab-runner/blob/master/LICENSE) file.
+This code is distributed under the MIT license. View the [LICENSE](https://gitlab.com/gitlab-org/gitlab-runner/blob/main/LICENSE) file.

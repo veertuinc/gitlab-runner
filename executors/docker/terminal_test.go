@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package docker
 
 import (
@@ -277,7 +280,7 @@ func TestTerminalConn_Start(t *testing.T) {
 
 	session.SetInteractiveTerminal(&s)
 
-	srv := httptest.NewServer(session.Mux())
+	srv := httptest.NewServer(session.Handler())
 
 	u := url.URL{
 		Scheme: "ws",

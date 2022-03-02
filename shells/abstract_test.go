@@ -1,8 +1,12 @@
+//go:build !integration
+// +build !integration
+
 package shells
 
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +15,7 @@ import (
 
 	_ "gitlab.com/gitlab-org/gitlab-runner/cache/test"
 	"gitlab.com/gitlab-org/gitlab-runner/common"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers/tls"
 )
 
@@ -542,6 +547,128 @@ func TestWriteWritingArchiveCacheOnFailure(t *testing.T) {
 	}
 }
 
+func TestAbstractShell_writeCleanupBuildDirectoryScript(t *testing.T) {
+	testCases := []struct {
+		name                 string
+		buildDir             string
+		gitStrategy          string
+		gitCleanFlags        string
+		gitSubmoduleStrategy string
+		setupExpectations    func(*MockShellWriter)
+	}{
+		{
+			name:        "cloned repository",
+			buildDir:    "build/dir",
+			gitStrategy: "clone",
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("RmDir", "build/dir")
+			},
+		},
+		{
+			name:        "no git strategy",
+			buildDir:    "build/dir",
+			gitStrategy: "none",
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("Noticef", "Skipping build directory cleanup step")
+			},
+		},
+		{
+			name:        "git fetch strategy",
+			buildDir:    "some/dir/to/the/repo",
+			gitStrategy: "fetch",
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("Cd", "some/dir/to/the/repo")
+				m.On("Command", "git", "clean", "-ffdx")
+				m.On("Command", "git", "reset", "--hard")
+			},
+		},
+		{
+			name:          "git fetch with git clean flags",
+			buildDir:      "/build/dir/for/project",
+			gitStrategy:   "fetch",
+			gitCleanFlags: "-x -d -f",
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("Cd", "/build/dir/for/project")
+				m.On("Command", "git", "clean", "-x", "-d", "-f")
+				m.On("Command", "git", "reset", "--hard")
+			},
+		},
+		{
+			name:                 "git fetch with recursive submodule strategy",
+			buildDir:             "/dir/for/project",
+			gitStrategy:          "fetch",
+			gitCleanFlags:        "-n -q",
+			gitSubmoduleStrategy: "recursive",
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("Cd", "/dir/for/project")
+				m.On("Command", "git", "clean", "-n", "-q")
+				m.On("Command", "git", "reset", "--hard")
+				m.On("Command", "git", "submodule", "foreach", "--recursive", "git", "clean", "-n", "-q")
+				m.On("Command", "git", "submodule", "foreach", "--recursive", "git", "reset", "--hard")
+			},
+		},
+		{
+			name:                 "git fetch with normal submodule strategy",
+			buildDir:             "/dir/for/project",
+			gitStrategy:          "fetch",
+			gitCleanFlags:        "-x",
+			gitSubmoduleStrategy: "normal",
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("Cd", "/dir/for/project")
+				m.On("Command", "git", "clean", "-x")
+				m.On("Command", "git", "reset", "--hard")
+				m.On("Command", "git", "submodule", "foreach", "git", "clean", "-x")
+				m.On("Command", "git", "submodule", "foreach", "git", "reset", "--hard")
+			},
+		},
+		{
+			name:        "invalid git strategy",
+			buildDir:    "/dir/for/project",
+			gitStrategy: "use-svn",
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("RmDir", "/dir/for/project")
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			info := common.ShellScriptInfo{
+				Build: &common.Build{
+					JobResponse: common.JobResponse{
+						Variables: common.JobVariables{
+							common.JobVariable{
+								Key:   "FF_ENABLE_CLEANUP",
+								Value: "true",
+							},
+							common.JobVariable{
+								Key:   "GIT_STRATEGY",
+								Value: tc.gitStrategy,
+							},
+							common.JobVariable{
+								Key:   "GIT_CLEAN_FLAGS",
+								Value: tc.gitCleanFlags,
+							},
+							common.JobVariable{
+								Key:   "GIT_SUBMODULE_STRATEGY",
+								Value: tc.gitSubmoduleStrategy,
+							},
+						},
+					},
+					BuildDir: tc.buildDir,
+				},
+			}
+			mockShellWriter := &MockShellWriter{}
+			defer mockShellWriter.AssertExpectations(t)
+
+			tc.setupExpectations(mockShellWriter)
+			shell := AbstractShell{}
+
+			assert.NoError(t, shell.writeCleanupBuildDirectoryScript(mockShellWriter, info))
+		})
+	}
+}
+
 func TestGitCleanFlags(t *testing.T) {
 	tests := map[string]struct {
 		value string
@@ -575,7 +702,7 @@ func TestGitCleanFlags(t *testing.T) {
 			shell := AbstractShell{}
 
 			const dummySha = "01234567abcdef"
-			const dummyRef = "master"
+			const dummyRef = "main"
 
 			build := &common.Build{
 				Runner: &common.RunnerConfig{},
@@ -628,7 +755,7 @@ func TestGitFetchFlags(t *testing.T) {
 			shell := AbstractShell{}
 
 			const dummySha = "01234567abcdef"
-			const dummyRef = "master"
+			const dummyRef = "main"
 			const dummyProjectDir = "./"
 
 			build := &common.Build{
@@ -646,6 +773,7 @@ func TestGitFetchFlags(t *testing.T) {
 
 			mockWriter.On("Noticef", "Fetching changes...").Once()
 			mockWriter.On("MkTmpDir", mock.Anything).Return(mock.Anything).Once()
+			mockWriter.On("Command", "git", "config", "-f", mock.Anything, "init.defaultBranch", "none").Once()
 			mockWriter.On("Command", "git", "config", "-f", mock.Anything, "fetch.recurseSubmodules", "false").Once()
 			mockWriter.On("Command", "git", "init", dummyProjectDir, "--template", mock.Anything).Once()
 			mockWriter.On("Cd", mock.Anything)
@@ -730,10 +858,14 @@ func TestAbstractShell_writeSubmoduleUpdateCmd(t *testing.T) {
 					"Command",
 					append([]interface{}{"git", "submodule", "update", "--init"}, tc.ExpectedGitUpdateFlags...)...,
 				).Once()
-			mockWriter.
+			cleanCmd := mockWriter.
 				On("Command", append(expectedGitForEachArgsFn(), "git clean -ffxd")...).
 				Once()
-			mockWriter.On("Command", append(expectedGitForEachArgsFn(), "git reset --hard")...).Once()
+			mockWriter.On("Command", append(expectedGitForEachArgsFn(), "git reset --hard")...).
+				Run(func(args mock.Arguments) {
+					cleanCmd.Once()
+				}).
+				Once()
 			mockWriter.On("IfCmd", "git", "lfs", "version").Once()
 			mockWriter.On("Command", append(expectedGitForEachArgsFn(), "git lfs pull")...).Once()
 			mockWriter.On("EndIf").Once()
@@ -837,6 +969,80 @@ func TestAbstractShell_extractCacheWithFallbackKey(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestAbstractShell_writeSubmoduleUpdateCmdPath(t *testing.T) {
+	tests := map[string]struct {
+		paths string
+	}{
+		"single path": {
+			paths: "submoduleA",
+		},
+		"multiple paths": {
+			paths: "submoduleA submoduleB submoduleC",
+		},
+		"exclude paths": {
+			paths: ":(exclude)submoduleA :(exclude)submoduleB",
+		},
+		"paths with dash": {
+			paths: "-submoduleA :(exclude)-submoduleB",
+		},
+		"invalid paths": {
+			paths: "submoduleA : (exclude)submoduleB submoduleC :::1(exclude) submoduleD",
+		},
+		"extra spaces": {
+			paths: "submoduleA :   (exclude)submoduleB    submoduleC :::1(exclude)   submoduleD",
+		},
+		"empty paths": {
+			paths: "",
+		},
+		"spaces": {
+			paths: "        ",
+		},
+	}
+
+	submoduleCommand := func(paths string, args ...string) []interface{} {
+		command := []interface{}{
+			"git",
+			"submodule",
+		}
+
+		for _, a := range args {
+			command = append(command, a)
+		}
+
+		paths = strings.TrimSpace(paths)
+		if paths != "" {
+			command = append(command, "--", paths)
+		}
+
+		return command
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			shell := AbstractShell{}
+			mockWriter := new(MockShellWriter)
+			defer mockWriter.AssertExpectations(t)
+
+			mockWriter.On("Noticef", mock.Anything).Once()
+			mockWriter.On("Command", submoduleCommand(test.paths, "sync")...).Once()
+			mockWriter.On("Command", submoduleCommand(test.paths, "update", "--init")...).Once()
+			cleanCmd := mockWriter.On("Command", "git", "submodule", "foreach", "git clean -ffxd").Once()
+			mockWriter.On("Command", "git", "submodule", "foreach", "git reset --hard").
+				Run(func(args mock.Arguments) {
+					cleanCmd.Once()
+				}).
+				Once()
+			mockWriter.On("IfCmd", "git", "lfs", "version").Once()
+			mockWriter.On("Command", "git", "submodule", "foreach", "git lfs pull").Once()
+			mockWriter.On("EndIf").Once()
+
+			build := &common.Build{}
+			build.Variables = append(build.Variables, common.JobVariable{Key: "GIT_SUBMODULE_PATHS", Value: test.paths})
+			shell.writeSubmoduleUpdateCmd(mockWriter, build, false)
+		})
+	}
+}
+
 func TestWriteUserScript(t *testing.T) {
 	tests := map[string]struct {
 		inputSteps        common.Steps
@@ -914,6 +1120,7 @@ func TestWriteUserScript(t *testing.T) {
 					JobResponse: common.JobResponse{
 						Steps: tt.inputSteps,
 					},
+					Runner: &common.RunnerConfig{},
 				},
 				PostBuildScript: tt.postBuildScript,
 			}
@@ -926,6 +1133,151 @@ func TestWriteUserScript(t *testing.T) {
 			err := shell.writeUserScript(mockShellWriter, info, tt.buildStage)
 			assert.ErrorIs(t, err, tt.expectedErr)
 		})
+	}
+}
+
+func TestScriptSections(t *testing.T) {
+	tests := []struct {
+		inputSteps        common.Steps
+		setupExpectations func(*MockShellWriter)
+		featureFlagOn     bool
+		traceSections     bool
+	}{
+		{
+			featureFlagOn: true,
+			traceSections: true,
+			inputSteps: common.Steps{
+				common.Step{
+					Name:   common.StepNameScript,
+					Script: common.StepScript{"script 1", "script 2", "script 3"},
+				},
+			},
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("Variable", mock.Anything)
+				m.On("Cd", mock.AnythingOfType("string"))
+				m.On("SectionStart", mock.AnythingOfType("string"), "$ echo prebuild").Once()
+				m.On("SectionEnd", mock.AnythingOfType("string")).Once()
+				m.On("SectionStart", mock.AnythingOfType("string"), "$ script 1").Once()
+				m.On("SectionEnd", mock.AnythingOfType("string")).Once()
+				m.On("SectionStart", mock.AnythingOfType("string"), "$ script 2").Once()
+				m.On("SectionEnd", mock.AnythingOfType("string")).Once()
+				m.On("SectionStart", mock.AnythingOfType("string"), "$ script 3").Once()
+				m.On("SectionEnd", mock.AnythingOfType("string")).Once()
+				m.On("SectionStart", mock.AnythingOfType("string"), "$ echo postbuild").Once()
+				m.On("SectionEnd", mock.AnythingOfType("string")).Once()
+				m.On("Line", "echo prebuild").Once()
+				m.On("Line", "script 1").Once()
+				m.On("Line", "script 2").Once()
+				m.On("Line", "script 3").Once()
+				m.On("Line", "echo postbuild").Once()
+				m.On("CheckForErrors").Times(5)
+			},
+		},
+		{
+			featureFlagOn: false,
+			traceSections: false,
+			inputSteps: common.Steps{
+				common.Step{
+					Name:   common.StepNameScript,
+					Script: common.StepScript{"script 1", "script 2", "script 3"},
+				},
+			},
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("Variable", mock.Anything)
+				m.On("Cd", mock.AnythingOfType("string"))
+				m.On("Noticef", "$ %s", "echo prebuild").Once()
+				m.On("Noticef", "$ %s", "script 1").Once()
+				m.On("Noticef", "$ %s", "script 2").Once()
+				m.On("Noticef", "$ %s", "script 3").Once()
+				m.On("Noticef", "$ %s", "echo postbuild").Once()
+				m.On("Line", "echo prebuild").Once()
+				m.On("Line", "script 1").Once()
+				m.On("Line", "script 2").Once()
+				m.On("Line", "script 3").Once()
+				m.On("Line", "echo postbuild").Once()
+				m.On("CheckForErrors").Times(5)
+			},
+		},
+		{
+			featureFlagOn: true,
+			traceSections: false,
+			inputSteps: common.Steps{
+				common.Step{
+					Name:   common.StepNameScript,
+					Script: common.StepScript{"script 1", "script 2", "script 3"},
+				},
+			},
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("Variable", mock.Anything)
+				m.On("Cd", mock.AnythingOfType("string"))
+				m.On("Noticef", "$ %s", "echo prebuild").Once()
+				m.On("Noticef", "$ %s", "script 1").Once()
+				m.On("Noticef", "$ %s", "script 2").Once()
+				m.On("Noticef", "$ %s", "script 3").Once()
+				m.On("Noticef", "$ %s", "echo postbuild").Once()
+				m.On("Line", "echo prebuild").Once()
+				m.On("Line", "script 1").Once()
+				m.On("Line", "script 2").Once()
+				m.On("Line", "script 3").Once()
+				m.On("Line", "echo postbuild").Once()
+				m.On("CheckForErrors").Times(5)
+			},
+		},
+		{
+			featureFlagOn: false,
+			traceSections: true,
+			inputSteps: common.Steps{
+				common.Step{
+					Name:   common.StepNameScript,
+					Script: common.StepScript{"script 1", "script 2", "script 3"},
+				},
+			},
+			setupExpectations: func(m *MockShellWriter) {
+				m.On("Variable", mock.Anything)
+				m.On("Cd", mock.AnythingOfType("string"))
+				m.On("Noticef", "$ %s", "echo prebuild").Once()
+				m.On("Noticef", "$ %s", "script 1").Once()
+				m.On("Noticef", "$ %s", "script 2").Once()
+				m.On("Noticef", "$ %s", "script 3").Once()
+				m.On("Noticef", "$ %s", "echo postbuild").Once()
+				m.On("Line", "echo prebuild").Once()
+				m.On("Line", "script 1").Once()
+				m.On("Line", "script 2").Once()
+				m.On("Line", "script 3").Once()
+				m.On("Line", "echo postbuild").Once()
+				m.On("CheckForErrors").Times(5)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(
+			fmt.Sprintf("feature flag %t, trace sections %t", tt.featureFlagOn, tt.traceSections),
+			func(t *testing.T) {
+				info := common.ShellScriptInfo{
+					PreBuildScript: "echo prebuild",
+					Build: &common.Build{
+						JobResponse: common.JobResponse{
+							Steps: tt.inputSteps,
+							Features: common.GitlabFeatures{
+								TraceSections: tt.traceSections,
+							},
+						},
+						Runner: &common.RunnerConfig{RunnerSettings: common.RunnerSettings{
+							FeatureFlags: map[string]bool{featureflags.ScriptSections: tt.featureFlagOn},
+						}},
+					},
+					PostBuildScript: "echo postbuild",
+				}
+				mockShellWriter := &MockShellWriter{}
+				defer mockShellWriter.AssertExpectations(t)
+
+				tt.setupExpectations(mockShellWriter)
+				shell := AbstractShell{}
+
+				assert.NoError(t, shell.writeUserScript(mockShellWriter, info, common.BuildStage("step_script")))
+			},
+		)
 	}
 }
 
@@ -1112,7 +1464,7 @@ func TestSkipBuildStage(t *testing.T) {
 				},
 			},
 		},
-		common.BuildStageCleanupFileVariables: {
+		common.BuildStageCleanup: {
 			"don't skip if file artifact defined": {
 				common.JobResponse{
 					Variables: common.JobVariables{
@@ -1188,6 +1540,7 @@ func TestAbstractShell_writeCleanupFileVariablesScript(t *testing.T) {
 					{Key: testVar4, Value: "test", File: false},
 				},
 			},
+			Runner: &common.RunnerConfig{},
 		},
 	}
 
@@ -1201,6 +1554,140 @@ func TestAbstractShell_writeCleanupFileVariablesScript(t *testing.T) {
 
 	shell := new(AbstractShell)
 
-	err := shell.writeCleanupFileVariablesScript(mockShellWriter, info)
+	err := shell.writeCleanupScript(mockShellWriter, info)
 	assert.NoError(t, err)
+}
+
+func BenchmarkScriptStage(b *testing.B) {
+	stages := []common.BuildStage{
+		common.BuildStagePrepare,
+		common.BuildStageGetSources,
+		common.BuildStageRestoreCache,
+		common.BuildStageDownloadArtifacts,
+		common.BuildStageAfterScript,
+		common.BuildStageArchiveOnSuccessCache,
+		common.BuildStageArchiveOnFailureCache,
+		common.BuildStageUploadOnSuccessArtifacts,
+		common.BuildStageUploadOnFailureArtifacts,
+		common.BuildStageCleanup,
+		common.BuildStage("step_release"),
+	}
+
+	shells := []common.Shell{
+		&BashShell{Shell: "sh"},
+		&BashShell{Shell: "bash"},
+		&PowerShell{Shell: SNPwsh, EOL: "\n"},
+		&PowerShell{Shell: SNPowershell, EOL: "\r\n"},
+		&CmdShell{},
+	}
+
+	for _, shell := range shells {
+		for _, stage := range stages {
+			b.Run(fmt.Sprintf("%s-%s", shell.GetName(), stage), func(b *testing.B) {
+				benchmarkScriptStage(b, shell, stage)
+			})
+		}
+	}
+}
+
+func benchmarkScriptStage(b *testing.B, shell common.Shell, stage common.BuildStage) {
+	info := common.ShellScriptInfo{
+		RunnerCommand:  "runner-helper",
+		PreBuildScript: "echo prebuild",
+		Build: &common.Build{
+			CacheDir: "cache",
+			Runner: &common.RunnerConfig{
+				RunnerCredentials: common.RunnerCredentials{
+					URL: "https://example.com",
+				},
+				RunnerSettings: common.RunnerSettings{
+					BuildsDir: "build",
+					CacheDir:  "cache",
+					Cache: &common.CacheConfig{
+						Type: "test",
+					},
+				},
+			},
+			JobResponse: common.JobResponse{
+				GitInfo: common.GitInfo{
+					Sha: "deadbeef",
+				},
+				Dependencies: []common.Dependency{{
+					ID: 1,
+					ArtifactsFile: common.DependencyArtifactsFile{
+						Filename: "artifact.zip",
+					},
+				}},
+				Artifacts: []common.Artifact{
+					{
+						Name:  "artifact",
+						Paths: []string{"*"},
+						When:  common.ArtifactWhenOnSuccess,
+					},
+					{
+						Name:  "artifact",
+						Paths: []string{"*"},
+						When:  common.ArtifactWhenOnFailure,
+					},
+				},
+				Cache: []common.Cache{
+					{
+						Key:    "cache",
+						Paths:  []string{"*"},
+						Policy: common.CachePolicyPullPush,
+						When:   common.CacheWhenOnSuccess,
+					},
+					{
+						Key:    "cache",
+						Paths:  []string{"*"},
+						Policy: common.CachePolicyPullPush,
+						When:   common.CacheWhenOnFailure,
+					},
+				},
+				Steps: common.Steps{
+					common.Step{
+						Name:   common.StepNameScript,
+						Script: common.StepScript{"echo script"},
+					},
+					common.Step{
+						Name:   common.StepNameAfterScript,
+						Script: common.StepScript{"echo after_script"},
+					},
+					common.Step{
+						Name:   "release",
+						Script: common.StepScript{"echo release"},
+					},
+					common.Step{
+						Name:   "a11y",
+						Script: common.StepScript{"echo a11y"},
+					},
+				},
+				Variables: []common.JobVariable{
+					{
+						Key:   "GIT_STRATEGY",
+						Value: "fetch",
+					},
+					{
+						Key:   "GIT_SUBMODULE_STRATEGY",
+						Value: "normal",
+					},
+					{
+						Key:   "file",
+						Value: "value",
+						File:  true,
+					},
+				},
+			},
+		},
+		PostBuildScript: "echo postbuild",
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		script, err := shell.GenerateScript(stage, info)
+		b.SetBytes(int64(len(script)))
+		assert.NoError(b, err, stage)
+	}
 }

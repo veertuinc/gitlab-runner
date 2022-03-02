@@ -4,7 +4,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
 ---
 
-# Run GitLab Runner in a container
+# Run GitLab Runner in a container **(FREE)**
 
 This is how you can run GitLab Runner inside a Docker container.
 
@@ -57,10 +57,20 @@ Before you begin, ensure [Docker is installed](https://docs.docker.com/get-docke
 
 To run `gitlab-runner` inside a Docker container, you need to make sure that the configuration is not lost when the container is restarted. To do this, there are two options, which are described below.
 
-Make sure that you read the [FAQ](../faq/README.md) section which describes some of the most common problems with GitLab Runner.
+Make sure that you read the [FAQ](../faq/index.md) section which describes some of the most common problems with GitLab Runner.
+
+- If you are using a [`session_server`](../configuration/advanced-configuration.md), you also
+need to expose port `8093` by adding `-p 8093:8093` to your `docker run` command.
+- If you want to use the Docker Machine executor for autoscaling feature, you also need to mount Docker Machine
+  storage path: `/root/.docker/machine`:
+  
+  - by adding `-v /srv/gitlab-runner/docker-machine-config:/root/.docker/machine` for system volume mounts
+  - by adding `-v docker-machine-config:/root/.docker/machine` for Docker named volumes
 
 NOTE:
-If you are using a [`session_server`](../configuration/advanced-configuration.md), you will also need to expose port `8093` by adding `-p 8093:8093` to your `docker run` command.
+This setup delegates full control over the Docker daemon to each GitLab Runner container.
+The effect is that isolation guarantees break if you run GitLab Runner inside a Docker daemon
+that also runs other payloads.
 
 ### Option 1: Use local system volume mounts to start the Runner container
 
@@ -98,9 +108,12 @@ In this example, you can use a configuration container to mount your custom data
 NOTE:
 To set the container's timezone, in the `docker run` command, use the flag `--env TZ=<TIMEZONE>`. [View a list of available time zones](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
 
+NOTE:
+For a [FIPS compliant GitLab Runner](index.md#fips-compliant-gitlab-runner) image, based on `redhat/ubi8`, use the `gitlab/gitlab-runner:ubi-fips` tags.
+
 ### Register the runner
 
-The final step is to [register a new runner](../register/index.md#docker). The GitLab Runner Container won't pick up any jobs until it's registered.
+The final step is to [register a new runner](../register/index.md#docker). The GitLab Runner container doesn't pick up any jobs until it's registered.
 
 ## Update configuration
 
@@ -135,7 +148,7 @@ docker run -d --name gitlab-runner --restart always \
 ```
 
 NOTE:
-You need to use the same method for mounting you data volume as you
+You need to use the same method for mounting your data volume as you
 did originally (`-v /srv/gitlab-runner/config:/etc/gitlab-runner` or
 `--volumes-from gitlab-runner-config`).
 
@@ -143,7 +156,7 @@ did originally (`-v /srv/gitlab-runner/config:/etc/gitlab-runner` or
 
 When GitLab Runner is started as a foreground task (whether it's a locally installed binary or
 inside of a Docker Container), the logs are printed to the standard output. When
-GitLab Runner is started as a system service (e.g. with Systemd), the logs are in most
+GitLab Runner is started as a system service (for example, with Systemd), the logs are in most
 cases logged through Syslog or other system logging mechanism.
 
 With GitLab Runner started as a Docker based service, since the `gitlab-runner ...` command is
@@ -182,9 +195,8 @@ certificates at `/etc/gitlab-runner/certs/ca.crt`, this can however be changed u
 
 Copy the `ca.crt` file into the `certs` directory on the data volume (or container).
 The `ca.crt` file should contain the root certificates of all the servers you
-want GitLab Runner to trust. The GitLab Runner container will
-import the `ca.crt` file on startup so if your container is already running you
-may need to restart it for the changes to take effect.
+want GitLab Runner to trust. The GitLab Runner container imports the `ca.crt` file on startup so if
+your container is already running you may need to restart it for the changes to take effect.
 
 ## Docker images
 
@@ -194,12 +206,41 @@ The following multi-platform Docker images are available:
 - `gitlab/gitlab-runner:alpine` based on Alpine with much a smaller footprint
   (~160/350 MB Ubuntu vs ~45/130 MB Alpine compressed/decompressed).
 
-See [GitLab Runner](https://gitlab.com/gitlab-org/gitlab-runner/tree/master/dockerfiles)
+See [GitLab Runner](https://gitlab.com/gitlab-org/gitlab-runner/tree/main/dockerfiles)
 source for possible build instructions for both Ubuntu and Alpine images.
 
+### Creating a GitLab Runner Docker image
+
+As of 2021-08-03, the GitLab Runner Docker image based on Alpine uses Alpine 3.12.0. However, you can upgrade the image's OS before it is available in the GitLab repositories.
+
+To build a `gitlab-runner` Docker image for the latest Alpine version:
+
+1. Create `alpine-upgrade/Dockerfile`.
+
+```dockerfile
+ARG GITLAB_RUNNER_IMAGE_TYPE
+ARG GITLAB_RUNNER_IMAGE_TAG
+FROM gitlab/${GITLAB_RUNNER_IMAGE_TYPE}:${GITLAB_RUNNER_IMAGE_TAG}
+
+RUN apk update
+RUN apk upgrade
+```
+
+1. Create an upgraded `gitlab-runner` image.
+
+```shell
+GITLAB_RUNNER_IMAGE_TYPE=gitlab-runner GITLAB_RUNNER_IMAGE_TAG=alpine-v13.12.0 docker build -t $GITLAB_RUNNER_IMAGE_TYPE:$GITLAB_RUNNER_IMAGE_TAG --build-arg GITLAB_RUNNER_IMAGE_TYPE=$GITLAB_RUNNER_IMAGE_TYPE --build-arg GITLAB_RUNNER_IMAGE_TAG=$GITLAB_RUNNER_IMAGE_TAG -f alpine-upgrade/Dockerfile alpine-upgrade
+```
+
+1. Create an upgraded `gitlab-runner-helper` image.
+
+```shell
+GITLAB_RUNNER_IMAGE_TYPE=gitlab-runner-helper GITLAB_RUNNER_IMAGE_TAG=x86_64-v13.12.0 docker build -t $GITLAB_RUNNER_IMAGE_TYPE:$GITLAB_RUNNER_IMAGE_TAG --build-arg GITLAB_RUNNER_IMAGE_TYPE=$GITLAB_RUNNER_IMAGE_TYPE --build-arg GITLAB_RUNNER_IMAGE_TAG=$GITLAB_RUNNER_IMAGE_TAG -f alpine-upgrade/Dockerfile alpine-upgrade
+```
+
 NOTE:
-The IBM Z image does not contain the `docker-machine` dependency, as it is not yet maintained for the Linux s390x
-platform. See [issue](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26551) for current status.
+The IBM Z image does not contain the `docker-machine` dependency, as it is not yet maintained for the Linux s390x or Linux ppc64le
+platforms. See [issue](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26551) for current status.
 
 ## SELinux
 
@@ -207,8 +248,8 @@ Some distributions (CentOS, RedHat, Fedora) use SELinux by default to enhance th
 
 Special care must be taken when dealing with such a configuration.
 
-1. If you want to use the [Docker executor](../executors/docker.md) to run builds in containers, you'll need access to `/var/run/docker.sock`.
-   However, if SELinux is in enforcing mode, you will see a `Permission denied` error when you're accessing `/var/run/docker.sock`.
+1. If you want to use the [Docker executor](../executors/docker.md) to run builds in containers, you need access to `/var/run/docker.sock`.
+   However, if SELinux is in enforcing mode, you see a `Permission denied` error when you're accessing `/var/run/docker.sock`.
    Install [selinux-dockersock](https://github.com/dpw/selinux-dockersock) to resolve this issue.
 1. Make sure that a persistent directory is created on host: `mkdir -p /srv/gitlab-runner/config`.
 1. Run Docker with `:Z` on volumes:
@@ -219,6 +260,3 @@ docker run -d --name gitlab-runner --restart always \
   -v /srv/gitlab-runner/config:/etc/gitlab-runner:Z \
   gitlab/gitlab-runner:latest
 ```
-
-More information about the cause and resolution can be found here:
-<http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/>

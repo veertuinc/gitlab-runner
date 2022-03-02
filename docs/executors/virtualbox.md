@@ -4,7 +4,7 @@ group: Runner
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://about.gitlab.com/handbook/engineering/ux/technical-writing/#assignments
 ---
 
-# VirtualBox
+# VirtualBox **(FREE)**
 
 NOTE:
 The Parallels executor works the same as the VirtualBox executor. The
@@ -13,7 +13,7 @@ caching feature is currently not supported.
 VirtualBox allows you to use VirtualBox's virtualization to provide a clean
 build environment for every build. This executor supports all systems that can
 be run on VirtualBox. The only requirement is that the virtual machine exposes
-its SSH server and provide a bash-compatible shell.
+an SSH server and provides a shell compatible with Bash or PowerShell.
 
 NOTE:
 GitLab Runner will use the `git lfs` command if [Git LFS](https://git-lfs.github.com) is installed on the virtual machine.
@@ -33,7 +33,7 @@ the `[[runners]]` section in
 [`config.toml`](../configuration/advanced-configuration.md).
 
 You can also define [custom build
-directories](https://docs.gitlab.com/ce/ci/yaml/README.html#custom-build-directories) per job using the
+directories](https://docs.gitlab.com/ee/ci/yaml/index.html#custom-build-directories) per job using the
 `GIT_CLONE_PATH`.
 
 ## Create a new base virtual machine
@@ -83,10 +83,30 @@ When a new build is started:
 
 ## Checklist for Windows VMs
 
+To use VirtualBox with Windows, you can install Cygwin or PowerShell.
+
+### Use Cygwin
+
 - Install [Cygwin](https://cygwin.com/)
-- Install sshd and Git from Cygwin (do not use *Git For Windows*, you will get lots of path issues!)
+- Install `sshd` and Git from Cygwin (do not use *Git For Windows*, you will get lots of path issues!)
 - Install Git LFS
-- Configure sshd and set it up as a service (see [Cygwin wiki](https://cygwin.fandom.com/wiki/Sshd))
+- Configure `sshd` and set it up as a service (see [Cygwin wiki](https://cygwin.fandom.com/wiki/Sshd))
 - Create a rule for the Windows Firewall to allow incoming TCP traffic on port 22
 - Add the GitLab server(s) to `~/.ssh/known_hosts`
 - To convert paths between Cygwin and Windows, use [the `cygpath` utility](https://cygwin.fandom.com/wiki/Cygpath_utility)
+
+### Use native OpenSSH and PowerShell
+
+> [Introduced in](https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/3176) GitLab Runner 14.6.
+
+- Install [PowerShell](https://docs.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-windows?view=powershell-7.2)
+- Install [OpenSSH](https://docs.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse)
+- Install [Git For Windows](https://git-scm.com/)
+- Configure [`sshd`, set it up as a service and add a rule for the Windows firewall](https://docs.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse#start-and-configure-openssh-server)
+- Configure the [default shell as `pwsh`](https://docs.microsoft.com/en-us/windows-server/administration/openssh/openssh_server_configuration#configuring-the-default-shell-for-openssh-in-windows). Update example with the correct full path:
+
+  ```powershell
+  New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value "$PSHOME\pwsh.exe" -PropertyType String -Force
+  ```
+
+- Add shell `pwsh` to [`config.toml`](../configuration/advanced-configuration.md)

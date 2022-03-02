@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package kubernetes
 
 import (
@@ -127,7 +130,7 @@ func TestKubernetesLogStreamProviderLogStream(t *testing.T) {
 	s.logPath = logPath
 	s.waitLogFileTimeout = waitFileTimeout
 
-	err := s.Stream(context.Background(), int64(offset), output)
+	err := s.Stream(int64(offset), output)
 	assert.ErrorIs(t, err, abortErr)
 }
 
@@ -241,10 +244,10 @@ func TestListenReadLines(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(len(logs))
 
-	mockLogStreamer.On("Stream", mock.Anything, mock.Anything, mock.Anything).
+	mockLogStreamer.On("Stream", mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			writeLogs(
-				args.Get(2).(io.Writer),
+				args.Get(1).(io.Writer),
 				logs...,
 			)
 
@@ -255,7 +258,7 @@ func TestListenReadLines(t *testing.T) {
 		}).
 		Return(nil).
 		Once()
-	mockLogStreamer.On("Stream", mock.Anything, mock.Anything, mock.Anything).
+	mockLogStreamer.On("Stream", mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			t.Log(args)
 			assert.FailNow(t, "unexpected call to Stream()")
@@ -266,7 +269,7 @@ func TestListenReadLines(t *testing.T) {
 	processor := newTestKubernetesLogProcessor()
 	processor.logStreamer = mockLogStreamer
 
-	ch := processor.Process(ctx)
+	ch, _ := processor.Process(ctx)
 	receivedLogs := make([]string, 0)
 	for log := range ch {
 		wg.Done()
@@ -312,12 +315,12 @@ func TestListenCancelContext(t *testing.T) {
 
 	ctx, _ := context.WithTimeout(context.Background(), 200*time.Millisecond)
 
-	mockLogStreamer.On("Stream", mock.Anything, mock.Anything, mock.Anything).
+	mockLogStreamer.On("Stream", mock.Anything, mock.Anything).
 		Run(func(mock.Arguments) {
 			<-ctx.Done()
 		}).
 		Return(io.EOF)
-	mockLogStreamer.On("Stream", mock.Anything, mock.Anything, mock.Anything).
+	mockLogStreamer.On("Stream", mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			t.Log(args)
 			assert.FailNow(t, "unexpected call to Stream()")
@@ -328,13 +331,12 @@ func TestListenCancelContext(t *testing.T) {
 	processor := newTestKubernetesLogProcessor()
 	processor.logStreamer = mockLogStreamer
 
-	ch := processor.Process(ctx)
-	for range ch {
-	}
+	ch, errCh := processor.Process(ctx)
+	assert.NoError(t, drainProcessLogsChannels(ch, errCh), "No error should be returned!")
 }
 
 func TestAttachReconnectLogStream(t *testing.T) {
-	const expectedConnectCount = 3
+	const expectedConnectCount = 5
 	ctx, cancel := context.WithCancel(context.Background())
 
 	mockLogStreamer := newMockLogStreamer()
@@ -342,7 +344,7 @@ func TestAttachReconnectLogStream(t *testing.T) {
 
 	var connects int
 	mockLogStreamer.
-		On("Stream", mock.Anything, mock.Anything, mock.Anything).
+		On("Stream", mock.Anything, mock.Anything).
 		Run(func(mock.Arguments) {
 			connects++
 			if connects == expectedConnectCount {
@@ -351,7 +353,7 @@ func TestAttachReconnectLogStream(t *testing.T) {
 		}).
 		Return(io.EOF).
 		Times(expectedConnectCount)
-	mockLogStreamer.On("Stream", mock.Anything, mock.Anything, mock.Anything).
+	mockLogStreamer.On("Stream", mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			t.Log(args)
 			assert.FailNow(t, "unexpected call to Stream()")
@@ -362,13 +364,12 @@ func TestAttachReconnectLogStream(t *testing.T) {
 	processor := newTestKubernetesLogProcessor()
 	processor.logStreamer = mockLogStreamer
 
-	ch := processor.Process(ctx)
-	for range ch {
-	}
+	ch, errCh := processor.Process(ctx)
+	_ = drainProcessLogsChannels(ch, errCh)
 }
 
 func TestAttachReconnectReadLogs(t *testing.T) {
-	const expectedConnectCount = 3
+	const expectedConnectCount = 5
 	ctx, cancel := context.WithCancel(context.Background())
 
 	mockLogStreamer := newMockLogStreamer()
@@ -376,9 +377,9 @@ func TestAttachReconnectReadLogs(t *testing.T) {
 
 	var connects int
 	mockLogStreamer.
-		On("Stream", mock.Anything, mock.Anything, mock.Anything).
+		On("Stream", mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
-			_ = args.Get(2).(*io.PipeWriter).Close()
+			_ = args.Get(1).(*io.PipeWriter).Close()
 
 			connects++
 			if connects == expectedConnectCount {
@@ -387,7 +388,7 @@ func TestAttachReconnectReadLogs(t *testing.T) {
 		}).
 		Return(nil).
 		Times(expectedConnectCount)
-	mockLogStreamer.On("Stream", mock.Anything, mock.Anything, mock.Anything).
+	mockLogStreamer.On("Stream", mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			t.Log(args)
 			assert.FailNow(t, "unexpected call to Stream()")
@@ -398,8 +399,26 @@ func TestAttachReconnectReadLogs(t *testing.T) {
 	processor := newTestKubernetesLogProcessor()
 	processor.logStreamer = mockLogStreamer
 
-	ch := processor.Process(ctx)
-	for range ch {
+	ch, errCh := processor.Process(ctx)
+	assert.NoError(t, drainProcessLogsChannels(ch, errCh), "No error should be returned!")
+}
+
+func drainProcessLogsChannels(ch <-chan string, errCh <-chan error) error {
+	var firstErr error
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return firstErr
+			}
+		case err, ok := <-errCh:
+			if !ok {
+				continue
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
 	}
 }
 
@@ -418,10 +437,10 @@ func TestAttachCorrectOffset(t *testing.T) {
 	wg.Add(len(logs))
 
 	mockLogStreamer.
-		On("Stream", mock.Anything, int64(0), mock.Anything).
+		On("Stream", int64(0), mock.Anything).
 		Run(func(args mock.Arguments) {
 			writeLogs(
-				args.Get(2).(io.Writer),
+				args.Get(1).(io.Writer),
 				logs...,
 			)
 
@@ -433,14 +452,14 @@ func TestAttachCorrectOffset(t *testing.T) {
 		Once()
 
 	mockLogStreamer.
-		On("Stream", mock.Anything, int64(20), mock.Anything).
+		On("Stream", int64(20), mock.Anything).
 		Run(func(mock.Arguments) {
 			cancel()
 		}).
 		Return(new(brokenReaderError)).
 		Once()
 
-	mockLogStreamer.On("Stream", mock.Anything, mock.Anything, mock.Anything).
+	mockLogStreamer.On("Stream", mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			t.Log(args)
 			assert.FailNow(t, "unexpected call to Stream()")
@@ -451,7 +470,7 @@ func TestAttachCorrectOffset(t *testing.T) {
 	processor := newTestKubernetesLogProcessor()
 	processor.logStreamer = mockLogStreamer
 
-	ch := processor.Process(ctx)
+	ch, _ := processor.Process(ctx)
 	for range ch {
 		wg.Done()
 	}

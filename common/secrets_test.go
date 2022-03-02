@@ -1,3 +1,6 @@
+//go:build !integration
+// +build !integration
+
 package common
 
 import (
@@ -30,6 +33,13 @@ func TestDefaultResolver_Resolve(t *testing.T) {
 				Field: "field",
 			},
 		},
+	}
+
+	composeSecrets := func(file bool) Secrets {
+		secret := secrets[variableKey]
+		secret.File = &file
+
+		return Secrets{variableKey: secret}
 	}
 
 	getLogger := func(t *testing.T) (logger, func()) {
@@ -70,7 +80,7 @@ func TestDefaultResolver_Resolve(t *testing.T) {
 			expectedVariables:        nil,
 			expectedError:            assert.AnError,
 		},
-		"secret resolved properly": {
+		"secret resolved properly - file not defined": {
 			getLogger:                getLogger,
 			supportedResolverPresent: true,
 			secrets:                  secrets,
@@ -79,6 +89,32 @@ func TestDefaultResolver_Resolve(t *testing.T) {
 					Key:   variableKey,
 					Value: returnValue,
 					File:  true,
+				},
+			},
+			expectedError: nil,
+		},
+		"secret resolved properly - file set to true": {
+			getLogger:                getLogger,
+			supportedResolverPresent: true,
+			secrets:                  composeSecrets(true),
+			expectedVariables: JobVariables{
+				{
+					Key:   variableKey,
+					Value: returnValue,
+					File:  true,
+				},
+			},
+			expectedError: nil,
+		},
+		"secret resolved properly - file set to false": {
+			getLogger:                getLogger,
+			supportedResolverPresent: true,
+			secrets:                  composeSecrets(false),
+			expectedVariables: JobVariables{
+				{
+					Key:   variableKey,
+					Value: returnValue,
+					File:  false,
 				},
 			},
 			expectedError: nil,

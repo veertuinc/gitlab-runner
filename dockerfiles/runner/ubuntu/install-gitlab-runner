@@ -2,12 +2,10 @@
 
 set -eEo pipefail
 
-ARCH="$1"
+ARCH=$(if [ "$1" == "ppc64le" ]; then echo "ppc64el"; else echo "$1"; fi)
 
 dpkg -i "/tmp/gitlab-runner_${ARCH}.deb"
 apt-get update
 apt-get -f install -y
 rm -rf /var/lib/apt/lists/*
 rm "/tmp/gitlab-runner_${ARCH}.deb"
-# TODO: Remove in 14.0 https://gitlab.com/gitlab-org/gitlab-runner/-/issues/4845
-rm "/home/gitlab-runner/.bash_logout"

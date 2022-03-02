@@ -38,17 +38,29 @@ const (
 	buildContainerName  = "build"
 	helperContainerName = "helper"
 
-	detectShellScriptName = "detect_shell_script"
+	detectShellScriptName         = "detect_shell_script"
+	pwshJSONTerminationScriptName = "terminate_with_json_script"
 
 	waitLogFileTimeout = time.Minute
+
+	outputLogFileNotExistsExitCode = 100
+	unknownLogProcessorExitCode    = 1000
+
+	// nodeSelectorWindowsBuildLabel is the label used to reference a specific Windows Version.
+	// https://kubernetes.io/docs/reference/labels-annotations-taints/#nodekubernetesiowindows-build
+	nodeSelectorWindowsBuildLabel = "node.kubernetes.io/windows-build"
+
+	apiVersion         = "v1"
+	ownerReferenceKind = "Pod"
 )
 
 var (
+	PropagationPolicy = metav1.DeletePropagationForeground
+
 	executorOptions = executors.ExecutorOptions{
 		DefaultCustomBuildsDirEnabled: true,
 		DefaultBuildsDir:              "/builds",
 		DefaultCacheDir:               "/cache",
-		SharedBuildsDir:               false,
 		Shell: common.ShellScriptInfo{
 			Shell:         "bash",
 			Type:          common.NormalShell,
@@ -57,18 +69,8 @@ var (
 		ShowHostname: true,
 	}
 
-	detectShellScript = shells.BashDetectShellScript
+	errIncorrectShellType = fmt.Errorf("kubernetes executor incorrect shell type")
 )
-
-// GetDefaultCapDrop returns the default capabilities that should be dropped
-// from a build container.
-func GetDefaultCapDrop() []string {
-	return []string{
-		// Reasons for disabling NET_RAW by default were
-		// discussed in https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26833
-		"NET_RAW",
-	}
-}
 
 type commandTerminatedError struct {
 	exitCode int
@@ -97,6 +99,16 @@ type kubernetesOptions struct {
 	Services common.Services
 }
 
+type containerBuildOpts struct {
+	name            string
+	image           string
+	imageDefinition common.Image
+	requests        api.ResourceList
+	limits          api.ResourceList
+	securityContext *api.SecurityContext
+	command         []string
+}
+
 type executor struct {
 	executors.AbstractExecutor
 
@@ -118,11 +130,11 @@ type executor struct {
 	newLogProcessor func() logProcessor
 
 	remoteProcessTerminated chan shells.TrapCommandExitStatus
-}
 
-type serviceDeleteResponse struct {
-	serviceName string
-	err         error
+	requireSharedBuildsDir *bool
+
+	// Flag if a repo mount and emptyDir volume are needed
+	requireDefaultBuildsDirVolume *bool
 }
 
 type serviceCreateResponse struct {
@@ -131,13 +143,7 @@ type serviceCreateResponse struct {
 }
 
 func (s *executor) Prepare(options common.ExecutorPrepareOptions) (err error) {
-	if err = s.AbstractExecutor.Prepare(options); err != nil {
-		return fmt.Errorf("prepare AbstractExecutor: %w", err)
-	}
-
-	if s.BuildShell.PassFile {
-		return fmt.Errorf("kubernetes doesn't support shells that require script file")
-	}
+	s.AbstractExecutor.PrepareConfiguration(options)
 
 	if err = s.prepareOverwrites(options.Build.GetAllVariables()); err != nil {
 		return fmt.Errorf("couldn't prepare overwrites: %w", err)
@@ -150,6 +156,10 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) (err error) {
 	s.pullManager = pull.NewPullManager(pullPolicies, &s.BuildLogger)
 
 	s.prepareOptions(options.Build)
+
+	// Dynamically configure use of shared build dir allowing
+	// for static build dir when isolated volume is in use.
+	s.SharedBuildsDir = s.isSharedBuildsDirRequired()
 
 	if err = s.checkDefaults(); err != nil {
 		return fmt.Errorf("check defaults error: %w", err)
@@ -170,6 +180,9 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) (err error) {
 		return fmt.Errorf("prepare helper image: %w", err)
 	}
 
+	// setup default executor options based on OS type
+	s.setupDefaultExecutorOptions(s.helperImageInfo.OSType)
+
 	s.featureChecker = &kubeClientFeatureChecker{kubeClient: s.kubeClient}
 
 	imageName := s.Build.GetAllVariables().ExpandValue(s.options.Image.Name)
@@ -179,16 +192,53 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) (err error) {
 		s.Println("Using attach strategy to execute scripts...")
 	}
 
-	return nil
+	s.Debugln(fmt.Sprintf("Using helper image: %s:%s", s.helperImageInfo.Name, s.helperImageInfo.Tag))
+
+	if err = s.AbstractExecutor.PrepareBuildAndShell(); err != nil {
+		return fmt.Errorf("prepare build and shell: %w", err)
+	}
+
+	if s.BuildShell.PassFile {
+		return fmt.Errorf("kubernetes doesn't support shells that require script file")
+	}
+
+	return err
+}
+
+func (s *executor) setupDefaultExecutorOptions(os string) {
+	if os == helperimage.OSTypeWindows {
+		s.DefaultBuildsDir = `C:\builds`
+		s.DefaultCacheDir = `C:\cache`
+
+		s.ExecutorOptions.Shell.Shell = shells.SNPowershell
+		s.ExecutorOptions.Shell.RunnerCommand = "gitlab-runner-helper"
+	}
 }
 
 func (s *executor) prepareHelperImage() (helperimage.Info, error) {
-	return helperimage.Get(common.REVISION, helperimage.Config{
+	config := helperimage.Config{
 		OSType:         helperimage.OSTypeLinux,
 		Architecture:   "amd64",
 		GitLabRegistry: s.Build.IsFeatureFlagOn(featureflags.GitLabRegistryHelperImage),
 		Shell:          s.Config.Shell,
-	})
+		Flavor:         s.Config.Kubernetes.HelperImageFlavor,
+	}
+
+	// use node selector labels to better select the correct image
+	if s.Config.Kubernetes.NodeSelector != nil {
+		for label, option := range map[string]*string{
+			api.LabelArchStable:           &config.Architecture,
+			api.LabelOSStable:             &config.OSType,
+			nodeSelectorWindowsBuildLabel: &config.OperatingSystem,
+		} {
+			value := s.Config.Kubernetes.NodeSelector[label]
+			if value != "" {
+				*option = value
+			}
+		}
+	}
+
+	return helperimage.Get(common.REVISION, config)
 }
 
 func (s *executor) Run(cmd common.ExecutorCommand) error {
@@ -268,26 +318,7 @@ func (s *executor) runWithAttach(cmd common.ExecutorCommand) error {
 	ctx, cancel := context.WithCancel(cmd.Context)
 	defer cancel()
 
-	containerName := buildContainerName
-	// Translates to roughly "sh /detect/shell/path.sh /stage/script/path.sh"
-	// which when the detect shell exits becomes something like "bash /stage/script/path.sh".
-	// This works unlike "gitlab-runner-build" since the detect shell passes arguments with "$@"
-	containerCommand := []string{
-		"sh",
-		s.scriptPath(detectShellScriptName),
-		s.buildCommandForStage(cmd.Stage),
-	}
-	if cmd.Predefined {
-		containerName = helperContainerName
-		// We use redirection here since the "gitlab-runner-build" helper doesn't pass input args
-		// to the shell it executes, so we technically pass the script to the stdin of the underlying shell
-		// translates roughly to "gitlab-runner-build <<< /stage/script/path.sh"
-		containerCommand = append(
-			s.helperImageInfo.Cmd,
-			"<<<",
-			s.buildCommandForStage(cmd.Stage),
-		)
-	}
+	containerName, containerCommand := s.getContainerInfo(cmd)
 
 	s.Debugln(fmt.Sprintf(
 		"Starting in container %q the command %q with script: %s",
@@ -308,7 +339,7 @@ func (s *executor) runWithAttach(cmd common.ExecutorCommand) error {
 
 		return err
 	case err := <-podStatusCh:
-		if isKubernetesPodNotFoundError(err) {
+		if IsKubernetesPodNotFoundError(err) {
 			return err
 		}
 
@@ -333,9 +364,9 @@ func (s *executor) ensurePodsConfigured(ctx context.Context) error {
 		return fmt.Errorf("setting up scripts configMap: %w", err)
 	}
 
-	permissionsInitContainer, err := s.buildLogPermissionsInitContainer()
+	permissionsInitContainer, err := s.buildPermissionsInitContainer(s.helperImageInfo.OSType)
 	if err != nil {
-		return fmt.Errorf("building log permissions init container: %w", err)
+		return fmt.Errorf("building permissions init container: %w", err)
 	}
 	err = s.setupBuildPod([]api.Container{permissionsInitContainer})
 	if err != nil {
@@ -356,56 +387,175 @@ func (s *executor) ensurePodsConfigured(ctx context.Context) error {
 	return nil
 }
 
-func (s *executor) buildLogPermissionsInitContainer() (api.Container, error) {
-	// We need to create the log file in which all scripts will append their output.
-	// The log file is created with the current user. There are 3 different scenarios for the user:
-	// 1. The user in all images and containers is root, in that case the chmod is redundant since they
-	// will all have permissions to the file.
-	// 2. The user of the helper image is root, however the build image's user is not root.
-	// In that case we need to allow the build user to write to the log file from inside the
-	// build container. That's where the chmod comes into play.
-	// 3. No user is root but all containers have the same user ID. In that case create the file.
-	// It will have the same user and group owner across all containers. This is the case for Kubernetes
-	// where the PodSecurityContext is set manually or for Openshift where each pod has a different user ID.
-	// *4. We don't allow setting different user IDs across containers, if that ever becomes the case
-	// we might need to try and chown the log file for the group only.
-	logFile := s.logFile()
-	chmod := fmt.Sprintf("touch %s && (chmod 777 %s || exit 0)", logFile, logFile)
+func (s *executor) getContainerInfo(cmd common.ExecutorCommand) (string, []string) {
+	var containerCommand []string
 
-	pullPolicy, err := s.pullManager.GetPullPolicyFor(s.getHelperImage())
-	if err != nil {
-		return api.Container{}, fmt.Errorf("getting pull policy for log permissions init container: %w", err)
+	containerName := buildContainerName
+	if cmd.Predefined {
+		containerName = helperContainerName
 	}
 
-	return api.Container{
-		Name:            "init-logs",
-		Image:           s.getHelperImage(),
-		Command:         []string{"sh", "-c", chmod},
-		VolumeMounts:    s.getVolumeMounts(),
-		ImagePullPolicy: pullPolicy,
-	}, nil
+	shell := s.Shell().Shell
+
+	switch shell {
+	case shells.SNPwsh, shells.SNPowershell:
+		// Translates to roughly "/path/to/parse_pwsh_script.ps1 /path/to/stage_script"
+		containerCommand = []string{
+			s.scriptPath(pwshJSONTerminationScriptName),
+			s.scriptPath(cmd.Stage),
+			s.buildRedirectionCmd(shell),
+		}
+	default:
+		// Translates to roughly "sh /detect/shell/path.sh /stage/script/path.sh"
+		// which when the detect shell exits becomes something like "bash /stage/script/path.sh".
+		// This works unlike "gitlab-runner-build" since the detect shell passes arguments with "$@"
+		containerCommand = []string{
+			"sh",
+			s.scriptPath(detectShellScriptName),
+			s.scriptPath(cmd.Stage),
+			s.buildRedirectionCmd(shell),
+		}
+		if cmd.Predefined {
+			// We use redirection here since the "gitlab-runner-build" helper doesn't pass input args
+			// to the shell it executes, so we technically pass the script to the stdin of the underlying shell
+			// translates roughly to "gitlab-runner-build <<< /stage/script/path.sh"
+			containerCommand = append(
+				s.helperImageInfo.Cmd,
+				"<<<",
+				s.scriptPath(cmd.Stage),
+				s.buildRedirectionCmd(shell),
+			)
+		}
+	}
+
+	return containerName, containerCommand
 }
 
-func (s *executor) buildCommandForStage(stage common.BuildStage) string {
-	return fmt.Sprintf("%s 2>&1 | tee -a %s", s.scriptPath(stage), s.logFile())
+func (s *executor) initContainerResources() api.ResourceRequirements {
+	resources := api.ResourceRequirements{}
+
+	if s.configurationOverwrites != nil {
+		resources.Limits = s.configurationOverwrites.helperLimits
+		resources.Requests = s.configurationOverwrites.helperRequests
+	}
+
+	return resources
+}
+
+func (s *executor) buildPermissionsInitContainer(os string) (api.Container, error) {
+	pullPolicy, err := s.pullManager.GetPullPolicyFor(s.getHelperImage())
+	if err != nil {
+		return api.Container{}, fmt.Errorf("getting pull policy for permissions init container: %w", err)
+	}
+
+	container := api.Container{
+		Name:            "init-permissions",
+		Image:           s.getHelperImage(),
+		VolumeMounts:    s.getVolumeMounts(),
+		ImagePullPolicy: pullPolicy,
+		// let's use build container resources
+		Resources: s.initContainerResources(),
+	}
+
+	// The kubernetes executor uses both a helper container (for predefined stages) and a build
+	// container (for user defined steps). When accessing files on a shared volume, permissions
+	// are resolved within the context of the individual container.
+	//
+	// For Linux, the helper container and build container can occasionally have the same user IDs
+	// and access is not a problem. This can occur when:
+	// - the image defines a user ID that is identical across both images
+	// - PodSecurityContext is used and the UIDs is set manually
+	// - Openshift is used and each pod is assigned a different user ID
+	// Due to UIDs being different in other scenarios, we explicitly open the permissions on the
+	// log shared volume so both containers have access.
+	//
+	// For Windows, the security identifiers are larger. Unlike Linux, its not likely to have
+	// containers share the same identifier. The Windows Security Access Manager is not shared
+	// between containers, so we need to open up permissions across more than just the logging
+	// shared volume. Fortunately, Windows allows us to set permissions that recursively affect
+	// future folders and files.
+	switch os {
+	case helperimage.OSTypeWindows:
+		//nolint:lll
+		chmod := "icacls $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(%q) /grant 'Everyone:(OI)(CI)F' /t /q | out-null"
+		commands := []string{
+			fmt.Sprintf(chmod, s.logsDir()),
+			fmt.Sprintf(chmod, s.Build.RootDir),
+		}
+		container.Command = []string{
+			s.Shell().Shell,
+			"-c",
+			strings.Join(commands, ";\n"),
+		}
+
+	default:
+		chmod := "touch %[1]s && (chmod 777 %[1]s || exit 0)"
+		container.Command = []string{
+			"sh",
+			"-c",
+			fmt.Sprintf(chmod, s.logFile()),
+		}
+	}
+
+	return container, nil
+}
+
+func (s *executor) buildRedirectionCmd(shell string) string {
+	switch shell {
+	// powershell outputs utf16, so we re-encode the output to utf8
+	// this is important because our json decoder that detects the exit status
+	// of a job requires utf8.
+	case shells.SNPowershell:
+		return fmt.Sprintf("2>&1 | Out-File -Append -Encoding UTF8 %s", s.logFile())
+	}
+
+	return fmt.Sprintf("2>&1 | tee -a %s", s.logFile())
 }
 
 func (s *executor) processLogs(ctx context.Context) {
 	processor := s.newLogProcessor()
-	logsCh := processor.Process(ctx)
+	logsCh, errCh := processor.Process(ctx)
 
-	for line := range logsCh {
-		var status shells.TrapCommandExitStatus
-		if status.TryUnmarshal(line) {
-			s.remoteProcessTerminated <- status
-			continue
-		}
+	for {
+		select {
+		case line, ok := <-logsCh:
+			if !ok {
+				return
+			}
+			var status shells.TrapCommandExitStatus
+			if status.TryUnmarshal(line) {
+				s.remoteProcessTerminated <- status
+				continue
+			}
 
-		_, err := s.Trace.Write(append([]byte(line), '\n'))
-		if err != nil {
-			s.Warningln(fmt.Sprintf("Error writing log line to trace: %v", err))
+			_, err := s.Trace.Write(append([]byte(line), '\n'))
+			if err != nil {
+				s.Warningln(fmt.Sprintf("Error writing log line to trace: %v", err))
+			}
+		case err, ok := <-errCh:
+			if !ok {
+				continue
+			}
+
+			exitCode := getExitCode(err)
+			s.Warningln(fmt.Sprintf("%v", err))
+			// Script can be kept to nil as not being used after the exitStatus is received L1223
+			s.remoteProcessTerminated <- shells.TrapCommandExitStatus{CommandExitCode: exitCode}
 		}
 	}
+}
+
+// getExitCode tries to extract the exit code from an inner exec.CodeExitError
+// This error may be returned by the underlying kubernetes connection stream
+// however it's not guaranteed to be.
+// getExitCode would return unknownLogProcessorExitCode if err isn't of type exec.CodeExitError
+// or if it's nil
+func getExitCode(err error) int {
+	var exitErr exec.CodeExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.Code
+	}
+	return unknownLogProcessorExitCode
 }
 
 func (s *executor) setupScriptsConfigMap() error {
@@ -414,13 +564,12 @@ func (s *executor) setupScriptsConfigMap() error {
 	// After issue https://gitlab.com/gitlab-org/gitlab-runner/issues/10342 is resolved and
 	// the legacy execution mode is removed we can remove the manual construction of trapShell and just use "bash+trap"
 	// in the exec options
-	bashShell, ok := common.GetShell(s.Shell().Shell).(*shells.BashShell)
-	if !ok {
-		return fmt.Errorf("kubernetes executor incorrect shell type")
+	shell, err := s.retrieveShell()
+	if err != nil {
+		return err
 	}
 
-	trapShell := &shells.BashTrapShell{BashShell: bashShell, LogFile: s.logFile()}
-	scripts, err := s.generateScripts(trapShell)
+	scripts, err := s.generateScripts(shell)
 	if err != nil {
 		return err
 	}
@@ -433,7 +582,11 @@ func (s *executor) setupScriptsConfigMap() error {
 		Data: scripts,
 	}
 
-	s.configMap, err = s.kubeClient.CoreV1().ConfigMaps(s.configurationOverwrites.namespace).Create(configMap)
+	// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
+	s.configMap, err = s.kubeClient.
+		CoreV1().
+		ConfigMaps(s.configurationOverwrites.namespace).
+		Create(context.TODO(), configMap, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("generating scripts config map: %w", err)
 	}
@@ -441,9 +594,29 @@ func (s *executor) setupScriptsConfigMap() error {
 	return nil
 }
 
+func (s *executor) retrieveShell() (common.Shell, error) {
+	bashShell, ok := common.GetShell(s.Shell().Shell).(*shells.BashShell)
+	if ok {
+		return &shells.BashTrapShell{BashShell: bashShell}, nil
+	}
+
+	shell := common.GetShell(s.Shell().Shell)
+	if shell == nil {
+		return nil, errIncorrectShellType
+	}
+
+	return shell, nil
+}
+
 func (s *executor) generateScripts(shell common.Shell) (map[string]string, error) {
 	scripts := map[string]string{}
-	scripts[detectShellScriptName] = detectShellScript
+	shellName := s.Shell().Shell
+	switch shellName {
+	case shells.SNPwsh, shells.SNPowershell:
+		scripts[s.scriptName(pwshJSONTerminationScriptName)] = shells.PwshJSONTerminationScript(shellName)
+	default:
+		scripts[s.scriptName(detectShellScriptName)] = shells.BashDetectShellScript
+	}
 
 	for _, stage := range s.Build.BuildStages() {
 		script, err := shell.GenerateScript(stage, *s.Shell())
@@ -453,14 +626,14 @@ func (s *executor) generateScripts(shell common.Shell) (map[string]string, error
 			return nil, fmt.Errorf("generating trap shell script: %w", err)
 		}
 
-		scripts[string(stage)] = script
+		scripts[s.scriptName(string(stage))] = script
 	}
 
 	return scripts, nil
 }
 
 func (s *executor) Finish(err error) {
-	if isKubernetesPodNotFoundError(err) {
+	if IsKubernetesPodNotFoundError(err) {
 		// Avoid an additional error message when trying to
 		// cleanup a pod that we know no longer exists
 		s.pod = nil
@@ -475,130 +648,131 @@ func (s *executor) Cleanup() {
 	s.AbstractExecutor.Cleanup()
 }
 
-func (s *executor) cleanupServices() {
-	ch := make(chan serviceDeleteResponse)
-	var wg sync.WaitGroup
-	wg.Add(len(s.services))
-
-	for _, service := range s.services {
-		go s.deleteKubernetesService(service.ObjectMeta.Name, ch, &wg)
-	}
-
-	go func() {
-		wg.Wait()
-		close(ch)
-	}()
-
-	for res := range ch {
-		if res.err != nil {
-			s.Errorln(fmt.Sprintf("Error cleaning up the pod service %q: %v", res.serviceName, res.err))
-		}
-	}
-}
-
-func (s *executor) deleteKubernetesService(serviceName string, ch chan<- serviceDeleteResponse, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	err := s.kubeClient.CoreV1().
-		Services(s.configurationOverwrites.namespace).
-		Delete(serviceName, &metav1.DeleteOptions{})
-	ch <- serviceDeleteResponse{serviceName: serviceName, err: err}
-}
-
+// cleanupResources deletes the resources used during the runner job
+// Having a pod does not mean that the owner-dependent relationship exists as an error may occur during setting
+// We therefore explicitly delete the resources if no ownerReference is found on it
+// This does not apply for services as they are created with the owner from the start
+// thus deletion of the pod automatically means deletion of the services if any
 func (s *executor) cleanupResources() {
 	if s.pod != nil {
-		err := s.kubeClient.CoreV1().Pods(s.pod.Namespace).Delete(s.pod.Name, &metav1.DeleteOptions{})
+		// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
+		err := s.kubeClient.
+			CoreV1().
+			Pods(s.pod.Namespace).
+			Delete(context.TODO(), s.pod.Name, metav1.DeleteOptions{
+				GracePeriodSeconds: s.Config.Kubernetes.GetCleanupGracePeriodSeconds(),
+				PropagationPolicy:  &PropagationPolicy,
+			})
 		if err != nil {
 			s.Errorln(fmt.Sprintf("Error cleaning up pod: %s", err.Error()))
 		}
 	}
-	if s.credentials != nil {
+
+	if s.credentials != nil && len(s.credentials.OwnerReferences) == 0 {
+		// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
 		err := s.kubeClient.CoreV1().
 			Secrets(s.configurationOverwrites.namespace).
-			Delete(s.credentials.Name, &metav1.DeleteOptions{})
+			Delete(context.TODO(), s.credentials.Name, metav1.DeleteOptions{
+				GracePeriodSeconds: s.Config.Kubernetes.GetCleanupGracePeriodSeconds(),
+			})
 		if err != nil {
 			s.Errorln(fmt.Sprintf("Error cleaning up secrets: %s", err.Error()))
 		}
 	}
-	if s.configMap != nil {
+	if s.configMap != nil && len(s.configMap.OwnerReferences) == 0 {
+		// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
 		err := s.kubeClient.CoreV1().
 			ConfigMaps(s.configurationOverwrites.namespace).
-			Delete(s.configMap.Name, &metav1.DeleteOptions{})
+			Delete(context.TODO(), s.configMap.Name, metav1.DeleteOptions{
+				GracePeriodSeconds: s.Config.Kubernetes.GetCleanupGracePeriodSeconds(),
+			})
 		if err != nil {
 			s.Errorln(fmt.Sprintf("Error cleaning up configmap: %s", err.Error()))
 		}
 	}
-
-	s.cleanupServices()
 }
 
 //nolint:funlen
-func (s *executor) buildContainer(
-	name, image string,
-	imageDefinition common.Image,
-	requests, limits api.ResourceList,
-	containerCommand ...string,
-) (api.Container, error) {
-	privileged := false
-	var allowPrivilegeEscalation *bool
-	containerPorts := make([]api.ContainerPort, len(imageDefinition.Ports))
-	proxyPorts := make([]proxy.Port, len(imageDefinition.Ports))
+func (s *executor) buildContainer(opts containerBuildOpts) (api.Container, error) {
+	// check if the image/service is allowed
+	internalImages := []string{
+		s.Config.Kubernetes.Image,
+		s.helperImageInfo.Name,
+	}
 
-	for i, port := range imageDefinition.Ports {
+	var (
+		optionName    string
+		allowedImages []string
+		envVars       []common.JobVariable
+	)
+	if strings.HasPrefix(opts.name, "svc-") {
+		optionName = "services"
+		allowedImages = s.Config.Kubernetes.AllowedServices
+		envVars = s.getServiceVariables(opts.imageDefinition)
+	} else if opts.name == buildContainerName {
+		optionName = "images"
+		allowedImages = s.Config.Kubernetes.AllowedImages
+		envVars = s.Build.GetAllVariables().PublicOrInternal()
+	}
+
+	verifyAllowedImageOptions := common.VerifyAllowedImageOptions{
+		Image:          opts.image,
+		OptionName:     optionName,
+		AllowedImages:  allowedImages,
+		InternalImages: internalImages,
+	}
+	err := common.VerifyAllowedImage(verifyAllowedImageOptions, s.BuildLogger)
+	if err != nil {
+		return api.Container{}, err
+	}
+
+	containerPorts := make([]api.ContainerPort, len(opts.imageDefinition.Ports))
+	proxyPorts := make([]proxy.Port, len(opts.imageDefinition.Ports))
+
+	for i, port := range opts.imageDefinition.Ports {
 		proxyPorts[i] = proxy.Port{Name: port.Name, Number: port.Number, Protocol: port.Protocol}
 		containerPorts[i] = api.ContainerPort{ContainerPort: int32(port.Number)}
 	}
 
 	if len(proxyPorts) > 0 {
-		serviceName := imageDefinition.Alias
+		serviceName := opts.imageDefinition.Alias
 
 		if serviceName == "" {
-			serviceName = name
-			if name != buildContainerName {
-				serviceName = fmt.Sprintf("proxy-%s", name)
+			serviceName = opts.name
+			if opts.name != buildContainerName {
+				serviceName = fmt.Sprintf("proxy-%s", opts.name)
 			}
 		}
 
 		s.ProxyPool[serviceName] = s.newProxy(serviceName, proxyPorts)
 	}
 
-	if s.Config.Kubernetes != nil {
-		privileged = s.Config.Kubernetes.Privileged
-		allowPrivilegeEscalation = s.Config.Kubernetes.AllowPrivilegeEscalation
-	}
-
-	pullPolicy, err := s.pullManager.GetPullPolicyFor(image)
+	pullPolicy, err := s.pullManager.GetPullPolicyFor(opts.image)
 	if err != nil {
 		return api.Container{}, err
 	}
 
-	command, args := s.getCommandAndArgs(imageDefinition, containerCommand...)
+	command, args := s.getCommandAndArgs(opts.imageDefinition, opts.command...)
 
-	return api.Container{
-			Name:            name,
-			Image:           image,
-			ImagePullPolicy: pullPolicy,
-			Command:         command,
-			Args:            args,
-			Env:             buildVariables(s.Build.GetAllVariables().PublicOrInternal()),
-			Resources: api.ResourceRequirements{
-				Limits:   limits,
-				Requests: requests,
-			},
-			Ports:        containerPorts,
-			VolumeMounts: s.getVolumeMounts(),
-			SecurityContext: &api.SecurityContext{
-				Privileged:               &privileged,
-				AllowPrivilegeEscalation: allowPrivilegeEscalation,
-				Capabilities: getCapabilities(
-					GetDefaultCapDrop(),
-					s.Config.Kubernetes.CapAdd,
-					s.Config.Kubernetes.CapDrop,
-				),
-			},
-			Stdin: true,
+	container := api.Container{
+		Name:            opts.name,
+		Image:           opts.image,
+		ImagePullPolicy: pullPolicy,
+		Command:         command,
+		Args:            args,
+		Env:             buildVariables(envVars),
+		Resources: api.ResourceRequirements{
+			Limits:   opts.limits,
+			Requests: opts.requests,
 		},
-		nil
+		Ports:           containerPorts,
+		VolumeMounts:    s.getVolumeMounts(),
+		SecurityContext: opts.securityContext,
+		Lifecycle:       s.prepareLifecycleHooks(),
+		Stdin:           true,
+	}
+
+	return container, nil
 }
 
 func (s *executor) getCommandAndArgs(imageDefinition common.Image, command ...string) ([]string, []string) {
@@ -627,16 +801,21 @@ func (s *executor) scriptsDir() string {
 }
 
 func (s *executor) scriptPath(stage common.BuildStage) string {
-	return path.Join(s.scriptsDir(), string(stage))
+	return path.Join(s.scriptsDir(), s.scriptName(string(stage)))
+}
+
+func (s *executor) scriptName(name string) string {
+	shell := s.Shell()
+	conf, err := common.GetShell(shell.Shell).GetConfiguration(*shell)
+	if err != nil || conf.Extension == "" {
+		return name
+	}
+
+	return name + "." + conf.Extension
 }
 
 func (s *executor) getVolumeMounts() []api.VolumeMount {
 	var mounts []api.VolumeMount
-
-	mounts = append(mounts, api.VolumeMount{
-		Name:      "repo",
-		MountPath: s.Build.RootDir,
-	})
 
 	// The configMap is nil when using legacy execution
 	if s.configMap != nil {
@@ -662,6 +841,13 @@ func (s *executor) getVolumeMounts() []api.VolumeMount {
 	}
 
 	mounts = append(mounts, s.getVolumeMountsForConfig()...)
+
+	if s.isDefaultBuildsDirVolumeRequired() {
+		mounts = append(mounts, api.VolumeMount{
+			Name:      "repo",
+			MountPath: s.AbstractExecutor.RootDir(),
+		})
+	}
 
 	return mounts
 }
@@ -727,19 +913,27 @@ func (s *executor) getVolumeMountsForConfig() []api.VolumeMount {
 
 func (s *executor) getVolumes() []api.Volume {
 	volumes := s.getVolumesForConfig()
-	volumes = append(volumes, api.Volume{
-		Name: "repo",
-		VolumeSource: api.VolumeSource{
-			EmptyDir: &api.EmptyDirVolumeSource{},
-		},
-	})
+
+	if s.isDefaultBuildsDirVolumeRequired() {
+		volumes = append(volumes, api.Volume{
+			Name: "repo",
+			VolumeSource: api.VolumeSource{
+				EmptyDir: &api.EmptyDirVolumeSource{},
+			},
+		})
+	}
 
 	// The configMap is nil when using legacy execution
 	if s.configMap == nil {
 		return volumes
 	}
 
-	mode := int32(0777)
+	var mode *int32
+	if s.helperImageInfo.OSType != helperimage.OSTypeWindows {
+		defaultLinuxMode := int32(0777)
+		mode = &defaultLinuxMode
+	}
+
 	optional := false
 	volumes = append(
 		volumes,
@@ -750,7 +944,7 @@ func (s *executor) getVolumes() []api.Volume {
 					LocalObjectReference: api.LocalObjectReference{
 						Name: s.configMap.Name,
 					},
-					DefaultMode: &mode,
+					DefaultMode: mode,
 					Optional:    &optional,
 				},
 			},
@@ -827,16 +1021,24 @@ func (s *executor) getVolumesForSecrets() []api.Volume {
 func (s *executor) getVolumesForPVCs() []api.Volume {
 	var volumes []api.Volume
 
+	store := make(map[string]api.Volume)
+
 	for _, volume := range s.Config.Kubernetes.Volumes.PVCs {
-		volumes = append(volumes, api.Volume{
+		if _, found := store[volume.Name]; found {
+			continue
+		}
+
+		apiVolume := api.Volume{
 			Name: volume.Name,
 			VolumeSource: api.VolumeSource{
 				PersistentVolumeClaim: &api.PersistentVolumeClaimVolumeSource{
 					ClaimName: volume.Name,
-					ReadOnly:  volume.ReadOnly,
 				},
 			},
-		})
+		}
+
+		volumes = append(volumes, apiVolume)
+		store[volume.Name] = apiVolume
 	}
 
 	return volumes
@@ -902,6 +1104,57 @@ func (s *executor) getVolumesForCSIs() []api.Volume {
 	return volumes
 }
 
+func (s *executor) isDefaultBuildsDirVolumeRequired() bool {
+	if s.requireDefaultBuildsDirVolume != nil {
+		return *s.requireDefaultBuildsDirVolume
+	}
+
+	var required = true
+	for _, mount := range s.getVolumeMountsForConfig() {
+		if mount.MountPath == s.AbstractExecutor.RootDir() {
+			required = false
+			break
+		}
+	}
+
+	s.requireDefaultBuildsDirVolume = &required
+
+	return required
+}
+
+func (s *executor) isSharedBuildsDirRequired() bool {
+	// Return quickly when default builds dir is used as job is
+	// isolated to pod, so no need for SharedBuildsDir behavior
+	if s.isDefaultBuildsDirVolumeRequired() {
+		return false
+	}
+
+	var required = true
+	if s.requireSharedBuildsDir != nil {
+		return *s.requireSharedBuildsDir
+	}
+
+	// Fetch name of the volume backing the builds volume mount
+	buildVolumeName := "repo"
+	for _, mount := range s.getVolumeMountsForConfig() {
+		if mount.MountPath == s.AbstractExecutor.RootDir() {
+			buildVolumeName = mount.Name
+			break
+		}
+	}
+
+	// Require shared builds dir when builds dir volume is anything except an emptyDir
+	for _, volume := range s.getVolumes() {
+		if volume.Name == buildVolumeName && volume.VolumeSource.EmptyDir != nil {
+			required = false
+			break
+		}
+	}
+
+	s.requireSharedBuildsDir = &required
+	return required
+}
+
 func (s *executor) setupCredentials() error {
 	s.Debugln("Setting up secrets")
 
@@ -931,7 +1184,11 @@ func (s *executor) setupCredentials() error {
 	secret.Data = map[string][]byte{}
 	secret.Data[api.DockerConfigKey] = dockerCfgContent
 
-	creds, err := s.kubeClient.CoreV1().Secrets(s.configurationOverwrites.namespace).Create(&secret)
+	// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
+	creds, err := s.kubeClient.
+		CoreV1().
+		Secrets(s.configurationOverwrites.namespace).
+		Create(context.TODO(), &secret, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
@@ -964,13 +1221,17 @@ func (s *executor) setupBuildPod(initContainers []api.Container) error {
 	for i, service := range s.options.Services {
 		resolvedImage := s.Build.GetAllVariables().ExpandValue(service.Name)
 		var err error
-		podServices[i], err = s.buildContainer(
-			fmt.Sprintf("svc-%d", i),
-			resolvedImage,
-			service,
-			s.configurationOverwrites.serviceRequests,
-			s.configurationOverwrites.serviceLimits,
-		)
+		podServices[i], err = s.buildContainer(containerBuildOpts{
+			name:            fmt.Sprintf("svc-%d", i),
+			image:           resolvedImage,
+			imageDefinition: service,
+			requests:        s.configurationOverwrites.serviceRequests,
+			limits:          s.configurationOverwrites.serviceLimits,
+			securityContext: s.Config.Kubernetes.GetContainerSecurityContext(
+				s.Config.Kubernetes.ServiceContainerSecurityContext,
+				s.defaultCapDrop()...,
+			),
+		})
 		if err != nil {
 			return err
 		}
@@ -980,7 +1241,7 @@ func (s *executor) setupBuildPod(initContainers []api.Container) error {
 	// by the services, to link each service to the pod
 	labels := map[string]string{"pod": s.Build.ProjectUniqueName()}
 	for k, v := range s.Build.Runner.Kubernetes.PodLabels {
-		labels[k] = s.Build.Variables.ExpandValue(v)
+		labels[k] = sanitizeLabel(s.Build.Variables.ExpandValue(v))
 	}
 
 	annotations := make(map[string]string)
@@ -1009,18 +1270,44 @@ func (s *executor) setupBuildPod(initContainers []api.Container) error {
 	}
 
 	s.Debugln("Creating build pod")
-	pod, err := s.kubeClient.CoreV1().Pods(s.configurationOverwrites.namespace).Create(&podConfig)
+
+	// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
+	pod, err := s.kubeClient.
+		CoreV1().
+		Pods(s.configurationOverwrites.namespace).
+		Create(context.TODO(), &podConfig, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
 
 	s.pod = pod
-	s.services, err = s.makePodProxyServices()
+
+	ownerReferences := s.buildPodReferences()
+	err = s.setOwnerReferencesForResources(ownerReferences)
+	if err != nil {
+		return fmt.Errorf("error setting ownerReferences: %w", err)
+	}
+
+	s.services, err = s.makePodProxyServices(ownerReferences)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (s *executor) defaultCapDrop() []string {
+	os := s.helperImageInfo.OSType
+	// windows does not support security context capabilities
+	if os == helperimage.OSTypeWindows {
+		return nil
+	}
+
+	return []string{
+		// Reasons for disabling NET_RAW by default were
+		// discussed in https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26833
+		"NET_RAW",
+	}
 }
 
 //nolint:funlen
@@ -1031,28 +1318,39 @@ func (s *executor) preparePodConfig(
 	hostAliases []api.HostAlias,
 	initContainers []api.Container,
 ) (api.Pod, error) {
-	buildImage := s.Build.GetAllVariables().ExpandValue(s.options.Image.Name)
+	dockerCmdForBuildContainer := s.BuildShell.DockerCommand
+	if s.Build.IsFeatureFlagOn(featureflags.KubernetesHonorEntrypoint) &&
+		!s.Build.IsFeatureFlagOn(featureflags.UseLegacyKubernetesExecutionStrategy) {
+		dockerCmdForBuildContainer = []string{}
+	}
 
-	buildContainer, err := s.buildContainer(
-		buildContainerName,
-		buildImage,
-		s.options.Image,
-		s.configurationOverwrites.buildRequests,
-		s.configurationOverwrites.buildLimits,
-		s.BuildShell.DockerCommand...,
-	)
+	buildContainer, err := s.buildContainer(containerBuildOpts{
+		name:            buildContainerName,
+		image:           s.Build.GetAllVariables().ExpandValue(s.options.Image.Name),
+		imageDefinition: s.options.Image,
+		requests:        s.configurationOverwrites.buildRequests,
+		limits:          s.configurationOverwrites.buildLimits,
+		securityContext: s.Config.Kubernetes.GetContainerSecurityContext(
+			s.Config.Kubernetes.BuildContainerSecurityContext,
+			s.defaultCapDrop()...,
+		),
+		command: dockerCmdForBuildContainer,
+	})
 	if err != nil {
 		return api.Pod{}, fmt.Errorf("building build container: %w", err)
 	}
 
-	helperContainer, err := s.buildContainer(
-		helperContainerName,
-		s.getHelperImage(),
-		common.Image{},
-		s.configurationOverwrites.helperRequests,
-		s.configurationOverwrites.helperLimits,
-		s.BuildShell.DockerCommand...,
-	)
+	helperContainer, err := s.buildContainer(containerBuildOpts{
+		name:     helperContainerName,
+		image:    s.getHelperImage(),
+		requests: s.configurationOverwrites.helperRequests,
+		limits:   s.configurationOverwrites.helperLimits,
+		securityContext: s.Config.Kubernetes.GetContainerSecurityContext(
+			s.Config.Kubernetes.HelperContainerSecurityContext,
+			s.defaultCapDrop()...,
+		),
+		command: s.BuildShell.DockerCommand,
+	})
 	if err != nil {
 		return api.Pod{}, fmt.Errorf("building helper container: %w", err)
 	}
@@ -1075,7 +1373,7 @@ func (s *executor) preparePodConfig(
 				buildContainer,
 				helperContainer,
 			}, services...),
-			TerminationGracePeriodSeconds: &s.Config.Kubernetes.TerminationGracePeriodSeconds,
+			TerminationGracePeriodSeconds: s.Config.Kubernetes.GetPodTerminationGracePeriodSeconds(),
 			ImagePullSecrets:              imagePullSecrets,
 			SecurityContext:               s.Config.Kubernetes.GetPodSecurityContext(),
 			HostAliases:                   hostAliases,
@@ -1086,6 +1384,51 @@ func (s *executor) preparePodConfig(
 	}
 
 	return pod, nil
+}
+
+func (s *executor) setOwnerReferencesForResources(ownerReferences []metav1.OwnerReference) error {
+	if s.credentials != nil {
+		credentials := s.credentials.DeepCopy()
+		credentials.SetOwnerReferences(ownerReferences)
+
+		var err error
+		s.credentials, err = s.kubeClient.
+			CoreV1().
+			Secrets(s.configurationOverwrites.namespace).
+			Update(context.TODO(), credentials, metav1.UpdateOptions{})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	if s.configMap != nil {
+		configMap := s.configMap.DeepCopy()
+		configMap.ObjectMeta.SetOwnerReferences(ownerReferences)
+
+		var err error
+		s.configMap, err = s.kubeClient.
+			CoreV1().
+			ConfigMaps(s.configurationOverwrites.namespace).
+			Update(context.TODO(), configMap, metav1.UpdateOptions{})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *executor) buildPodReferences() []metav1.OwnerReference {
+	return []metav1.OwnerReference{
+		{
+			APIVersion: apiVersion,
+			Kind:       ownerReferenceKind,
+			Name:       s.pod.GetName(),
+			UID:        s.pod.GetUID(),
+		},
+	}
 }
 
 func (s *executor) getDNSPolicy() api.DNSPolicy {
@@ -1108,7 +1451,7 @@ func (s *executor) getHelperImage() string {
 	return s.helperImageInfo.String()
 }
 
-func (s *executor) makePodProxyServices() ([]api.Service, error) {
+func (s *executor) makePodProxyServices(ownerReferences []metav1.OwnerReference) ([]api.Service, error) {
 	s.Debugln("Creating pod proxy services")
 
 	ch := make(chan serviceCreateResponse)
@@ -1128,7 +1471,7 @@ func (s *executor) makePodProxyServices() ([]api.Service, error) {
 			}
 		}
 
-		serviceConfig := s.prepareServiceConfig(serviceName, servicePorts)
+		serviceConfig := s.prepareServiceConfig(serviceName, servicePorts, ownerReferences)
 		go s.createKubernetesService(&serviceConfig, serviceProxy.Settings, ch, &wg)
 	}
 
@@ -1152,11 +1495,16 @@ func (s *executor) makePodProxyServices() ([]api.Service, error) {
 	return proxyServices, nil
 }
 
-func (s *executor) prepareServiceConfig(name string, ports []api.ServicePort) api.Service {
+func (s *executor) prepareServiceConfig(
+	name string,
+	ports []api.ServicePort,
+	ownerReferences []metav1.OwnerReference,
+) api.Service {
 	return api.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: name,
-			Namespace:    s.configurationOverwrites.namespace,
+			GenerateName:    name,
+			Namespace:       s.configurationOverwrites.namespace,
+			OwnerReferences: ownerReferences,
 		},
 		Spec: api.ServiceSpec{
 			Ports:    ports,
@@ -1174,7 +1522,11 @@ func (s *executor) createKubernetesService(
 ) {
 	defer wg.Done()
 
-	service, err := s.kubeClient.CoreV1().Services(s.pod.Namespace).Create(service)
+	// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
+	service, err := s.kubeClient.
+		CoreV1().
+		Services(s.pod.Namespace).
+		Create(context.TODO(), service, metav1.CreateOptions{})
 	if err == nil {
 		// Updating the internal service name reference and activating the proxy
 		proxySettings.ServiceName = service.Name
@@ -1212,8 +1564,12 @@ func (s *executor) watchPodStatus(ctx context.Context) <-chan error {
 }
 
 func (s *executor) checkPodStatus() error {
-	pod, err := s.kubeClient.CoreV1().Pods(s.pod.Namespace).Get(s.pod.Name, metav1.GetOptions{})
-	if isKubernetesPodNotFoundError(err) {
+	// TODO: handle the context properly with https://gitlab.com/gitlab-org/gitlab-runner/-/issues/27932
+	pod, err := s.kubeClient.
+		CoreV1().
+		Pods(s.pod.Namespace).
+		Get(context.TODO(), s.pod.Name, metav1.GetOptions{})
+	if IsKubernetesPodNotFoundError(err) {
 		return err
 	}
 
@@ -1256,12 +1612,14 @@ func (s *executor) runInContainer(name string, command []string) <-chan error {
 		}
 
 		exitStatus := <-s.remoteProcessTerminated
-		if *exitStatus.CommandExitCode == 0 {
+		s.Debugln("Remote process exited with the status:", exitStatus)
+
+		if exitStatus.CommandExitCode == 0 {
 			errCh <- nil
 			return
 		}
 
-		errCh <- &commandTerminatedError{exitCode: *exitStatus.CommandExitCode}
+		errCh <- &commandTerminatedError{exitCode: exitStatus.CommandExitCode}
 	}()
 
 	return errCh
@@ -1326,6 +1684,25 @@ func (s *executor) prepareOptions(build *common.Build) {
 	s.getServices(build)
 }
 
+func (s *executor) prepareLifecycleHooks() *api.Lifecycle {
+	lifecycleCfg := s.Config.Kubernetes.GetContainerLifecycle()
+
+	if lifecycleCfg.PostStart == nil && lifecycleCfg.PreStop == nil {
+		return nil
+	}
+
+	lifecycle := &api.Lifecycle{}
+
+	if lifecycleCfg.PostStart != nil {
+		lifecycle.PostStart = lifecycleCfg.PostStart.ToKubernetesLifecycleHandler()
+	}
+	if lifecycleCfg.PreStop != nil {
+		lifecycle.PreStop = lifecycleCfg.PreStop.ToKubernetesLifecycleHandler()
+	}
+
+	return lifecycle
+}
+
 func (s *executor) getServices(build *common.Build) {
 	for _, service := range s.Config.Kubernetes.Services {
 		if service.Name == "" {
@@ -1340,6 +1717,13 @@ func (s *executor) getServices(build *common.Build) {
 		}
 		s.options.Services = append(s.options.Services, service)
 	}
+}
+
+func (s *executor) getServiceVariables(serviceDefinition common.Image) common.JobVariables {
+	variables := s.Build.GetAllVariables().PublicOrInternal()
+	variables = append(variables, serviceDefinition.Variables...)
+
+	return variables.Expand()
 }
 
 // checkDefaults Defines the configuration for the Pod on Kubernetes
@@ -1364,7 +1748,7 @@ func (s *executor) checkDefaults() error {
 	return nil
 }
 
-func isKubernetesPodNotFoundError(err error) bool {
+func IsKubernetesPodNotFoundError(err error) bool {
 	var statusErr *kubeerrors.StatusError
 	return errors.As(err, &statusErr) &&
 		statusErr.ErrStatus.Code == http.StatusNotFound &&
@@ -1408,6 +1792,7 @@ func featuresFn(features *common.FeaturesInfo) {
 	features.Session = true
 	features.Terminal = true
 	features.Proxy = true
+	features.ServiceVariables = true
 }
 
 func init() {

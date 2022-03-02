@@ -9,19 +9,19 @@ info: To determine the technical writer assigned to the Stage/Group associated w
 These instructions to install GitLab Runner assume the
 [GitLab Kubernetes Agent](https://docs.gitlab.com/ee/user/clusters/agent/index.html) is already configured.
 
-1. Review the possible [GitLab Runner chart YAML values](https://gitlab.com/gitlab-org/charts/gitlab-runner/blob/master/values.yaml).
+1. Review the possible [GitLab Runner chart YAML values](https://gitlab.com/gitlab-org/charts/gitlab-runner/blob/main/values.yaml).
 1. Create a `runner-chart-values.yaml` file with the configuration that fits
    your needs, such as:
 
    ```yaml
    # The GitLab Server URL (with protocol) that want to register the runner against
-   # ref: https://docs.gitlab.com/runner/commands/README.html#gitlab-runner-register
+   # ref: https://docs.gitlab.com/runner/commands/index.html#gitlab-runner-register
    #
    gitlabUrl: https://gitlab.my.domain.example.com/
 
    # The Registration Token for adding new runners to the GitLab Server. This must
    # be retrieved from your GitLab instance.
-   # ref: https://docs.gitlab.com/ce/ci/runners/README.html
+   # ref: https://docs.gitlab.com/ee/ci/runners/index.html
    #
    runnerRegistrationToken: "yrnZW46BrtBFqM7xDzE7dddd"
 
@@ -38,13 +38,29 @@ These instructions to install GitLab Runner assume the
    ```
 
 1. Create a single manifest file to install the GitLab Runner chart with your cluster agent,
-   replacing `GITLAB GITLAB-RUNNER` with your namespace:
+   replacing `GITLAB-NAMESPACE` with your namespace:
 
    ```shell
-   helm template --namespace GITLAB GITLAB-RUNNER -f runner-chart-values.yaml gitlab/gitlab-runner > runner-manifest.yaml
+   helm template --namespace GITLAB-NAMESPACE gitlab-runner -f runner-chart-values.yaml gitlab/gitlab-runner > runner-manifest.yaml
    ```
 
    An [example file is available](#example-runner-manifest).
+
+1. Edit `runner-manifest.yaml` file to include the `namespace` for every resource. The output of `helm template` doesn't include the
+   `namespace` in the generated resources:
+
+   ```yaml
+   ---
+   # Source: gitlab-runner/templates/service-account.yaml
+   apiVersion: v1
+   kind: ServiceAccount
+   metadata:
+     annotations:
+     name: gitlab-runner-gitlab-runner
+     namespace: gitlab
+     labels:
+   ...
+   ```
 
 1. Push your `runner-manifest.yaml` to your manifest repository.
 
@@ -449,4 +465,19 @@ spec:
       - name: scripts
         configMap:
           name: gitlab-runner-gitlab-runner
+```
+
+## Troubleshooting
+
+### `associative list with keys has an element that omits key field "protocol"`
+
+Due to [the bug in Kubernetes v1.19](https://github.com/kubernetes-sigs/structured-merge-diff/issues/130), you may see this error when installing GitLab Runner or any other application with GitLab Kubernetes Agent. To fix it make sure to either upgrade your Kubernetes cluster to v1.20 and above or add `protocol: TCP` to `containers.ports` subsection:
+
+```yaml
+...
+ports:
+  - name: metrics
+    containerPort: 9252
+    protocol: TCP
+...
 ```

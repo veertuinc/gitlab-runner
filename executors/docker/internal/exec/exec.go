@@ -26,12 +26,26 @@ type reader interface {
 	io.Reader
 }
 
-type Docker interface {
-	Exec(ctx context.Context, containerID string, input io.Reader, output io.Writer) error
+type IOStreams struct {
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
-func NewDocker(c docker.Client, waiter wait.KillWaiter, logger logrus.FieldLogger) Docker {
+type Docker interface {
+	Exec(ctx context.Context, containerID string, streams IOStreams) error
+}
+
+// NewDocker returns a client for starting a new container and running a
+// command inside of it.
+//
+// The context passed is used to wait for any created container to stop. This
+// is likely an executor's context. This means that waits to stop are only ever
+// canceled should the job be aborted (either manually, or by exceeding the
+// build time).
+func NewDocker(ctx context.Context, c docker.Client, waiter wait.KillWaiter, logger logrus.FieldLogger) Docker {
 	return &defaultDocker{
+		ctx:    ctx,
 		c:      c,
 		waiter: waiter,
 		logger: logger,
@@ -39,12 +53,14 @@ func NewDocker(c docker.Client, waiter wait.KillWaiter, logger logrus.FieldLogge
 }
 
 type defaultDocker struct {
+	ctx    context.Context
 	c      docker.Client
 	waiter wait.KillWaiter
 	logger logrus.FieldLogger
 }
 
-func (d *defaultDocker) Exec(ctx context.Context, containerID string, input io.Reader, output io.Writer) error {
+//nolint:funlen
+func (d *defaultDocker) Exec(ctx context.Context, containerID string, streams IOStreams) error {
 	d.logger.Debugln("Attaching to container", containerID, "...")
 
 	hijacked, err := d.c.ContainerAttach(ctx, containerID, attachOptions())
@@ -59,17 +75,27 @@ func (d *defaultDocker) Exec(ctx context.Context, containerID string, input io.R
 		return err
 	}
 
+	// stdout/stdin error channels, buffered intentionally so that if select{}
+	// below exits, the go routines don't block forever upon container exit.
+	stdoutErrCh := make(chan error, 1)
+	stdinErrCh := make(chan error, 1)
+
 	// Copy any output to the build trace
-	stdoutErrCh := make(chan error)
 	go func() {
-		_, errCopy := stdcopy.StdCopy(output, output, hijacked.Reader)
+		_, errCopy := stdcopy.StdCopy(streams.Stdout, streams.Stderr, hijacked.Reader)
+
+		// this goroutine can continue even whilst StopKillWait is in flight,
+		// allowing a graceful stop. If reading stdout returns, we must close
+		// attached connection, otherwise kills can be interfered with and
+		// block indefinitely.
+		hijacked.Close()
+
 		stdoutErrCh <- errCopy
 	}()
 
 	// Write the input to the container and close its STDIN to get it to finish
-	stdinErrCh := make(chan error)
 	go func() {
-		_, errCopy := io.Copy(hijacked.Conn, input)
+		_, errCopy := io.Copy(hijacked.Conn, streams.Stdin)
 		_ = hijacked.CloseWrite()
 		if errCopy != nil {
 			stdinErrCh <- errCopy
@@ -92,9 +118,13 @@ func (d *defaultDocker) Exec(ctx context.Context, containerID string, input io.R
 		d.logger.Debugln("Container", containerID, "finished with", err)
 	}
 
-	// Kill and wait for exit.
+	// Try to gracefully stop, then kill and wait for the exit.
 	// Containers are stopped so that they can be reused by the job.
-	return d.waiter.KillWait(ctx, containerID)
+	//
+	// It's very likely that at this point, the context passed to Exec has
+	// been cancelled, so is unable to be used. Instead, we use the context
+	// passed to NewDocker.
+	return d.waiter.StopKillWait(d.ctx, containerID, nil)
 }
 
 func attachOptions() types.ContainerAttachOptions {

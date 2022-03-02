@@ -1,24 +1,46 @@
 package shells
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"gitlab.com/gitlab-org/gitlab-runner/common"
 	"gitlab.com/gitlab-org/gitlab-runner/helpers"
+	"gitlab.com/gitlab-org/gitlab-runner/helpers/featureflags"
 )
 
 const (
+	kubernetesExecutor    = "kubernetes"
+	dockerExecutor        = "docker"
 	dockerWindowsExecutor = "docker-windows"
+	virtualboxExecutor    = "virtualbox"
+	parallelsExecutor     = "parallels"
 
 	SNPwsh       = "pwsh"
 	SNPowershell = "powershell"
+
+	// Before executing a script, powershell parses it.
+	// A `ParserError` can then be thrown if a parsing error is found.
+	// Those errors are not catched by the powershell_trap_script thus causing the job to hang
+	// To avoid this problem, the PwshValidationScript is used to validate the given script and eventually to cause
+	// the job to fail if a `ParserError` is thrown
+	pwshJSONTerminationScript = `
+param (
+	[Parameter(Mandatory=$true,Position=1)]
+	[string]$Path
+)
+
+%s -File $Path
+$out_json= '{"command_exit_code": ' + $LASTEXITCODE + ', "script": "' + $MyInvocation.MyCommand.Name + '"}'
+echo ""
+echo "$out_json"
+Exit 0
+`
 )
 
 type PowerShell struct {
@@ -33,6 +55,7 @@ type PsWriter struct {
 	indent        int
 	Shell         string
 	EOL           string
+	resolvePaths  bool
 }
 
 func stdinCmdArgs() []string {
@@ -53,6 +76,10 @@ func stdinCmdArgs() []string {
 
 func fileCmdArgs() []string {
 	return []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"}
+}
+
+func PwshJSONTerminationScript(shell string) string {
+	return fmt.Sprintf(pwshJSONTerminationScript, shell)
 }
 
 func PowershellDockerCmd(shell string) []string {
@@ -79,6 +106,7 @@ func psQuote(text string) string {
 func psQuoteVariable(text string) string {
 	text = psQuote(text)
 	text = strings.ReplaceAll(text, "$", "`$")
+	text = strings.ReplaceAll(text, "``e", "`e")
 	return text
 }
 
@@ -116,6 +144,10 @@ func (p *PsWriter) Command(command string, arguments ...string) {
 	p.checkErrorLevel()
 }
 
+func (p *PsWriter) SectionStart(id, command string) {}
+
+func (p *PsWriter) SectionEnd(id string) {}
+
 func (p *PsWriter) buildCommand(command string, arguments ...string) string {
 	list := []string{
 		psQuote(command),
@@ -128,12 +160,28 @@ func (p *PsWriter) buildCommand(command string, arguments ...string) string {
 	return "& " + strings.Join(list, " ")
 }
 
+func (p *PsWriter) resolvePath(path string) string {
+	if p.resolvePaths {
+		return fmt.Sprintf("$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(%s)", psQuote(path))
+	}
+
+	return psQuote(p.fromSlash(path))
+}
+
 func (p *PsWriter) TmpFile(name string) string {
-	filePath := p.Absolute(filepath.Join(p.TemporaryPath, name))
+	if p.resolvePaths {
+		return p.Join(p.TemporaryPath, name)
+	}
+
+	filePath := p.Absolute(p.Join(p.TemporaryPath, name))
 	return p.fromSlash(filePath)
 }
 
 func (p *PsWriter) fromSlash(path string) string {
+	if p.resolvePaths {
+		return path
+	}
+
 	if p.Shell == SNPwsh {
 		// pwsh wants OS slash style, not necessarily backslashes
 		return filepath.FromSlash(path)
@@ -148,16 +196,13 @@ func (p *PsWriter) EnvVariableKey(name string) string {
 func (p *PsWriter) Variable(variable common.JobVariable) {
 	if variable.File {
 		variableFile := p.TmpFile(variable.Key)
-		p.Linef(
-			"New-Item -ItemType directory -Force -Path %s | out-null",
-			psQuote(p.fromSlash(p.TemporaryPath)),
-		)
+		p.MkDir(p.TemporaryPath)
 		p.Linef(
 			"[System.IO.File]::WriteAllText(%s, %s)",
-			psQuote(variableFile),
+			p.resolvePath(variableFile),
 			psQuoteVariable(variable.Value),
 		)
-		p.Linef("$%s=%s", variable.Key, psQuote(variableFile))
+		p.Linef("$%s=%s", variable.Key, p.resolvePath(variableFile))
 	} else {
 		p.Linef("$%s=%s", variable.Key, psQuoteVariable(variable.Value))
 	}
@@ -166,12 +211,12 @@ func (p *PsWriter) Variable(variable common.JobVariable) {
 }
 
 func (p *PsWriter) IfDirectory(path string) {
-	p.Linef("if(Test-Path %s -PathType Container) {", psQuote(p.fromSlash(path)))
+	p.Linef("if(Test-Path %s -PathType Container) {", p.resolvePath(path))
 	p.Indent()
 }
 
 func (p *PsWriter) IfFile(path string) {
-	p.Linef("if(Test-Path %s -PathType Leaf) {", psQuote(p.fromSlash(path)))
+	p.Linef("if(Test-Path %s -PathType Leaf) {", p.resolvePath(path))
 	p.Indent()
 }
 
@@ -211,23 +256,23 @@ func (p *PsWriter) EndIf() {
 }
 
 func (p *PsWriter) Cd(path string) {
-	p.Line("cd " + psQuote(p.fromSlash(path)))
+	p.Line("cd " + p.resolvePath(path))
 	p.checkErrorLevel()
 }
 
 func (p *PsWriter) MkDir(path string) {
-	p.Linef("New-Item -ItemType directory -Force -Path %s | out-null", psQuote(p.fromSlash(path)))
+	p.Linef("New-Item -ItemType directory -Force -Path %s | out-null", p.resolvePath(path))
 }
 
 func (p *PsWriter) MkTmpDir(name string) string {
-	dirPath := filepath.Join(p.TemporaryPath, name)
+	dirPath := p.Join(p.TemporaryPath, name)
 	p.MkDir(dirPath)
 
 	return dirPath
 }
 
 func (p *PsWriter) RmDir(path string) {
-	path = psQuote(p.fromSlash(path))
+	path = p.resolvePath(path)
 	p.Linef(
 		"if( (Get-Command -Name Remove-Item2 -Module NTFSSecurity -ErrorAction SilentlyContinue) "+
 			"-and (Test-Path %s -PathType Container) ) {",
@@ -245,7 +290,7 @@ func (p *PsWriter) RmDir(path string) {
 }
 
 func (p *PsWriter) RmFile(path string) {
-	path = psQuote(p.fromSlash(path))
+	path = p.resolvePath(path)
 	p.Line(
 		"if( (Get-Command -Name Remove-Item2 -Module NTFSSecurity -ErrorAction SilentlyContinue) " +
 			"-and (Test-Path " + path + " -PathType Leaf) ) {")
@@ -258,6 +303,18 @@ func (p *PsWriter) RmFile(path string) {
 	p.Unindent()
 	p.Line("}")
 	p.Line("")
+}
+
+func (p *PsWriter) RmFilesRecursive(path string, name string) {
+	resolvedPath := p.resolvePath(path)
+	p.IfDirectory(path)
+	p.Linef(
+		// `Remove-Item -Recurse` has a known issue (see Example 4 in
+		// https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.management/remove-item)
+		"Get-ChildItem -Path %s -Filter %s -Recurse | ForEach-Object { Remove-Item -Force $_.FullName }",
+		resolvedPath, psQuote(name),
+	)
+	p.EndIf()
 }
 
 func (p *PsWriter) Printf(format string, arguments ...interface{}) {
@@ -285,45 +342,52 @@ func (p *PsWriter) EmptyLine() {
 }
 
 func (p *PsWriter) Absolute(dir string) string {
+	if p.resolvePaths {
+		return dir
+	}
+
 	if filepath.IsAbs(dir) {
 		return dir
 	}
 
 	p.Linef("$CurrentDirectory = (Resolve-Path .%s).Path", string(os.PathSeparator))
-	return filepath.Join("$CurrentDirectory", dir)
+	return p.Join("$CurrentDirectory", dir)
 }
 
 func (p *PsWriter) Join(elem ...string) string {
-	newPath := filepath.Join(elem...)
-	return newPath
+	if p.resolvePaths {
+		// We rely on the resolve function and always use forward slashes
+		// when joining paths.
+		return path.Join(elem...)
+	}
+
+	return filepath.Join(elem...)
 }
 
 func (p *PsWriter) Finish(trace bool) string {
-	var buffer bytes.Buffer
-	w := bufio.NewWriter(&buffer)
+	var buf strings.Builder
 
-	if p.Shell != SNPwsh {
+	if p.Shell == SNPwsh && p.EOL == "\n" {
+		buf.WriteString("#!/usr/bin/env " + p.Shell + p.EOL)
+	}
+
+	if p.Shell == SNPowershell {
 		// write UTF-8 BOM (Powershell Core doesn't use a BOM as mentioned in
 		// https://gitlab.com/gitlab-org/gitlab-runner/-/issues/3896#note_157830131)
-		_, _ = io.WriteString(w, "\xef\xbb\xbf")
+		buf.WriteString("\xef\xbb\xbf")
 	}
 
-	p.writeTrace(w, trace)
-	if p.Shell == SNPwsh {
-		_, _ = io.WriteString(w, `$ErrorActionPreference = "Stop"`+p.EOL+p.EOL)
-	}
-
-	// add empty line to close code-block when it is piped to STDIN
-	p.Line("")
-	_, _ = io.WriteString(w, p.String())
-	_ = w.Flush()
-	return buffer.String()
-}
-
-func (p *PsWriter) writeTrace(w io.Writer, trace bool) {
 	if trace {
-		_, _ = io.WriteString(w, "Set-PSDebug -Trace 2"+p.EOL)
+		buf.WriteString("Set-PSDebug -Trace 2" + p.EOL)
 	}
+
+	if p.Shell == SNPwsh {
+		buf.WriteString(`$ErrorActionPreference = "Stop"` + p.EOL)
+	}
+
+	buf.WriteString(p.String() + p.EOL)
+
+	return buf.String()
 }
 
 func (b *PowerShell) GetName() string {
@@ -334,7 +398,7 @@ func (b *PowerShell) GetConfiguration(info common.ShellScriptInfo) (*common.Shel
 	script := &common.ShellConfiguration{
 		Command:       b.Shell,
 		Arguments:     stdinCmdArgs(),
-		PassFile:      b.Shell != SNPwsh && info.Build.Runner.Executor != dockerWindowsExecutor,
+		PassFile:      !b.isStdinSupported(info),
 		Extension:     "ps1",
 		DockerCommand: PowershellDockerCmd(b.Shell),
 	}
@@ -346,36 +410,59 @@ func (b *PowerShell) GetConfiguration(info common.ShellScriptInfo) (*common.Shel
 	return script, nil
 }
 
+func (b *PowerShell) isStdinSupported(info common.ShellScriptInfo) bool {
+	executor := info.Build.Runner.Executor
+
+	return executor == kubernetesExecutor ||
+		executor == dockerExecutor ||
+		executor == dockerWindowsExecutor ||
+		executor == virtualboxExecutor ||
+		executor == parallelsExecutor
+}
+
 func (b *PowerShell) GenerateScript(buildStage common.BuildStage, info common.ShellScriptInfo) (string, error) {
 	w := &PsWriter{
 		Shell:         b.Shell,
 		EOL:           b.EOL,
 		TemporaryPath: info.Build.TmpProjectDir(),
+		resolvePaths:  info.Build.IsFeatureFlagOn(featureflags.UsePowershellPathResolver),
 	}
 
-	if buildStage == common.BuildStagePrepare {
-		if info.Build.Hostname != "" {
-			w.Linef(
-				`echo "Running on $([Environment]::MachineName) via %s..."`,
-				psQuoteVariable(info.Build.Hostname),
-			)
-		} else {
-			w.Line(`echo "Running on $([Environment]::MachineName)..."`)
-		}
-	}
+	return b.generateScript(w, buildStage, info)
+}
 
+func (b *PowerShell) generateScript(
+	w ShellWriter,
+	buildStage common.BuildStage,
+	info common.ShellScriptInfo,
+) (string, error) {
+	b.ensurePrepareStageHostnameMessage(w, buildStage, info)
 	err := b.writeScript(w, buildStage, info)
 	if err != nil {
 		return "", err
 	}
 
-	// No need to set up BOM or tracing since no script was generated.
-	if w.Buffer.Len() > 0 {
-		script := w.Finish(info.Build.IsDebugTraceEnabled())
-		return script, nil
-	}
+	script := w.Finish(info.Build.IsDebugTraceEnabled())
+	return script, nil
+}
 
-	return "", nil
+func (b *PowerShell) ensurePrepareStageHostnameMessage(
+	w ShellWriter,
+	buildStage common.BuildStage,
+	info common.ShellScriptInfo,
+) {
+	if buildStage == common.BuildStagePrepare {
+		if info.Build.Hostname != "" {
+			w.Line(
+				fmt.Sprintf(
+					`echo "Running on $([Environment]::MachineName) via %s..."`,
+					psQuoteVariable(info.Build.Hostname),
+				),
+			)
+		} else {
+			w.Line(`echo "Running on $([Environment]::MachineName)..."`)
+		}
+	}
 }
 
 func (b *PowerShell) IsDefault() bool {

@@ -72,7 +72,7 @@ func (s *sshExecutor) Run(cmd common.ExecutorCommand) error {
 		Environment: s.BuildShell.Environment,
 		Command:     s.BuildShell.GetCommandWithArguments(),
 		Stdin:       cmd.Script,
-	})
+	}, s.Shell().Shell)
 	if exitError, ok := err.(*ssh.ExitError); ok {
 		exitCode := exitError.ExitCode()
 		err = &common.BuildError{Inner: err, ExitCode: exitCode}
@@ -124,6 +124,7 @@ func init() {
 	common.RegisterExecutorProvider("docker-ssh", executors.DefaultExecutorProvider{
 		Creator:          creator,
 		FeaturesUpdater:  featuresUpdater,
+		ConfigUpdater:    configUpdater,
 		DefaultShellName: options.Shell.Shell,
 	})
 }
