@@ -17,6 +17,7 @@ tests/ubuntu/.vagrant
 artifacts
 tmp/gitlab-test
 /.tmp/
+tmp
 
 # Ignore all editorconfig files except the root one
 .editorconfig
