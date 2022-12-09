@@ -1,6 +1,6 @@
 # Anka GitLab Runner
 
-### [Official Anka GitLab Runner Usage Guide](https://ankadocs.veertu.com/docs/ci-plugins-and-integrations/gitlab/)
+### [Official Anka GitLab Runner Usage Guide](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/gitlab/)
 
 For a list of compatible versions between GitLab and GitLab Runner, see the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
 
