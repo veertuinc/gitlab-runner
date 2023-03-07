@@ -76,7 +76,7 @@ make runner-bin-host
 make runner-and-helper-bin-host
 ```
 
-Test your changes manually with `anka-gitlab-runner --debug --log-level debug run`:
+Test your changes manually with `./out/binaries/anka-gitlab-runner-darwin-amd64 --debug --log-level debug run`:
 
 > Try our https://github.com/veertuinc/getting-started scripts to run Gitlab locally inside of a docker container
 
@@ -84,7 +84,7 @@ Test your changes manually with `anka-gitlab-runner --debug --log-level debug ru
 export GITLAB_HOSTNAME="anka.gitlab";
 export GITLAB_DOCKER_CONTAINER_NAME="anka.gitlab";
 export GITLAB_PORT="8093";
-export GITLAB_ROOT_PASSWORD="rootpassword";
+export GITLAB_ROOT_PASSWORD="kLF2Cx2XmaWdBwcKAmWRD/Ew9eifMCnyPUFnUPlk6Lw=";
 export GITLAB_EXAMPLE_PROJECT_NAME="gitlab-examples";
 export GITLAB_ACCESS_TOKEN="token-string-here123";
 export GITLAB_EXAMPLE_PROJECT_ID=$(curl -s --request GET -H "PRIVATE-TOKEN: $GITLAB_ACCESS_TOKEN" "http://$GITLAB_HOSTNAME:$GITLAB_PORT/api/v4/projects" | jq -r ".[] | select(.name==\"$GITLAB_EXAMPLE_PROJECT_NAME\") | .id");

@@ -85,7 +85,15 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		s.Config.Anka.ControllerExternalID = ankaControllerExternalId
 	}
 
-	s.Println("Opening a connection to the Anka Cloud Controller:", s.Config.Anka.ControllerAddress)
+	ankaHideOutput := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_HIDE_OUTPUT"))
+	if ankaHideOutput != "" {
+		s.Config.Anka.HideOutput = ankaHideOutput
+	}
+
+	if s.Config.Anka.HideOutput == "" {
+		s.Println("Opening a connection to the Anka Cloud Controller:", s.Config.Anka.ControllerAddress)
+	}
+
 	s.connector = MakeNewAnkaCloudConnector(s.Config.Anka)
 
 	s.Println(fmt.Sprintf("%s%s%s", helpers.ANSI_BOLD_CYAN, "Starting Anka VM using:", helpers.ANSI_RESET))
@@ -113,7 +121,9 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		done = true
 	}()
 
-	s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
+	if s.Config.Anka.HideOutput == "" {
+		s.Println(fmt.Sprintf("%s %s/#/instances", "You can check the status of starting your Instance on the Anka Cloud Controller:", s.Config.Anka.ControllerAddress))
+	}
 
 	vmInfo, err := s.connector.StartInstance(s.Config.Anka, &done, options)
 	if err != nil {

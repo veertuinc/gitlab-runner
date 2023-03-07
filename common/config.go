@@ -597,8 +597,9 @@ type KubernetesHostAliases struct {
 	Hostnames []string `toml:"hostnames" json:"hostnames" long:"hostnames" description:"A list of hostnames that will be attached to the IP"`
 }
 
-//nolint:lll
 // https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.21/#lifecycle-v1-core
+//
+//nolint:lll
 type KubernetesContainerLifecyle struct {
 	PostStart *KubernetesLifecycleHandler `toml:"post_start,omitempty" json:"post_start,omitempty" description:"PostStart is called immediately after a container is created. If the handler fails, the container is terminated and restarted according to its restart policy. Other management of the container blocks until the hook completes"`
 	PreStop   *KubernetesLifecycleHandler `toml:"pre_stop,omitempty" json:"pre_stop,omitempty" description:"PreStop is called immediately before a container is terminated due to an API request or management event such as liveness/startup probe failure, preemption, resource contention, etc. The handler is not called if the container crashes or exits. The reason for termination is passed to the handler. The Pod's termination grace period countdown begins before the PreStop hooked is executed. Regardless of the outcome of the handler, the container will eventually terminate within the Pod's termination grace period. Other management of the container blocks until the hook completes or until the termination grace period is reached"`
@@ -1571,6 +1572,7 @@ func (c *Config) GetCheckInterval() time.Duration {
 }
 
 type AnkaConfig struct {
+	HideOutput             string  `toml:"hide_output" json:"hide_output" long:"hide-output" env:"HIDE_OUTPUT" description:"Hide output with the Controller URL"`
 	ControllerAddress      string  `toml:"controller_address" json:"controller_address" long:"controller-address" env:"CONTROLLER_ADDRESS" description:"Anka Cloud Controller address (example: http://anka-controller.mydomain.net[:8090])"`
 	TemplateUUID           string  `toml:"template_uuid" json:"template_uuid" long:"template-uuid" env:"TEMPLATE_UUID" description:"Specify the VM Template UUID"`
 	Tag                    *string `toml:"tag,omitempty" json:"tag" long:"tag" env:"TAG" description:"Specify the Tag to use"`
