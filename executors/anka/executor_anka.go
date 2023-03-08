@@ -104,8 +104,10 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	if s.Config.Anka.NodeGroup != nil {
 		s.Println("  - Node Group:", *s.Config.Anka.NodeGroup)
 	}
-	if s.Config.Anka.ControllerExternalID != "" {
-		s.Println("  - Controller External ID:", s.Config.Anka.ControllerExternalID)
+	if s.Config.Anka.HideOutput == "" {
+		if s.Config.Anka.ControllerExternalID != "" {
+			s.Println("  - Controller External ID:", s.Config.Anka.ControllerExternalID)
+		}
 	}
 	if s.Config.Anka.ControllerInstanceName != "" {
 		s.Println("  - Controller Instance Name:", s.Config.Anka.ControllerInstanceName)
