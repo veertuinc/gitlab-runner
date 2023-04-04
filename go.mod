@@ -9,11 +9,10 @@ require (
 	github.com/Microsoft/go-winio v0.4.12 // indirect
 	github.com/bmatcuk/doublestar v1.3.0
 	github.com/boumenot/gocover-cobertura v1.2.0
-	github.com/containerd/containerd v1.4.3 // indirect
 	github.com/creack/pty v1.1.11
 	github.com/docker/cli v20.10.2+incompatible
 	github.com/docker/distribution v2.7.0+incompatible
-	github.com/docker/docker v20.10.2+incompatible
+	github.com/docker/docker v20.10.24+incompatible
 	github.com/docker/docker-credential-helpers v0.4.1 // indirect
 	github.com/docker/go-connections v0.3.0
 	github.com/docker/go-units v0.3.2-0.20160802145505-eb879ae3e2b8
@@ -26,8 +25,6 @@ require (
 	github.com/golang/mock v1.4.4
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorhill/cronexpr v0.0.0-20160318121724-f0984319b442
-	github.com/gorilla/context v1.1.1 // indirect
-	github.com/gorilla/mux v1.3.1-0.20170228224354-599cba5e7b61 // indirect
 	github.com/gorilla/websocket v1.4.2
 	github.com/hashicorp/go-version v1.2.1
 	github.com/hashicorp/vault/api v1.0.4
