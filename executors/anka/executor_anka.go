@@ -159,8 +159,7 @@ func (s *executor) verifyNode() error {
 	}
 	err = s.sshClient.Run(
 		s.Context,
-		ssh.Command{Command: []string{"exit"}},
-		s.Shell().Shell,
+		ssh.Command{Command: "exit"},
 	)
 	if err != nil {
 		return err
@@ -199,18 +198,15 @@ func (s *executor) startSSHClient() error {
 
 func (s *executor) Run(cmd common.ExecutorCommand) error {
 	logrus.Debugf("%+v\n", ssh.Command{
-		Environment: s.BuildShell.Environment,
-		Command:     s.BuildShell.GetCommandWithArguments(),
-		Stdin:       cmd.Script,
+		Command: s.BuildShell.CmdLine,
+		Stdin:   cmd.Script,
 	})
 	err := s.sshClient.Run(
 		cmd.Context,
 		ssh.Command{
-			Environment: s.BuildShell.Environment,
-			Command:     s.BuildShell.GetCommandWithArguments(),
-			Stdin:       cmd.Script,
+			Command: s.BuildShell.CmdLine,
+			Stdin:   cmd.Script,
 		},
-		s.Shell().Shell,
 	)
 	if _, ok := err.(*ssh.ExitError); ok {
 		err = &common.BuildError{Inner: err}
