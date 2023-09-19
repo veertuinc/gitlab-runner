@@ -73,7 +73,7 @@ func (s *executor) verifyMachine(vmName string) error {
 		return err
 	}
 	defer sshCommand.Cleanup()
-	err = sshCommand.Run(s.Context, ssh.Command{Command: []string{"exit"}}, s.Shell().Shell)
+	err = sshCommand.Run(s.Context, ssh.Command{Command: "exit"})
 	if err != nil {
 		return err
 	}
@@ -365,10 +365,9 @@ func (s *executor) sshConnect() error {
 
 func (s *executor) Run(cmd common.ExecutorCommand) error {
 	err := s.sshCommand.Run(cmd.Context, ssh.Command{
-		Environment: s.BuildShell.Environment,
-		Command:     s.BuildShell.GetCommandWithArguments(),
-		Stdin:       cmd.Script,
-	}, s.Shell().Shell)
+		Command: s.BuildShell.CmdLine,
+		Stdin:   cmd.Script,
+	})
 	if exitError, ok := err.(*ssh.ExitError); ok {
 		exitCode := exitError.ExitCode()
 		err = &common.BuildError{Inner: err, ExitCode: exitCode}

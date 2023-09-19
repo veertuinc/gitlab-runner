@@ -24,7 +24,8 @@ type ArtifactsDownloaderCommand struct {
 	network common.Network
 	meter.TransferMeterCommand
 
-	DirectDownload bool `long:"direct-download" env:"FF_USE_DIRECT_DOWNLOAD" description:"Support direct download for data stored externally to GitLab"`
+	DirectDownload bool   `long:"direct-download" env:"FF_USE_DIRECT_DOWNLOAD" description:"Support direct download for data stored externally to GitLab"`
+	StagingDir     string `long:"archiver-staging-dir" env:"ARCHIVER_STAGING_DIR" description:"Directory to stage artifact archives"`
 }
 
 func (c *ArtifactsDownloaderCommand) directDownloadFlag(retry int) *bool {
@@ -78,15 +79,21 @@ func (c *ArtifactsDownloaderCommand) Execute(cliContext *cli.Context) {
 		logrus.Fatalln("Unable to get working directory")
 	}
 
-	if c.URL == "" || c.Token == "" {
-		logrus.Fatalln("Missing runner credentials")
+	if c.URL == "" {
+		logrus.Warningln("Missing URL (--url)")
+	}
+	if c.Token == "" {
+		logrus.Warningln("Missing runner credentials (--token)")
 	}
 	if c.ID <= 0 {
-		logrus.Fatalln("Missing build ID")
+		logrus.Warningln("Missing build ID (--id)")
+	}
+	if c.ID <= 0 || c.Token == "" || c.URL == "" {
+		logrus.Fatalln("Incomplete arguments")
 	}
 
 	// Create temporary file
-	file, err := ioutil.TempFile("", "artifacts")
+	file, err := ioutil.TempFile(c.StagingDir, "artifacts")
 	if err != nil {
 		logrus.Fatalln(err)
 	}

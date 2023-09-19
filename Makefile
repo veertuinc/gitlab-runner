@@ -19,14 +19,15 @@ BUILD_PLATFORMS ?= -osarch 'darwin/amd64' -osarch 'darwin/arm64' -os 'linux' ${B
 S3_UPLOAD_PATH ?= main
 
 # Keep in sync with docs/install/linux-repository.md
-DEB_PLATFORMS ?= debian/jessie debian/stretch debian/buster \
+DEB_PLATFORMS ?= debian/stretch debian/buster debian/bullseye \
     ubuntu/xenial ubuntu/bionic ubuntu/focal \
     raspbian/jessie raspbian/stretch raspbian/buster \
     linuxmint/sarah linuxmint/serena linuxmint/sonya
 DEB_ARCHS ?= amd64 i386 armel armhf arm64 aarch64 s390x ppc64le
 RPM_PLATFORMS ?= el/6 el/7 el/8 \
     ol/6 ol/7 \
-    fedora/32 fedora/33 fedora/34
+    fedora/32 fedora/33 fedora/34 \
+    amazon/2
 RPM_ARCHS ?= x86_64 i686 arm armhf arm64 aarch64 s390x ppc64le
 
 PKG = gitlab.com/gitlab-org/$(PACKAGE_NAME)

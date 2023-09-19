@@ -131,6 +131,10 @@ func (b *AbstractShell) extractCacheOrFallbackCacheWrapper(
 	cacheKey string,
 ) {
 	cacheFallbackKey := info.Build.GetAllVariables().Get("CACHE_FALLBACK_KEY")
+	if strings.HasSuffix(cacheFallbackKey, "-protected") {
+		// The `-protected` suffix is reserved for protected refs, so we disallow it from user-specified values.
+		cacheFallbackKey = ""
+	}
 
 	// Execute cache-extractor command. Failure is not fatal.
 	b.guardRunnerCommand(w, info.RunnerCommand, "Extracting cache", func() {
@@ -174,7 +178,7 @@ func (b *AbstractShell) downloadArtifacts(w ShellWriter, job common.Dependency, 
 		"--token",
 		job.Token,
 		"--id",
-		strconv.Itoa(job.ID),
+		strconv.FormatInt(job.ID, 10),
 	}
 
 	w.Noticef("Downloading artifacts for %s (%d)...", job.Name, job.ID)
@@ -218,15 +222,27 @@ func (b *AbstractShell) writeGetSourcesScript(w ShellWriter, info common.ShellSc
 		b.writeGitSSLConfig(w, info.Build, []string{"--global"})
 	}
 
-	if info.PreCloneScript != "" && info.Build.GetGitStrategy() != common.GitNone {
-		b.writeCommands(w, info, "pre_clone_script", info.PreCloneScript)
-	}
+	b.guardCloneScriptHooks(w, info, "pre_clone_script", info.PreCloneScript)
 
 	if err := b.writeCloneFetchCmds(w, info); err != nil {
 		return err
 	}
 
-	return b.writeSubmoduleUpdateCmds(w, info)
+	if err := b.writeSubmoduleUpdateCmds(w, info); err != nil {
+		return err
+	}
+
+	b.guardCloneScriptHooks(w, info, "post_clone_script", info.PostCloneScript)
+
+	return nil
+}
+
+func (b *AbstractShell) guardCloneScriptHooks(w ShellWriter, info common.ShellScriptInfo, prefix string, s string) {
+	if s == "" || info.Build.GetGitStrategy() == common.GitNone {
+		return
+	}
+
+	b.writeCommands(w, info, prefix, s)
 }
 
 func (b *AbstractShell) writeExports(w ShellWriter, info common.ShellScriptInfo) {
@@ -717,7 +733,7 @@ func (b *AbstractShell) writeUploadArtifact(w ShellWriter, info common.ShellScri
 		"--token",
 		info.Build.Token,
 		"--id",
-		strconv.Itoa(info.Build.ID),
+		strconv.FormatInt(info.Build.ID, 10),
 	}
 
 	// Create list of files to archive

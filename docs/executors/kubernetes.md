@@ -172,6 +172,7 @@ The following settings help to define the behavior of GitLab Runner within Kuber
 | `poll_interval` | How frequently, in seconds, the runner will poll the Kubernetes pod it has just created to check its status (default = 3). |
 | `poll_timeout` | The amount of time, in seconds, that needs to pass before the runner will time out attempting to connect to the container it has just created. Useful for queueing more builds that the cluster can handle at a time (default = 180). |
 | `privileged` | Run containers with the privileged flag. |
+| `runtime_class_name` | A Runtime class to use for all created pods. If the feature is unsupported by the cluster, jobs exit or fail. |
 | `pull_policy` | Specify the image pull policy: `never`, `if-not-present`, `always`. If not set, the cluster's image [default pull policy](https://kubernetes.io/docs/concepts/containers/images/#updating-images) is used. For more information and instructions on how to set multiple pull policies, see [using pull policies](#using-pull-policies). See also [`if-not-present`, `never` security considerations](../security/index.md#usage-of-private-docker-images-with-if-not-present-pull-policy). |
 | `service_account` | Default service account job/executor pods use to talk to Kubernetes API. |
 | `service_account_overwrite_allowed` | Regular expression to validate the contents of the service account overwrite environment variable. When empty, it disables the service account overwrite feature. |
@@ -335,7 +336,7 @@ concurrent = 4
 
 ## Using the cache with the Kubernetes executor
 
-When the cache is used with the Kubernetes executor, a specific volume called `/cache` is mounted on the pod. 
+When the cache is used with the Kubernetes executor, a specific volume called `/cache` is mounted on the pod.
 The cache volume can be configured in the `config.toml` file by using the `cache_dir` setting.
 
 During the job's execution, if the cached data is needed, the runner checks to see if cached data is available (if a compressed file is available on the cache volume).
@@ -495,6 +496,23 @@ to volume's mount path) where _secret's_ value should be saved. When using `item
 | `volume_attributes` | `map[string]string` | No       | Key-value pair mapping for attributes of the CSI volume. |
 | `sub_path`          | string              | No       | Mount a [sub-path](https://kubernetes.io/docs/concepts/storage/volumes/#using-subpath) within the volume instead of the root. |
 | `read_only`         | boolean             | No       | Sets the volume in read-only mode (defaults to false). |
+
+### Mounting volumes on service containers
+
+Volumes defined for the build container are also automatically mounted for all services containers. This can be, for example, leveraged to mount database storage in RAM to speed up tests, as an alternative to [services_tmpfs](docker.md#mounting-a-directory-in-ram) which is only available to the Docker executor.
+
+Here is an example configuration:
+
+```toml
+[[runners]]
+  # usual configuration
+  executor = "kubernetes"
+  [runners.kubernetes]
+    [[runners.kubernetes.volumes.empty_dir]]
+      name = "mysql-tmpfs"
+      mount_path = "/var/lib/mysql"
+      medium = "Memory"
+```
 
 ## Custom builds directory mount
 
@@ -1057,6 +1075,25 @@ check_interval = 30
     # ...
 ```
 
+## Using Runtime Class
+
+> [Introduced](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/26646) in GitLab Runner 14.9.
+
+Use `runtime_class_name` to set the [**RuntimeClass**](https://kubernetes.io/docs/concepts/containers/runtime-class/) for each job container.
+
+If you specify `runtime_class_name` and it's not configured in your cluster or the feature is not supported, job pods fail to create.
+
+```toml
+concurrent = 1
+check_interval = 30
+  [[runners]]
+    name = "myRunner"
+    url = "gitlab.example.com"
+    executor = "kubernetes"
+    [runners.kubernetes]
+      runtime_class_name = "myclass"
+```
+
 ## Using Docker in your builds
 
 There are a couple of caveats when using Docker in your builds while running on
@@ -1208,6 +1245,35 @@ Error cleaning up pod: etcdserver: request timed out, possibly due to previous l
 Error cleaning up pod: etcdserver: request timed out
 Error cleaning up pod: context deadline exceeded
 ```
+
+### Connection refused when attempting to communicate with the Kubernetes API
+
+When GitLab Runner makes a request to the Kubernetes API and it fails,
+it is likely because
+[`kube-apiserver`](https://kubernetes.io/docs/concepts/overview/components/#kube-apiserver)
+is overloaded and can't accept or process API requests.
+
+### `Error cleaning up pod` and `Job failed (system failure): prepare environment: waiting for pod running`
+
+The following errors occur when Kubernetes fails to schedule the job pod in a timely manner.
+GitLab Runner waits for the pod to be ready, but it fails and then tries to clean up the pod, which can also fail.
+
+```plaintext
+Error: Error cleaning up pod: Delete "https://xx.xx.xx.x:443/api/v1/namespaces/gitlab-runner/runner-0001": dial tcp xx.xx.xx.x:443 connect: connection refused
+
+Error: Job failed (system failure): prepare environment: waiting for pod running: Get "https://xx.xx.xx.x:443/api/v1/namespaces/gitlab-runner/runner-0001": dial tcp xx.xx.xx.x:443 connect: connection refused
+```
+
+To troubleshoot, check the Kubernetes primary node and all nodes that run a
+[`kube-apiserver`](https://kubernetes.io/docs/concepts/overview/components/#kube-apiserver)
+instance. Ensure they have all of the resources needed to manage the target number
+of pods that you hope to scale up to on the cluster.
+
+To change the time GitLab Runner waits for a pod to reach its `Ready` status, use the
+[`poll_timeout`](#other-configtoml-settings) setting.
+
+To better understand how pods are scheduled or why they might not get scheduled
+on time, [read about the Kubernetes Scheduler](https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/). 
 
 ### `request did not complete within requested timeout`
 

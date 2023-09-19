@@ -154,7 +154,7 @@ type SessionInfo struct {
 type JobInfo struct {
 	Name        string `json:"name"`
 	Stage       string `json:"stage"`
-	ProjectID   int    `json:"project_id"`
+	ProjectID   int64  `json:"project_id"`
 	ProjectName string `json:"project_name"`
 }
 
@@ -332,7 +332,7 @@ type DependencyArtifactsFile struct {
 }
 
 type Dependency struct {
-	ID            int                     `json:"id"`
+	ID            int64                   `json:"id"`
 	Token         string                  `json:"token"`
 	Name          string                  `json:"name"`
 	ArtifactsFile DependencyArtifactsFile `json:"artifacts_file"`
@@ -346,7 +346,7 @@ type GitlabFeatures struct {
 }
 
 type JobResponse struct {
-	ID            int            `json:"id"`
+	ID            int64          `json:"id"`
 	Token         string         `json:"token"`
 	AllowGitFetch bool           `json:"allow_git_fetch"`
 	JobInfo       JobInfo        `json:"job_info"`
@@ -384,8 +384,9 @@ type VaultSecret struct {
 }
 
 type VaultServer struct {
-	URL  string    `json:"url"`
-	Auth VaultAuth `json:"auth"`
+	URL       string    `json:"url"`
+	Auth      VaultAuth `json:"auth"`
+	Namespace string    `json:"namespace"`
 }
 
 type VaultAuth struct {
@@ -463,6 +464,7 @@ func (s *VaultSecret) SecretField() string {
 
 func (s *VaultServer) expandVariables(vars JobVariables) {
 	s.URL = vars.ExpandValue(s.URL)
+	s.Namespace = vars.ExpandValue(s.Namespace)
 
 	s.Auth.expandVariables(vars)
 }
@@ -508,7 +510,7 @@ type JobTraceOutput struct {
 
 //nolint:lll
 type JobCredentials struct {
-	ID          int    `long:"id" env:"CI_JOB_ID" description:"The build ID to download and upload artifacts for"`
+	ID          int64  `long:"id" env:"CI_JOB_ID" description:"The build ID to download and upload artifacts for"`
 	Token       string `long:"token" env:"CI_JOB_TOKEN" required:"true" description:"Build token"`
 	URL         string `long:"url" env:"CI_SERVER_URL" required:"true" description:"GitLab CI URL"`
 	TLSCAFile   string `long:"tls-ca-file" env:"CI_SERVER_TLS_CA_FILE" description:"File containing the certificates to verify the peer when using HTTPS"`
@@ -537,7 +539,7 @@ func (j *JobCredentials) GetToken() string {
 }
 
 type UpdateJobInfo struct {
-	ID            int
+	ID            int64
 	State         JobState
 	FailureReason JobFailureReason
 	Output        JobTraceOutput
