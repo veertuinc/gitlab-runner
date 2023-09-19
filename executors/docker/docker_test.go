@@ -235,9 +235,7 @@ func testServiceFromNamedImage(t *testing.T, description, imageName, serviceName
 	err = e.createLabeler()
 	require.NoError(t, err)
 
-	e.BuildShell = &common.ShellConfiguration{
-		Environment: []string{},
-	}
+	e.BuildShell = &common.ShellConfiguration{}
 
 	realServiceContainerName := e.getProjectUniqRandomizedName() + servicePart
 
@@ -807,9 +805,7 @@ func TestCreateDependencies(t *testing.T) {
 				Name: "alpine:latest",
 			})
 
-			e.BuildShell = &common.ShellConfiguration{
-				Environment: []string{},
-			}
+			e.BuildShell = &common.ShellConfiguration{}
 		},
 		volumesManagerAssertions: func(vm *volumes.MockManager) {
 			binds := make([]string, 0)
@@ -914,9 +910,7 @@ func prepareTestDockerConfiguration(
 		Runner: &common.RunnerConfig{},
 	}
 	e.Build.Token = "abcd123456"
-	e.BuildShell = &common.ShellConfiguration{
-		Environment: []string{},
-	}
+	e.BuildShell = &common.ShellConfiguration{}
 	var err error
 	e.helperImageInfo, err = helperimage.Get(common.REVISION, helperimage.Config{
 		OSType:          e.info.OSType,
@@ -1059,6 +1053,33 @@ func TestDockerCPUSetCPUsSetting(t *testing.T) {
 
 	cce := func(t *testing.T, config *container.Config, hostConfig *container.HostConfig) {
 		assert.Equal(t, "1-3,5", hostConfig.CpusetCpus)
+	}
+
+	testDockerConfigurationWithJobContainer(t, dockerConfig, cce)
+}
+
+func TestDockerContainerLabelsSetting(t *testing.T) {
+	dockerConfig := &common.DockerConfig{
+		ContainerLabels: map[string]string{"my.custom.label": "my.custom.value"},
+	}
+
+	cce := func(t *testing.T, config *container.Config, hostConfig *container.HostConfig) {
+		expected := map[string]string{
+			"com.gitlab.gitlab-runner.job.before_sha":  "",
+			"com.gitlab.gitlab-runner.job.id":          "0",
+			"com.gitlab.gitlab-runner.job.ref":         "",
+			"com.gitlab.gitlab-runner.job.sha":         "",
+			"com.gitlab.gitlab-runner.job.url":         "/-/jobs/0",
+			"com.gitlab.gitlab-runner.managed":         "true",
+			"com.gitlab.gitlab-runner.pipeline.id":     "",
+			"com.gitlab.gitlab-runner.project.id":      "0",
+			"com.gitlab.gitlab-runner.runner.id":       "",
+			"com.gitlab.gitlab-runner.runner.local_id": "0",
+			"com.gitlab.gitlab-runner.type":            "build",
+			"my.custom.label":                          "my.custom.value",
+		}
+
+		assert.Equal(t, expected, config.Labels)
 	}
 
 	testDockerConfigurationWithJobContainer(t, dockerConfig, cce)

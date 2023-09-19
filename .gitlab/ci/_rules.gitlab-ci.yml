@@ -13,6 +13,7 @@
   - "**/testdata/**/*"
   - "go.*"
   - "tmp/gitlab-test/**"
+  - "VERSION"
 
 .docs-patterns: &docs-patterns
   - ".vale.ini"
@@ -159,6 +160,11 @@
     changes: *code-backstage-patterns
   - <<: *if-security-runner-release-ref
     changes: *code-backstage-patterns
+
+.rules:release:stable:branch:ignore-changes:
+  rules:
+  - <<: *if-runner-stable-release-ref
+  - <<: *if-security-runner-release-ref
 
 .rules:release:development:merge-requests:
   rules:

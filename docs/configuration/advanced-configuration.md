@@ -184,7 +184,8 @@ Each `[[runners]]` section defines one runner.
 | `request_concurrency` | Limit number of concurrent requests for new jobs from GitLab. Default is `1`. |
 | `output_limit`       | Maximum build log size in kilobytes. Default is `4096` (4MB). |
 | `pre_clone_script`   | Commands to be executed on the runner before cloning the Git repository. Use it to adjust the Git client configuration first, for example. To insert multiple commands, use a (triple-quoted) multi-line string or `\n` character. |
-| `pre_build_script`   | Commands to be executed on the runner after cloning the Git repository, but before executing the build. To insert multiple commands, use a (triple-quoted) multi-line string or `\n` character. |
+| `post_clone_script`  | Commands to be executed on the runner after cloning the Git repository and updating submodules. To insert multiple commands, use a (triple-quoted) multi-line string or `\n` character. |
+| `pre_build_script`   | Commands to be executed on the runner before executing the build. To insert multiple commands, use a (triple-quoted) multi-line string or `\n` character. |
 | `post_build_script`  | Commands to be executed on the runner just after executing the build, but before executing `after_script`. To insert multiple commands, use a (triple-quoted) multi-line string or `\n` character. |
 | `clone_url`          | Overwrite the URL for the GitLab instance. Used only if the runner can't connect to the GitLab URL. |
 | `debug_trace_disabled` | Disables the `CI_DEBUG_TRACE` feature. When set to `true`, then debug log (trace) remains disabled, even if `CI_DEBUG_TRACE` is set to `true` by the user. |
@@ -244,6 +245,16 @@ The available shells can run on different platforms.
 | `powershell`  | Generate PowerShell script. All commands are executed in PowerShell Desktop context. In GitLab Runner 12.0-13.12, this is the default for Windows. |
 | `pwsh`        | Generate PowerShell script. All commands are executed in PowerShell Core context. In GitLab Runner 14.0 and later, this is the default for Windows. |
 
+When the `shell` option is set to `bash` or `sh`, Bash's [ANSI-C quoting](https://www.gnu.org/software/bash/manual/html_node/ANSI_002dC-Quoting.html) is used
+to shell escape job scripts.
+
+### Use a POSIX-compliant shell
+
+In GitLab Runner 14.9 and later, [enable the feature flag](feature-flags.md) named
+`FF_POSIXLY_CORRECT_ESCAPES` to use a POSIX-compliant shell (like `dash`).
+When enabled, ["Double Quotes"](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_02),
+which is POSIX-compliant shell escaping mechanism, is used.
+
 ## The `[runners.docker]` section
 
 This defines the Docker Container parameters.
@@ -290,6 +301,7 @@ This defines the Docker Container parameters.
 | `volumes_from`                 | A list of volumes to inherit from another container in the form `<container name>[:<ro|rw>]`. Access level defaults to read-write, but can be manually set to `ro` (read-only) or `rw` (read-write). |
 | `volume_driver`                | The volume driver to use for the container. |
 | `wait_for_services_timeout`    | How long to wait for Docker services. Set to `-1` to disable. Default is `30`. |
+| `container_labels`             | A set of labels to add to each container created by the runner. The label value can include environment variables for expansion. |
 
 ### The `[[runners.docker.services]]` section
 

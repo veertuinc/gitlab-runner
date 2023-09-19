@@ -12,6 +12,7 @@ We provide packages for the currently supported versions of Debian, Ubuntu, Mint
 |---------------|-----------------------------|-----------------------|
 | Debian        | stretch                     | [June 2022](https://wiki.debian.org/LTS)             |
 | Debian        | buster                      | [June 2024](https://wiki.debian.org/LTS)             |
+| Debian        | bullseye                    | [June 2026](https://wiki.debian.org/LTS)             |
 | Ubuntu        | xenial                      | [April 2021](https://wiki.ubuntu.com/Releases)            |
 | Ubuntu        | bionic                      | [April 2023](https://wiki.ubuntu.com/Releases)            |
 | Ubuntu        | focal                       | [April 2025](https://wiki.ubuntu.com/Releases)            |
@@ -23,6 +24,7 @@ We provide packages for the currently supported versions of Debian, Ubuntu, Mint
 | RHEL          | 8                           | [May 2029](https://access.redhat.com/product-life-cycles?product=Red%20Hat%20Enterprise%20Linux)         |
 | Fedora        | 32                          | approx. May 2021      |
 | Fedora        | 33                          | approx. Nov 2021      |
+| Amazon Linux  | 2                           | [June 30, 2023](https://aws.amazon.com/amazon-linux-2/faqs/) |
 
 NOTE:
 Packages for distributions that are not on the list (for example: **Fedora 34**) are currently not available from our package repository. You can [install](linux-manually.md#using-debrpm-package) them manually by downloading the RPM package from our S3 bucket. Refer to this [issue](https://gitlab.com/gitlab-org/gitlab-runner/-/issues/28150) for details.

@@ -17,7 +17,7 @@ scalable solution.
 In this tutorial, we'll explore how to properly configure GitLab Runner in
 AWS. The instance in AWS will serve as a Runner Manager that spawns new Docker instances on
 demand. The runners on these instances are automatically created. They use the parameters
-covered in this guide and do not require manual configuration after creation.  
+covered in this guide and do not require manual configuration after creation.
 
 In addition, we'll make use of [Amazon's EC2 Spot instances](https://aws.amazon.com/ec2/spot/) which will
 greatly reduce the costs of the GitLab Runner instances while still using quite
@@ -29,7 +29,7 @@ A familiarity with Amazon Web Services (AWS) is required as this is where most
 of the configuration will take place.
 
 We suggest a quick read through Docker machine [`amazonec2` driver
-documentation](https://docs.docker.com/machine/drivers/aws/) to familiarize
+documentation](https://gitlab.com/gitlab-org/ci-cd/docker-machine/-/blob/main/docs/drivers/aws.md) to familiarize
 yourself with the parameters we will set later in this article.
 
 Your GitLab Runner is going to need to talk to your GitLab instance over the network,
@@ -43,7 +43,7 @@ is likely different, so consider what works best for your situation.
 ### AWS security groups
 
 Docker Machine will attempt to use a
-[default security group](https://docs.docker.com/machine/drivers/aws/#security-group)
+[default security group](https://gitlab.com/gitlab-org/ci-cd/docker-machine/-/blob/main/docs/drivers/aws.md/#security-group)
 with rules for port `2376` and SSH `22`, which is required for communication with the Docker
 daemon. Instead of relying on Docker, you can create a security group with the
 rules you need and provide that in the GitLab Runner options as we will
@@ -67,10 +67,9 @@ The first step is to install GitLab Runner in an EC2 instance that will serve
 as the Runner Manager that spawns new machines. Choose a distribution that both
 Docker and GitLab Runner support, like Ubuntu, Debian, CentOS, or RHEL.
 
-This doesn't have to be a powerful
-machine since it will not run any jobs itself, so for your initial configuration you can start with a smaller instance such as a `t4g.nano`.
-This machine will be a dedicated host since we need it always up and running,
-thus it will be the only standard cost.
+This doesn't have to be a powerful machine because a Runner Manager instance doesn't run jobs itself.
+For your initial configuration, you can start with a smaller instance. This machine is a dedicated host
+because we need it always up and running. Therefore, it is the only host with an ongoing baseline cost.
 
 Install the prerequisites:
 
@@ -268,10 +267,10 @@ under `MachineOptions`. Below you can see the most common ones.
 | `amazonec2-ssh-user=xxxx` | The user that will have SSH access to the instance. |
 | `amazonec2-iam-instance-profile=xxxx_runner_machine_inst_profile_name` | The IAM instance profile to use for the runner machine. |
 | `amazonec2-ami=xxxx_runner_machine_ami_id` | The GitLab Runner AMI ID for a specific image. |
-| `amazonec2-request-spot-instance=true` | Use spare EC2 capacity that is available for less than the on-demand price. | 
+| `amazonec2-request-spot-instance=true` | Use spare EC2 capacity that is available for less than the on-demand price. |
 | `amazonec2-spot-price=xxxx_runner_machine_spot_price=x.xx` | Spot instance bid price (in US dollars). Requires the `--amazonec2-request-spot-instance flag` set to `true`. If you omit the `amazonec2-spot-price`, Docker Machine sets the maximum price to a default value of `$0.50` per hour. |
 | `amazonec2-security-group-readonly=true` | Set the security group to read-only.|
-| `amazonec2-userdata=xxxx_runner_machine_userdata_path` | Specify the runner machine `userdata` path. | 
+| `amazonec2-userdata=xxxx_runner_machine_userdata_path` | Specify the runner machine `userdata` path. |
 
 Notes:
 

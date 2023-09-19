@@ -133,7 +133,7 @@ func (e *executor) getServiceVariables(serviceDefinition common.Image) []string 
 	variables := e.Build.GetAllVariables().PublicOrInternal()
 	variables = append(variables, serviceDefinition.Variables...)
 
-	return append(variables.Expand().StringList(), e.BuildShell.Environment...)
+	return variables.Expand().StringList()
 }
 
 func (e *executor) expandAndGetDockerImage(imageName string, allowedImages []string) (*types.ImageInspect, error) {
@@ -677,18 +677,19 @@ func (e *executor) createContainerConfig(
 	hostname string,
 	cmd []string,
 ) *container.Config {
+	labels := e.prepareContainerLabels(map[string]string{"type": containerType})
 	config := &container.Config{
 		Image:        imageID,
 		Hostname:     hostname,
 		Cmd:          cmd,
-		Labels:       e.labeler.Labels(map[string]string{"type": containerType}),
+		Labels:       labels,
 		Tty:          false,
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
 		OpenStdin:    true,
 		StdinOnce:    true,
-		Env:          append(e.Build.GetAllVariables().StringList(), e.BuildShell.Environment...),
+		Env:          e.Build.GetAllVariables().StringList(),
 	}
 	config.Entrypoint = e.overwriteEntrypoint(&imageDefinition)
 
@@ -847,7 +848,7 @@ func (e *executor) overwriteEntrypoint(image *common.Image) []string {
 }
 
 func (e *executor) connectDocker() error {
-	client, err := docker.New(e.Config.Docker.Credentials, "")
+	client, err := docker.New(e.Config.Docker.Credentials)
 	if err != nil {
 		return err
 	}
@@ -857,6 +858,15 @@ func (e *executor) connectDocker() error {
 	if err != nil {
 		return err
 	}
+
+	e.Debugln(fmt.Sprintf(
+		"Connected to docker daemon (api version: %s, server version: %s, kernel: %s, os: %s/%s)",
+		e.client.ClientVersion(),
+		e.info.ServerVersion,
+		e.info.KernelVersion,
+		e.info.OSType,
+		e.info.Architecture,
+	))
 
 	err = e.validateOSType()
 	if err != nil {
@@ -1316,4 +1326,14 @@ func (e *executor) readContainerLogs(containerID string) string {
 
 	_, _ = stdcopy.StdCopy(w, w, hijacked)
 	return strings.TrimSpace(buf.String())
+}
+
+func (e *executor) prepareContainerLabels(otherLabels map[string]string) map[string]string {
+	l := e.labeler.Labels(otherLabels)
+
+	for k, v := range e.Config.Docker.ContainerLabels {
+		l[k] = e.Build.Variables.ExpandValue(v)
+	}
+
+	return l
 }

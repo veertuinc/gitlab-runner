@@ -11,9 +11,9 @@ require (
 	github.com/boumenot/gocover-cobertura v1.2.0
 	github.com/containerd/containerd v1.4.3 // indirect
 	github.com/creack/pty v1.1.11
-	github.com/docker/cli v20.10.2+incompatible
+	github.com/docker/cli v20.10.12+incompatible
 	github.com/docker/distribution v2.7.0+incompatible
-	github.com/docker/docker v20.10.2+incompatible
+	github.com/docker/docker v20.10.12+incompatible
 	github.com/docker/docker-credential-helpers v0.4.1 // indirect
 	github.com/docker/go-connections v0.3.0
 	github.com/docker/go-units v0.3.2-0.20160802145505-eb879ae3e2b8
@@ -35,11 +35,11 @@ require (
 	github.com/jpillora/backoff v0.0.0-20170222002228-06c7a16c845d
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kardianos/service v1.2.0
-	github.com/klauspost/compress v1.14.2 // indirect
+	github.com/klauspost/compress v1.14.4 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.11 // indirect
 	github.com/klauspost/pgzip v1.2.5
 	github.com/minio/md5-simd v1.1.2 // indirect
-	github.com/minio/minio-go/v7 v7.0.21
+	github.com/minio/minio-go/v7 v7.0.24-0.20220302185830-f2d40be3e82f
 	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/mitchellh/gox v1.0.1
 	github.com/moby/term v0.0.0-20201216013528-df9cb8a40635 // indirect
@@ -51,20 +51,20 @@ require (
 	github.com/prometheus/common v0.6.0
 	github.com/prometheus/procfs v0.0.5
 	github.com/rs/xid v1.3.0 // indirect
-	github.com/saracen/fastzip v0.1.5
+	github.com/saracen/fastzip v0.1.9
 	github.com/sirupsen/logrus v1.8.1
 	github.com/stephens2424/writerset v1.0.2 // indirect
 	github.com/stretchr/objx v0.3.0 // indirect
-	github.com/stretchr/testify v1.6.2-0.20200720104044-95a9d909e987
+	github.com/stretchr/testify v1.7.0
 	github.com/tevino/abool v0.0.0-20160628101133-3c25f2fe7cd0
 	github.com/urfave/cli v1.20.0
 	gitlab.com/gitlab-org/gitlab-terminal v0.0.0-20210104151801-2a71b03b4462
 	gitlab.com/gitlab-org/golang-cli-helpers v0.0.0-20210929155855-70bef318ae0a
 	gocloud.dev v0.21.1-0.20201223184910-5094f54ed8bb
 	golang.org/x/crypto v0.0.0-20220214200702-86341886e292
-	golang.org/x/net v0.0.0-20220127200216-cd36cc0744dd
-	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
-	golang.org/x/sys v0.0.0-20220209214540-3681064d5158
+	golang.org/x/net v0.0.0-20220225172249-27dd8689420f
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	golang.org/x/sys v0.0.0-20220227234510-4e6760a101f9
 	golang.org/x/text v0.3.7
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/ini.v1 v1.66.4 // indirect
@@ -121,7 +121,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
-	github.com/saracen/zipextra v0.0.0-20201205103923-7347a2ee3f10 // indirect
+	github.com/saracen/zipextra v0.0.0-20220303013732-0187cb0159ea // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.opencensus.io v0.22.5 // indirect
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
@@ -143,4 +143,4 @@ require (
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
 
-replace golang.org/x/sys => golang.org/x/sys v0.0.0-20200826173525-f9321e4c35a6
+replace golang.org/x/sys => golang.org/x/sys v0.0.0-20220209214540-3681064d5158

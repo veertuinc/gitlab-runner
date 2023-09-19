@@ -9,10 +9,12 @@ import (
 )
 
 type ShellConfiguration struct {
-	Environment   []string
+	Command   string
+	Arguments []string
+
+	CmdLine string // combination of shell escaped command + args
+
 	DockerCommand []string
-	Command       string
-	Arguments     []string
 	PassFile      bool
 	Extension     string
 }
@@ -23,12 +25,6 @@ const (
 	NormalShell ShellType = iota
 	LoginShell
 )
-
-func (s *ShellConfiguration) GetCommandWithArguments() []string {
-	parts := []string{s.Command}
-	parts = append(parts, s.Arguments...)
-	return parts
-}
 
 func (s *ShellConfiguration) String() string {
 	return helpers.ToYAML(s)
@@ -41,6 +37,7 @@ type ShellScriptInfo struct {
 	User            string
 	RunnerCommand   string
 	PreCloneScript  string
+	PostCloneScript string
 	PreBuildScript  string
 	PostBuildScript string
 }

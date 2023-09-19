@@ -62,6 +62,7 @@ type BashWriter struct {
 	checkForErrors     bool
 	useNewEval         bool
 	useNewEscape       bool
+	usePosixEscape     bool
 	useJSONTermination bool
 }
 
@@ -82,7 +83,7 @@ func (b *BashWriter) CheckForErrors() {
 		return
 	}
 
-	b.Line("_runner_exit_code=$?; if [[ $_runner_exit_code -ne 0 ]]; then exit $_runner_exit_code; fi")
+	b.Line("_runner_exit_code=$?; if [ $_runner_exit_code -ne 0 ]; then exit $_runner_exit_code; fi")
 }
 
 func (b *BashWriter) Indent() {
@@ -122,7 +123,7 @@ func (b *BashWriter) Variable(variable common.JobVariable) {
 	if variable.File {
 		variableFile := b.TmpFile(variable.Key)
 		b.Linef("mkdir -p %q", helpers.ToSlash(b.TemporaryPath))
-		b.Linef("echo -n %s > %q", b.escape(variable.Value), variableFile)
+		b.Linef("printf '%%s' %s > %q", b.escape(variable.Value), variableFile)
 		b.Linef("export %s=%q", b.escape(variable.Key), variableFile)
 	} else {
 		b.Linef("export %s=%s", b.escape(variable.Key), b.escape(variable.Value))
@@ -130,18 +131,18 @@ func (b *BashWriter) Variable(variable common.JobVariable) {
 }
 
 func (b *BashWriter) IfDirectory(path string) {
-	b.Linef("if [[ -d %q ]]; then", path)
+	b.Linef("if [ -d %q ]; then", path)
 	b.Indent()
 }
 
 func (b *BashWriter) IfFile(path string) {
-	b.Linef("if [[ -e %q ]]; then", path)
+	b.Linef("if [ -e %q ]; then", path)
 	b.Indent()
 }
 
 func (b *BashWriter) IfCmd(cmd string, arguments ...string) {
 	cmdline := b.buildCommand(cmd, arguments...)
-	b.Linef("if %s >/dev/null 2>/dev/null; then", cmdline)
+	b.Linef("if %s >/dev/null 2>&1; then", cmdline)
 	b.Indent()
 }
 
@@ -228,16 +229,16 @@ func (b *BashWriter) EmptyLine() {
 }
 
 func (b *BashWriter) SectionStart(id, command string) {
-	b.Line("echo -e " +
+	b.Line("printf '%b\\n' " +
 		helpers.ANSI_CLEAR +
-		"section_start:`date +%s`:section_" + id +
-		"\r" + helpers.ANSI_CLEAR + helpers.ShellEscape(helpers.ANSI_BOLD_GREEN+command+helpers.ANSI_RESET))
+		"section_start:$(date +%s):section_" + id +
+		"\r" + helpers.ANSI_CLEAR + b.escape(helpers.ANSI_BOLD_GREEN+command+helpers.ANSI_RESET))
 }
 
 func (b *BashWriter) SectionEnd(id string) {
-	b.Line("echo -e " +
+	b.Line("printf '%b\\n' " +
 		helpers.ANSI_CLEAR +
-		"section_end:`date +%s`:section_" + id +
+		"section_end:$(date +%s):section_" + id +
 		"\r" + helpers.ANSI_CLEAR)
 }
 
@@ -256,7 +257,7 @@ func (b *BashWriter) Finish(trace bool) string {
 		buf.WriteString("set -o xtrace\n")
 	}
 
-	buf.WriteString("set -eo pipefail\n")
+	buf.WriteString("if set -o | grep pipefail > /dev/null; then set -o pipefail; fi; set -o errexit\n")
 	buf.WriteString("set +o noclobber\n")
 
 	if b.useNewEval {
@@ -271,6 +272,10 @@ func (b *BashWriter) Finish(trace bool) string {
 }
 
 func (b *BashWriter) escape(input string) string {
+	if b.usePosixEscape {
+		return helpers.PosixShellEscape(input)
+	}
+
 	if b.useNewEscape {
 		return helpers.ShellEscape(input)
 	}
@@ -283,35 +288,33 @@ func (b *BashShell) GetName() string {
 }
 
 func (b *BashShell) GetConfiguration(info common.ShellScriptInfo) (*common.ShellConfiguration, error) {
-	var detectScript string
-	var shellCommand string
-	if info.Type == common.LoginShell {
-		detectScript = strings.ReplaceAll(BashDetectShellScript, "$@", "--login")
-		shellCommand = b.Shell + " --login"
-	} else {
-		detectScript = strings.ReplaceAll(BashDetectShellScript, "$@", "")
-		shellCommand = b.Shell
+	script := &common.ShellConfiguration{
+		Command: b.Shell,
+		CmdLine: b.Shell,
 	}
 
-	script := &common.ShellConfiguration{}
-	script.DockerCommand = []string{"sh", "-c", detectScript}
-
-	// su
-	if info.User != "" {
-		script.Command = "su"
-		if runtime.GOOS == "linux" {
-			script.Arguments = append(script.Arguments, "-s", "/bin/"+b.Shell)
-		}
-		script.Arguments = append(
-			script.Arguments,
-			info.User,
-			"-c", shellCommand,
-		)
+	if info.Type == common.LoginShell {
+		script.CmdLine += " -l"
+		script.Arguments = []string{"-l"}
+		script.DockerCommand = []string{"sh", "-c", strings.ReplaceAll(BashDetectShellScript, "$@", "-l")}
 	} else {
-		script.Command = b.Shell
-		if info.Type == common.LoginShell {
-			script.Arguments = append(script.Arguments, "--login")
-		}
+		script.DockerCommand = []string{"sh", "-c", strings.ReplaceAll(BashDetectShellScript, "$@", "")}
+	}
+
+	if info.User == "" {
+		return script, nil
+	}
+
+	script.Command = "su"
+	if runtime.GOOS == OSLinux {
+		script.Arguments = []string{"-s", "/bin/" + b.Shell, info.User, "-c", script.CmdLine}
+	} else {
+		script.Arguments = []string{info.User, "-c", script.CmdLine}
+	}
+
+	script.CmdLine = script.Command
+	for _, arg := range script.Arguments {
+		script.CmdLine += " " + helpers.ShellEscape(arg)
 	}
 
 	return script, nil
@@ -324,6 +327,7 @@ func (b *BashShell) GenerateScript(buildStage common.BuildStage, info common.She
 		checkForErrors: info.Build.IsFeatureFlagOn(featureflags.EnableBashExitCodeCheck),
 		useNewEval:     info.Build.IsFeatureFlagOn(featureflags.UseNewEvalStrategy),
 		useNewEscape:   info.Build.IsFeatureFlagOn(featureflags.UseNewShellEscape),
+		usePosixEscape: info.Build.IsFeatureFlagOn(featureflags.PosixlyCorrectEscapes),
 	}
 
 	return b.generateScript(w, buildStage, info)

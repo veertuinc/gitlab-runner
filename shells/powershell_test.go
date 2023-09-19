@@ -5,6 +5,8 @@ package shells
 
 import (
 	"fmt"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,6 +20,7 @@ func TestPowershell_LineBreaks(t *testing.T) {
 		shell                   string
 		eol                     string
 		expectedErrorPreference string
+		shebang                 string
 	}{
 		"Windows newline on Desktop": {
 			shell:                   SNPowershell,
@@ -32,7 +35,8 @@ func TestPowershell_LineBreaks(t *testing.T) {
 		"Linux newline on Core": {
 			shell:                   SNPwsh,
 			eol:                     "\n",
-			expectedErrorPreference: `#!/usr/bin/env pwsh` + "\n" + `$ErrorActionPreference = "Stop"` + "\n",
+			shebang:                 `#!/usr/bin/env pwsh` + "\n",
+			expectedErrorPreference: `$ErrorActionPreference = "Stop"` + "\n",
 		},
 	}
 
@@ -47,7 +51,9 @@ func TestPowershell_LineBreaks(t *testing.T) {
 					`& "foo" ""` + eol + "if(!$?) { Exit &{if($LASTEXITCODE) {$LASTEXITCODE} else {1}} }" + eol +
 					eol +
 					eol
-			if tc.shell != SNPwsh {
+			if tc.shell == SNPwsh {
+				expectedOutput = tc.shebang + "& {" + eol + eol + expectedOutput + "}" + eol + eol
+			} else {
 				expectedOutput = "\xef\xbb\xbf" + expectedOutput
 			}
 			assert.Equal(t, expectedOutput, writer.Finish(false))
@@ -99,45 +105,122 @@ func TestPowershell_IsDefault(t *testing.T) {
 	}
 }
 
+//nolint:lll
 func TestPowershell_GetConfiguration(t *testing.T) {
 	testCases := map[string]struct {
 		shell    string
 		executor string
+		user     string
+		os       string
 
-		expectedPassFile bool
+		expectedError        error
+		expectedPassFile     bool
+		expectedCommand      string
+		expectedCmdLine      string
+		getExpectedArguments func() []string
 	}{
 		"powershell on docker-windows": {
-			shell:            SNPowershell,
-			executor:         dockerWindowsExecutor,
-			expectedPassFile: false,
+			shell:    SNPowershell,
+			executor: dockerWindowsExecutor,
+
+			expectedPassFile:     false,
+			expectedCommand:      SNPowershell,
+			getExpectedArguments: stdinCmdArgs,
+			expectedCmdLine:      "powershell -NoProfile -NoLogo -InputFormat text -OutputFormat text -NonInteractive -ExecutionPolicy Bypass -Command -",
 		},
 		"pwsh on docker-windows": {
-			shell:            SNPwsh,
-			executor:         dockerWindowsExecutor,
-			expectedPassFile: false,
+			shell:    SNPwsh,
+			executor: dockerWindowsExecutor,
+
+			expectedPassFile:     false,
+			expectedCommand:      SNPwsh,
+			getExpectedArguments: stdinCmdArgs,
+			expectedCmdLine:      "pwsh -NoProfile -NoLogo -InputFormat text -OutputFormat text -NonInteractive -ExecutionPolicy Bypass -Command -",
 		},
 		"pwsh on docker": {
-			shell:            SNPwsh,
-			executor:         "docker",
-			expectedPassFile: false,
+			shell:    SNPwsh,
+			executor: "docker",
+
+			expectedPassFile:     false,
+			expectedCommand:      SNPwsh,
+			getExpectedArguments: stdinCmdArgs,
+			expectedCmdLine:      "pwsh -NoProfile -NoLogo -InputFormat text -OutputFormat text -NonInteractive -ExecutionPolicy Bypass -Command -",
 		},
 		"pwsh on kubernetes": {
-			shell:            SNPwsh,
-			executor:         "kubernetes",
-			expectedPassFile: false,
+			shell:    SNPwsh,
+			executor: "kubernetes",
+
+			expectedPassFile:     false,
+			expectedCommand:      SNPwsh,
+			getExpectedArguments: stdinCmdArgs,
+			expectedCmdLine:      "pwsh -NoProfile -NoLogo -InputFormat text -OutputFormat text -NonInteractive -ExecutionPolicy Bypass -Command -",
 		},
 		"pwsh on shell": {
-			shell:            SNPwsh,
-			executor:         "shell",
-			expectedPassFile: true,
+			shell:    SNPwsh,
+			executor: "shell",
+
+			expectedPassFile:     false,
+			expectedCommand:      SNPwsh,
+			getExpectedArguments: stdinCmdArgs,
+			expectedCmdLine:      "pwsh -NoProfile -NoLogo -InputFormat text -OutputFormat text -NonInteractive -ExecutionPolicy Bypass -Command -",
+		},
+		"powershell on shell": {
+			shell:    SNPowershell,
+			executor: "shell",
+
+			expectedPassFile:     true,
+			expectedCommand:      SNPowershell,
+			getExpectedArguments: fileCmdArgs,
+			expectedCmdLine:      "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command",
+		},
+		"pwsh on shell with custom user (linux)": {
+			shell:    SNPwsh,
+			executor: "shell",
+			user:     "custom",
+			os:       OSLinux,
+
+			expectedPassFile: false,
+			expectedCommand:  "su",
+			expectedCmdLine:  "su -s /usr/bin/pwsh custom -c pwsh -NoProfile -NoLogo -InputFormat text -OutputFormat text -NonInteractive -ExecutionPolicy Bypass -Command -",
+			getExpectedArguments: func() []string {
+				return []string{"-s", "/usr/bin/" + SNPwsh, "custom", "-c", SNPwsh + " " + strings.Join(stdinCmdArgs(), " ")}
+			},
+		},
+		"pwsh on shell with custom user (windows)": {
+			shell:    SNPwsh,
+			executor: "shell",
+			user:     "custom",
+			os:       OSWindows,
+
+			expectedPassFile: false,
+			expectedCommand:  "su",
+			expectedCmdLine:  "su custom -c pwsh -NoProfile -NoLogo -InputFormat text -OutputFormat text -NonInteractive -ExecutionPolicy Bypass -Command -",
+			getExpectedArguments: func() []string {
+				return []string{"-s", "custom", "-c", SNPwsh + " " + strings.Join(stdinCmdArgs(), " ")}
+			},
+		},
+		"powershell docker-windows change user": {
+			shell:    SNPowershell,
+			executor: "anything-but-docker-windows",
+			user:     "custom",
+
+			expectedError: &powershellChangeUserError{
+				shell:    SNPowershell,
+				executor: "anything-but-docker-windows",
+			},
 		},
 	}
 
 	for tn, tc := range testCases {
 		t.Run(tn, func(t *testing.T) {
+			if tc.os != "" && tc.os != runtime.GOOS {
+				t.Skipf("test only runs on %s", tc.os)
+			}
+
 			shell := common.GetShell(tc.shell)
 			info := common.ShellScriptInfo{
 				Shell: tc.shell,
+				User:  tc.user,
 				Build: &common.Build{
 					Runner: &common.RunnerConfig{},
 				},
@@ -145,14 +228,16 @@ func TestPowershell_GetConfiguration(t *testing.T) {
 			info.Build.Runner.Executor = tc.executor
 
 			shellConfig, err := shell.GetConfiguration(info)
-			require.NoError(t, err)
-			assert.Equal(t, tc.shell, shellConfig.Command)
-			if tc.expectedPassFile {
-				assert.Equal(t, fileCmdArgs(), shellConfig.Arguments)
-			} else {
-				assert.Equal(t, stdinCmdArgs(), shellConfig.Arguments)
+			if tc.expectedError != nil {
+				require.Equal(t, tc.expectedError, err)
+				return
 			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.getExpectedArguments(), shellConfig.Arguments)
+			assert.Equal(t, tc.expectedCommand, shellConfig.Command)
 			assert.Equal(t, PowershellDockerCmd(tc.shell), shellConfig.DockerCommand)
+			assert.Equal(t, tc.expectedCmdLine, shellConfig.CmdLine)
 			assert.Equal(t, tc.expectedPassFile, shellConfig.PassFile)
 			assert.Equal(t, "ps1", shellConfig.Extension)
 		})
@@ -309,9 +394,11 @@ func TestPowershell_GenerateScript(t *testing.T) {
 			stage:           common.BuildStagePrepare,
 			info:            shellInfo,
 			expectedFailure: false,
-			expectedScript: shebang + `$ErrorActionPreference = "Stop"` + pwshShell.EOL +
+			expectedScript: shebang + "& {" +
+				pwshShell.EOL + pwshShell.EOL +
+				`$ErrorActionPreference = "Stop"` + pwshShell.EOL +
 				`echo "Running on $([Environment]::MachineName) via "Test Hostname"..."` +
-				pwshShell.EOL + pwshShell.EOL,
+				pwshShell.EOL + pwshShell.EOL + "}" + pwshShell.EOL + pwshShell.EOL,
 		},
 		"cleanup variables": {
 			stage:           common.BuildStageCleanup,
