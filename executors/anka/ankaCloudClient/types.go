@@ -86,8 +86,9 @@ type StartVMRequest struct {
 	NodeID                 *string `json:"node_id,omitempty"`
 	Name                   *string `json:"name_template,omitempty"`
 	ControllerInstanceName string  `json:"name,omitempty"`
-	Script                 *string `json:"startup_script,omitempty"`
-	ScriptRunCondition     *int    `json:"startup_script_condition,omitempty"`
+	StartupScript          string  `json:"startup_script,omitempty"`
+	StartupScriptCondition int     `json:"startup_script_condition,omitempty"`
+	ScriptMonitoring       bool    `json:"script_monitoring,omitempty"`
 	Priority               *int    `json:"priority,omitempty"`
 	GroupId                *string `json:"group_id,omitempty"`
 	ControllerExternalID   string  `json:"external_id,omitempty"`
@@ -116,18 +117,26 @@ type VM struct {
 }
 
 type VMStatus struct {
-	State         InstanceState `json:"instance_state"`
-	Message       string        `json:"message,omitempty"`
-	RegistryAddr  string        `json:"anka_registry"`
-	SourceVMID    string        `json:"vmid"`
-	Tag           *string       `json:"tag,omitempty"`
-	Version       *uint         `json:"version,omitempty"`
-	VMInfo        *VmInfo       `json:"vminfo,omitempty"`
-	InFlightReqID *string       `json:"inflight_reqid,omitempty"`
-	Ts            time.Time     `json:"ts"`
-	CrTime        time.Time     `json:"cr_time"`
-	Progress      float32       `json:"progress"`
-	GroupId       string        `json:"group_id,omitempty"`
+	State         InstanceState  `json:"instance_state"`
+	Message       string         `json:"message,omitempty"`
+	RegistryAddr  string         `json:"anka_registry"`
+	SourceVMID    string         `json:"vmid"`
+	Tag           *string        `json:"tag,omitempty"`
+	Version       *uint          `json:"version,omitempty"`
+	VMInfo        *VmInfo        `json:"vminfo,omitempty"`
+	InFlightReqID *string        `json:"inflight_reqid,omitempty"`
+	Ts            time.Time      `json:"ts"`
+	CrTime        time.Time      `json:"cr_time"`
+	Progress      float32        `json:"progress"`
+	GroupId       string         `json:"group_id,omitempty"`
+	StartupScript *StartupScript `json:"startup_script,omitempty"`
+}
+
+type StartupScript struct {
+	ReturnCode int    `json:"return_code"`
+	DidTimeout bool   `json:"did_timeout"`
+	Stdout     string `json:"stdout"`
+	Stderr     string `json:"stderr"`
 }
 
 type VmInfo struct {

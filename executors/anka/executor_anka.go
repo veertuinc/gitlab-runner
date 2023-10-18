@@ -1,9 +1,11 @@
 package anka
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -30,6 +32,10 @@ func LogAndUIPrint(s *executor, options common.ExecutorPrepareOptions, input str
 }
 
 func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
+	createScript := false
+	var startupScript []string
+	startupScript = append(startupScript, "#!/usr/bin/env bash\nset -exo pipefail")
+
 	s.Debugln("Prepare Anka executor")
 
 	err := s.AbstractExecutor.Prepare(options)
@@ -94,6 +100,56 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 		s.Println("Opening a connection to the Anka Cloud Controller:", s.Config.Anka.ControllerAddress)
 	}
 
+	ankaMountHostDirENV := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_MOUNT_HOST_DIR"))
+	if err != nil {
+		return err
+	}
+	if ankaMountHostDirENV != "" { // OVERRIDE of default Template
+		ankaMountHostUsernameENV := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_MOUNT_HOST_USERNAME"))
+		if ankaMountHostUsernameENV == "" {
+			return errors.New("must specify ANKA_MOUNT_HOST_USERNAME if using mounting features")
+		}
+		ankaMountHostPasswordENV := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_MOUNT_HOST_PASSWORD"))
+		if ankaMountHostPasswordENV == "" {
+			return errors.New("must specify ANKA_MOUNT_HOST_PASSWORD if using mounting features")
+		}
+
+		createScript = true
+
+		if ankaMountHostDirENV == "true" {
+			s.Config.Anka.MountHostDir = "/tmp/" +
+				fmt.Sprintf("%s-%d-%d-%s\n",
+					s.Build.JobResponse.JobInfo.ProjectName,
+					s.Build.JobResponse.ID,
+					s.Build.JobResponse.JobInfo.ProjectID,
+					s.Build.JobResponse.JobInfo.Stage,
+				)
+		} else {
+			s.Config.Anka.MountHostDir = ankaMountHostDirENV
+		}
+		ankaMountVMDirENV := s.Build.Variables.ExpandValue(s.Build.Variables.Get("ANKA_MOUNT_VM_DIR"))
+		if err != nil {
+			return err
+		}
+		if ankaMountVMDirENV != "" { // OVERRIDE of default Template
+			s.Config.Anka.MountVMDir = ankaMountVMDirENV
+		} else {
+			s.Config.Anka.MountVMDir = s.AbstractExecutor.DefaultBuildsDir
+		}
+
+		startupScript = append(startupScript,
+			fmt.Sprintf(`
+				HOST_USERNAME="%s"
+				HOST_PASSWORD="%s"
+				HOST_TMP_DIR="%s"
+				VM_DIR="%s"
+				# CREATE TMP FOLDER
+				ssh -o StrictHostKeyChecking=no "${HOST_USERNAME}:${HOST_PASSWORD}@192.168.64.1" "mkdir -p ${HOST_TMP_DIR}"
+				mount -t smbfs "//${HOST_USERNAME}:${HOST_PASSWORD}@192.168.64.1${HOST_TEMP_DIR}" "${VM_DIR}"
+				df -h
+			`, ankaMountHostUsernameENV, ankaMountHostPasswordENV, s.Config.Anka.MountHostDir, ankaMountVMDirENV))
+	}
+
 	s.connector = MakeNewAnkaCloudConnector(s.Config.Anka)
 
 	s.Println(fmt.Sprintf("%s%s%s", helpers.ANSI_BOLD_CYAN, "Starting Anka VM using:", helpers.ANSI_RESET))
@@ -112,8 +168,18 @@ func (s *executor) Prepare(options common.ExecutorPrepareOptions) error {
 	if s.Config.Anka.ControllerInstanceName != "" {
 		s.Println("  - Controller Instance Name:", s.Config.Anka.ControllerInstanceName)
 	}
+	if s.Config.Anka.MountHostDir != "" {
+		s.Println("  - Mounted Host Dir:", s.Config.Anka.MountHostDir)
+	}
+	if s.Config.Anka.MountVMDir != "" {
+		s.Println("  - Mounted VM Dir:", s.Config.Anka.MountVMDir)
+	}
 
 	s.Println("Please be patient...")
+
+	if createScript {
+		s.Config.Anka.StartupScript = base64.StdEncoding.EncodeToString([]byte(strings.Join(startupScript, "\n")))
+	}
 
 	// Handle canceled jobs in the UI
 	done := false

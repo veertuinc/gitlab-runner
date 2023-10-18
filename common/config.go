@@ -1589,6 +1589,9 @@ type AnkaConfig struct {
 	KeyPath                *string `toml:"key_path,omitempty" json:"key_path" long:"key-path" env:"KEY_PATH" description:"Specify the path to your GitLab Certificate Key (used for connecting to the Controller)"`
 	ControllerHTTPHeaders  *string `toml:"controller_http_headers,omitempty" json:"controller_http_headers" long:"controller-http-headers" env:"CONTROLLER_HTTP_HEADERS" description:"In JSON format, specify headers to set for the HTTP requests to the controller (quotes must be escaped) (example: \"{ \"HOST\": \"testing123.com\", \"CustomHeaderName\": \"test123\" }\")"`
 	// Be sure to use *bool or else setting --anka-skip-tls-verification true will ignore anything after it when you're doing register --non-interactive
-	SkipTLSVerification bool `toml:"skip_tls_verification,omitzero" json:"skip_tls_verification" long:"skip-tls-verification" env:"SKIP_TLS_VERIFICATION" description:"Skip TLS Verification when connecting to your Controller"`
-	KeepAliveOnError    bool `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"Keep the VM alive for debugging job failures"`
+	SkipTLSVerification bool   `toml:"skip_tls_verification,omitzero" json:"skip_tls_verification" long:"skip-tls-verification" env:"SKIP_TLS_VERIFICATION" description:"Skip TLS Verification when connecting to your Controller"`
+	KeepAliveOnError    bool   `toml:"keep_alive_on_error,omitzero" json:"keep_alive_on_error" long:"keep-alive-on-error" env:"KEEP_ALIVE_ON_ERROR" description:"Keep the VM alive for debugging job failures"`
+	MountHostDir        string `toml:"mount_host_dir,omitempty" json:"mount_host_dir" long:"mount-host-dir" env:"MOUNT_HOST_DIR" description:"The boolean or absolute path to a host level directory to mount into the VM over SMB"`
+	MountVMDir          string `toml:"mount_vm_dir,omitempty" json:"mount_vm_dir" long:"mount-vm-dir" env:"MOUNT_VM_DIR" description:"The absolute path in the VM to mount the mount_host_dir (requires mount_host_dir is enabled or set)"`
+	StartupScript       string `toml:"startup_script,omitempty" json:"startup_script" long:"startup-script" env:"STARTUP_SCRIPT" description:"The startup_script to run on VM start (must be in base64)"`
 }

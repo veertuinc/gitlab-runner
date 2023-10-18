@@ -107,7 +107,6 @@ export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME
 --anka-tag v1 \
 --executor anka \
 --anka-controller-instance-name "triggered by shared runner" \
---anka-controller-external-id "http://test123share.com" \
 --anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Type\": \"test\" }" \
 --clone-url "http://$GITLAB_HOSTNAME:$GITLAB_PORT" \
 --tag-list "localhost-shared,localhost,iOS" && \
@@ -122,7 +121,6 @@ export PROJECT_REGISTRATION_TOKEN=$(docker exec -i $GITLAB_DOCKER_CONTAINER_NAME
 --anka-tag v1 \
 --executor anka \
 --anka-controller-instance-name "triggered by project runner" \
---anka-controller-external-id "http://test123proj.com" \
 --anka-controller-http-headers "{ \"HOST\": \"testing123.com\", \"Content-Type\": \"test\" }" \
 --clone-url "http://$GITLAB_HOSTNAME:$GITLAB_PORT" \
 --tag-list "localhost-specific,localhost,iOS" && \

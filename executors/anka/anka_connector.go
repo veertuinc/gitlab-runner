@@ -29,6 +29,14 @@ func (connector *AnkaConnector) StartInstance(ankaConfig *common.AnkaConfig, don
 		ControllerInstanceName: ankaConfig.ControllerInstanceName,
 	}
 
+	if ankaConfig.MountHostDir != "" {
+		startVmRequest.StartupScript = ankaConfig.StartupScript
+		startVmRequest.ScriptMonitoring = true
+	}
+
+	fmt.Printf("%+v", ankaConfig)
+	fmt.Printf("%+v", startVmRequest)
+
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered in StartInstance", r)
@@ -147,6 +155,9 @@ func (connector *AnkaConnector) getVM(instanceId string) (vmStatus *ankaCloudCli
 		return nil, errors.New(showResponse.Message)
 	}
 	if showResponse.Body.State == "Terminated" || showResponse.Body.State == "Error" { // Handle terminated VMs in the Controller UI
+		if showResponse.Body.StartupScript.ReturnCode > 0 {
+			return nil, fmt.Errorf("Instance State changed to %v due to failed Startup Script\n%s", showResponse.Body.State, showResponse.Body.StartupScript.Stderr)
+		}
 		return nil, fmt.Errorf("Instance State changed to %v", showResponse.Body.State)
 	}
 	return &showResponse.Body, funcErr
