@@ -218,7 +218,8 @@ func (ankaClient *AnkaClient) doRequest(method string, path string, body interfa
 		response, err = client.Do(req)
 		if err != nil {
 			logrus.Debugf("client.Do(req) %v\n", err)
-			break
+			err = fmt.Errorf("client.Do(req) %v", err)
+			continue
 		}
 		if response == nil || response.Body == nil || response.Status == "" { // If the controller connection fails or is overwhelmed, it will return null or empty values. We need to handle this so the job doesn't fail and orphan VMs.
 			if tries == retryLimit {
