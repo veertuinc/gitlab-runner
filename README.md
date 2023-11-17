@@ -1,6 +1,8 @@
-# Anka GitLab Runner
+# Anka GitLab Runner (Deprecated)
 
-### [Official Anka GitLab Runner Usage Guide](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/gitlab/)
+**This Anka Gitlab Runner has been deprecated and replaced with the [Anka Custom Executor]({{< relref "plugins-and-integrations/controller-+-registry/gitlab-custom-executor.md" >}}) you can load into the official Gitlab Runner.**
+
+### [Official Anka GitLab Runner Usage Guide](https://docs.veertu.com/anka/plugins-and-integrations/controller-+-registry/gitlab-runner/)
 
 For a list of compatible versions between GitLab and GitLab Runner, see the [compatibility section](https://docs.gitlab.com/runner/#compatibility-with-gitlab-versions).
 
